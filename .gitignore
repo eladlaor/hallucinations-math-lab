@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+dist/
+build/
+wheels/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.key
+service-account*.json
+credentials*.json
+
+# Caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hf_cache/
+hf_cache/
+
+# Data and results
+data/
+eval/results/
+*.parquet
+*.arrow
+
+# Logs
+*.log
+logs/
+
+# Model weights (do not commit; use HF Hub)
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+weights/
+checkpoints/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
