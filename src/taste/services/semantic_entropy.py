@@ -15,9 +15,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from seh_handler.constants import LOG_EXTRA_KEY
-from seh_handler.custom_types.domain_types import Cluster, SampleSet
-from seh_handler.services.nli import NLIScorer, get_nli_scorer
+from taste.constants import LOG_EXTRA_KEY, DetectorName
+from taste.custom_types.domain_types import Cluster, SampleSet
+from taste.services.detector_protocol import (
+    DetectionContext,
+    Detector,
+    DetectorPrerequisiteError,
+    DetectorScore,
+)
+from taste.services.nli import NLIScorer, get_nli_scorer
 
 logger = logging.getLogger(__name__)
 
@@ -93,3 +99,24 @@ def compute_semantic_entropy(sample_set: SampleSet, scorer: NLIScorer | None = N
     )
 
     return SemanticEntropyResult(semantic_entropy=se, clusters=clusters)
+
+
+class SemanticEntropyDetector(Detector):
+    name = DetectorName.SEMANTIC_ENTROPY
+    requires_samples = True
+    requires_hidden_state = False
+
+    def __init__(self, scorer: NLIScorer | None = None) -> None:
+        self._scorer = scorer
+
+    def score(self, ctx: DetectionContext) -> DetectorScore:
+        if ctx.samples is None:
+            raise DetectorPrerequisiteError(
+                "SemanticEntropyDetector requires samples; DetectionContext.samples is None."
+            )
+        result = compute_semantic_entropy(ctx.samples, scorer=self._scorer)
+        return DetectorScore(
+            name=self.name,
+            score=result.semantic_entropy,
+            clusters=result.clusters,
+        )

@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 
-from seh_handler.constants import AnswerSource
+from taste.constants import AnswerSource, DetectorName
 
 
 class ChatRequest(BaseModel):
@@ -12,7 +12,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     source: AnswerSource
-    semantic_entropy: float
-    predictive_entropy: float
+    detector_scores: dict[DetectorName, float]
+    escalation_detector: DetectorName
     escalated: bool
     cluster_count: int

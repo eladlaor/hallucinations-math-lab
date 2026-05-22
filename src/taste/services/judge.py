@@ -2,8 +2,8 @@
 
 import logging
 
-from seh_handler.config import get_settings
-from seh_handler.constants import LOG_EXTRA_KEY
+from taste.config import get_settings
+from taste.constants import LOG_EXTRA_KEY
 
 logger = logging.getLogger(__name__)
 

@@ -25,7 +25,7 @@ def main(path: Path) -> None:
             f"Install missing dep: {e!s}"
         ) from e
 
-    from seh_handler.config import get_settings
+    from taste.config import get_settings
 
     settings = get_settings()
     if not settings.gcp_project_id:

@@ -9,8 +9,14 @@ import logging
 
 import numpy as np
 
-from seh_handler.constants import LOG_EXTRA_KEY
-from seh_handler.custom_types.domain_types import SampleSet
+from taste.constants import LOG_EXTRA_KEY, DetectorName
+from taste.custom_types.domain_types import SampleSet
+from taste.services.detector_protocol import (
+    DetectionContext,
+    Detector,
+    DetectorPrerequisiteError,
+    DetectorScore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,3 +46,19 @@ def length_normalized_predictive_entropy(sample_set: SampleSet) -> float:
         raise ValueError("No samples had token logprobs; cannot compute predictive entropy.")
 
     return float(np.mean(per_sample_nll))
+
+
+class PredictiveEntropyDetector(Detector):
+    name = DetectorName.PREDICTIVE_ENTROPY
+    requires_samples = True
+    requires_hidden_state = False
+
+    def score(self, ctx: DetectionContext) -> DetectorScore:
+        if ctx.samples is None:
+            raise DetectorPrerequisiteError(
+                "PredictiveEntropyDetector requires samples; DetectionContext.samples is None."
+            )
+        return DetectorScore(
+            name=self.name,
+            score=length_normalized_predictive_entropy(ctx.samples),
+        )

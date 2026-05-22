@@ -8,7 +8,7 @@ from pathlib import Path
 
 from datasets import load_dataset
 
-from seh_handler.constants import RANDOM_SEED
+from taste.constants import RANDOM_SEED
 
 
 def load_triviaqa_subset(n: int = 1000, seed: int = RANDOM_SEED, out: Path | None = None) -> list[dict]:

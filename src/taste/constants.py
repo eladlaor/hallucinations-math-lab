@@ -15,8 +15,13 @@ class AnswerSource(StrEnum):
     JUDGE_MODEL = "judge_model"
 
 
-class DetectorSignal(StrEnum):
+class DetectorName(StrEnum):
+    """Identifies a hallucination detector. All concrete `Detector` implementations
+    expose one of these as `Detector.name`. Order here reflects increasing cost /
+    increasing signal strength: PE < SEP < SE."""
+
     PREDICTIVE_ENTROPY = "predictive_entropy"
+    SEMANTIC_ENTROPY_PROBE = "semantic_entropy_probe"
     SEMANTIC_ENTROPY = "semantic_entropy"
 
 

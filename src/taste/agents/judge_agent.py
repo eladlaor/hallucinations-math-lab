@@ -2,9 +2,9 @@
 
 import logging
 
-from seh_handler.constants import LOG_EXTRA_KEY, AnswerSource
-from seh_handler.custom_types.domain_types import DetectionResult
-from seh_handler.services.judge import GeminiJudge
+from taste.constants import LOG_EXTRA_KEY, AnswerSource
+from taste.custom_types.domain_types import DetectionResult
+from taste.services.judge import GeminiJudge
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +24,13 @@ class JudgeAgent:
                 f"JudgeAgent escalation failed for prompt={detection.prompt[:80]!r}: {e!s}"
             ) from e
 
+        escalation_score = detection.detector_scores.get(detection.escalation_detector)
         logger.info(
             "Judge escalation produced answer.",
             extra={
                 LOG_EXTRA_KEY: {
-                    "se": round(detection.semantic_entropy, 4),
+                    "escalation_detector": str(detection.escalation_detector),
+                    "escalation_score": round(escalation_score, 4) if escalation_score is not None else None,
                     "judge_answer_preview": answer[:80],
                 }
             },

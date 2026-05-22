@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from seh_handler.constants import AnswerSource
+from taste.constants import AnswerSource, DetectorName
 
 
 class TokenLogprob(BaseModel):
@@ -40,13 +40,22 @@ class Cluster(BaseModel):
 
 
 class DetectionResult(BaseModel):
-    """Output of the detector for a single prompt."""
+    """Output of the detector orchestrator for a single prompt.
+
+    `detector_scores` is keyed by `DetectorName` and carries one float per
+    detector that ran. SE-specific clustering is in `clusters` (None if SE was
+    not enabled this run). The escalation decision is recorded as the
+    `escalation_detector` name, the comparand value, and the threshold used —
+    so a reader can reconstruct *why* the system escalated without
+    re-reading config."""
+
     prompt: str
     greedy_answer: str
     samples: list[str]
-    predictive_entropy: float
-    semantic_entropy: float
-    clusters: list[Cluster]
+    detector_scores: dict[DetectorName, float]
+    clusters: list[Cluster] | None = None
+    escalation_detector: DetectorName
+    escalation_threshold: float
     escalated: bool
     final_answer: str
     final_answer_source: AnswerSource
