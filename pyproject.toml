@@ -1,7 +1,7 @@
 [project]
-name = "seh-handler"
+name = "taste"
 version = "0.1.0"
-description = "Semantic-Entropy-based hallucination detector and judge-escalation pipeline for a quantized Gemma served via vLLM on Vertex AI, orchestrated with Google ADK."
+description = "Taste — response evaluators for LLM-native projects: Semantic Entropy, predictive entropy, Semantic Entropy Probes, plus optional LLM-as-a-judge escalation. Shippable as a library, with a reference vLLM-on-Vertex demo."
 readme = "README.md"
 authors = [
     { name = "Elad Laor", email = "eladlaor88@gmail.com" }
@@ -37,7 +37,7 @@ dev = [
 ]
 
 [project.scripts]
-seh = "seh_handler.main:app"
+taste = "demo.cli:app"
 
 [build-system]
 requires = ["uv_build>=0.8.23,<0.9.0"]
@@ -53,3 +53,9 @@ target-version = "py312"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Make both the src-layout library (taste) and the demo/ top-level package
+# importable in tests without installing demo as a distribution.
+pythonpath = ["src", "."]
+markers = [
+    "requires_gpu: skipped by default; runs only when a CUDA-capable device is present.",
+]
