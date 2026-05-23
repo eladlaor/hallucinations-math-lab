@@ -1,0 +1,13 @@
+# Copy to terraform.tfvars (gitignored) and edit the values.
+#
+# Required:
+project_id = "<your-project-id>"
+
+# Optional overrides (defaults shown):
+# region                     = "us-central1"
+# name_prefix                = "taste"
+# deploy_vertex_endpoint     = false
+# vllm_image_uri             = ""   # set once the vLLM container is pushed to Artifact Registry
+# endpoint_machine_type      = "g2-standard-12"
+# endpoint_accelerator_type  = "NVIDIA_L4"
+# endpoint_accelerator_count = 1

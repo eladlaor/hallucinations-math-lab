@@ -37,7 +37,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torch.nn as nn
 from sklearn.linear_model import Ridge
 
 from taste.config import get_settings
