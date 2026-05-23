@@ -31,15 +31,17 @@ Why a regressor over a classifier:
 """
 
 import logging
+import time
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 
-from taste.constants import LOG_EXTRA_KEY, DetectorName
+from taste.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
 from taste.services.detector_protocol import (
     DetectionContext,
     Detector,
+    DetectorMetadata,
     DetectorPrerequisiteError,
     DetectorScore,
 )
@@ -69,6 +71,16 @@ class SemanticEntropyProbeDetector(Detector):
     name = DetectorName.SEMANTIC_ENTROPY_PROBE
     requires_samples = False
     requires_hidden_state = True
+    metadata = DetectorMetadata(
+        signal="linear probe over the SLM's pooled last-layer hidden state at the final prompt token, predicting SE in nats",
+        assumption="hallucination uncertainty is linearly decodable from a single forward pass over the prompt",
+        failure_modes=(
+            "probe is SLM-specific — weights trained on model A do not transfer to model B",
+            "underperforms full SE on adversarial / out-of-distribution prompts where the linear approximation breaks",
+            "requires hidden-state access; useless against any provider that does not expose pooled embeddings",
+        ),
+        category=DetectorCategory.UNCERTAINTY,
+    )
 
     def __init__(self, probe_path: str | Path) -> None:
         probe_path = Path(probe_path)
@@ -107,6 +119,16 @@ class SemanticEntropyProbeDetector(Detector):
                 f"Pooled hidden state has dim {h.shape[-1]} but probe expects {self._hidden_dim}. "
                 "Probe was likely trained against a different SLM."
             )
+        # SEP is the cheapest detector by design — one linear forward pass.
+        # cost_usd is 0 (local CPU); latency_ms captures the wall-clock cost
+        # which is what makes SEP attractive on the Pareto frontier.
+        start = time.perf_counter()
         with torch.no_grad():
             predicted = self._probe(h).item()
-        return DetectorScore(name=self.name, score=float(predicted))
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        return DetectorScore(
+            name=self.name,
+            score=float(predicted),
+            cost_usd=0.0,
+            latency_ms=elapsed_ms,
+        )

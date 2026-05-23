@@ -6,14 +6,16 @@ Semantic Entropy (semantic_entropy.py) is compared in the eval harness.
 """
 
 import logging
+import time
 
 import numpy as np
 
-from taste.constants import LOG_EXTRA_KEY, DetectorName
+from taste.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
 from taste.custom_types.domain_types import SampleSet
 from taste.services.detector_protocol import (
     DetectionContext,
     Detector,
+    DetectorMetadata,
     DetectorPrerequisiteError,
     DetectorScore,
 )
@@ -52,13 +54,30 @@ class PredictiveEntropyDetector(Detector):
     name = DetectorName.PREDICTIVE_ENTROPY
     requires_samples = True
     requires_hidden_state = False
+    metadata = DetectorMetadata(
+        signal="mean per-sample length-normalized negative log-likelihood",
+        assumption="low token-level confidence correlates with incorrect answers",
+        failure_modes=(
+            "misses confident hallucinations where the model is wrong with high token probability",
+            "noisy on very short answers where length normalization divides by a small T",
+        ),
+        category=DetectorCategory.UNCERTAINTY,
+    )
 
     def score(self, ctx: DetectionContext) -> DetectorScore:
         if ctx.samples is None:
             raise DetectorPrerequisiteError(
                 "PredictiveEntropyDetector requires samples; DetectionContext.samples is None."
             )
+        # PE is a pure post-hoc computation over already-collected token
+        # logprobs. The cost is amortized into whatever produced the samples;
+        # the detector itself spends only python cycles, so cost_usd is 0.
+        start = time.perf_counter()
+        value = length_normalized_predictive_entropy(ctx.samples)
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
         return DetectorScore(
             name=self.name,
-            score=length_normalized_predictive_entropy(ctx.samples),
+            score=value,
+            cost_usd=0.0,
+            latency_ms=elapsed_ms,
         )

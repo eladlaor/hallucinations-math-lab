@@ -11,15 +11,17 @@ Low SE  = answers agree in meaning -> likely confident.
 """
 
 import logging
+import time
 from dataclasses import dataclass
 
 import numpy as np
 
-from taste.constants import LOG_EXTRA_KEY, DetectorName
+from taste.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
 from taste.custom_types.domain_types import Cluster, SampleSet
 from taste.services.detector_protocol import (
     DetectionContext,
     Detector,
+    DetectorMetadata,
     DetectorPrerequisiteError,
     DetectorScore,
 )
@@ -105,6 +107,16 @@ class SemanticEntropyDetector(Detector):
     name = DetectorName.SEMANTIC_ENTROPY
     requires_samples = True
     requires_hidden_state = False
+    metadata = DetectorMetadata(
+        signal="Shannon entropy over the cluster-size distribution of N samples grouped by bidirectional NLI entailment",
+        assumption="when the model is hallucinating, independent samples diverge in meaning even when each individually sounds fluent",
+        failure_modes=(
+            "NLI noise on long-form answers — clustering becomes unreliable past a few sentences",
+            "consistent paraphrase variation inflates SE even when meaning is stable",
+            "fixed N=10 caps the resolution; small N can miss low-probability divergent meanings",
+        ),
+        category=DetectorCategory.UNCERTAINTY,
+    )
 
     def __init__(self, scorer: NLIScorer | None = None) -> None:
         self._scorer = scorer
@@ -114,9 +126,17 @@ class SemanticEntropyDetector(Detector):
             raise DetectorPrerequisiteError(
                 "SemanticEntropyDetector requires samples; DetectionContext.samples is None."
             )
+        # The dominant cost is the O(N * |clusters|) NLI calls, paid in
+        # wall-clock GPU time on the NLI model rather than $/call against an
+        # external API. cost_usd is 0 (local GPU); latency_ms captures the
+        # wall-clock cost so the Pareto frontier still ranks SE realistically.
+        start = time.perf_counter()
         result = compute_semantic_entropy(ctx.samples, scorer=self._scorer)
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
         return DetectorScore(
             name=self.name,
             score=result.semantic_entropy,
+            cost_usd=0.0,
+            latency_ms=elapsed_ms,
             clusters=result.clusters,
         )

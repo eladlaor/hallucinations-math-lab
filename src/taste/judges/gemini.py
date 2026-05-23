@@ -1,4 +1,7 @@
-"""Gemini judge via Vertex AI Generative SDK. Called only on SE-triggered escalation."""
+"""Gemini judge via Vertex AI Generative SDK. Lazy-imported so this module
+loads without GCP credentials in the environment — the dependency on
+google-cloud-aiplatform is only paid when GeminiJudge is actually
+constructed and invoked."""
 
 import logging
 
@@ -9,7 +12,11 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiJudge:
-    """Vertex AI Gemini wrapper. Lazy-imported so this module loads without GCP creds."""
+    """Vertex AI Gemini wrapper implementing the `Judge` protocol.
+
+    Reference implementation only — consumers running outside the demo's
+    Vertex deployment are encouraged to supply their own Judge impl
+    (any class with `.answer(prompt) -> (str, str)`)."""
 
     def __init__(self, model_id: str | None = None) -> None:
         self._model_id = model_id or get_settings().judge_model_id
