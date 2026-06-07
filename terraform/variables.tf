@@ -27,6 +27,24 @@ variable "vllm_image_uri" {
   default     = ""
 }
 
+variable "model_id" {
+  description = "Hugging Face model id passed to the serving container as MODEL_ID. Must match an entry in demo/model_registry.py. Normally written into terraform/model_registry.auto.tfvars.json by `serving/model_flags.py <id> terraform`."
+  type        = string
+  default     = "google/gemma-4-E4B-it"
+}
+
+variable "with_embed_endpoint" {
+  description = "When true, the serving container also launches a sibling vLLM in --task embed mode on var.embed_port for SEP support. Roughly doubles VRAM usage."
+  type        = bool
+  default     = false
+}
+
+variable "embed_port" {
+  description = "Port for the sibling embed-task vLLM inside the serving container."
+  type        = number
+  default     = 8081
+}
+
 variable "endpoint_machine_type" {
   description = "Machine type for the Vertex endpoint deployed model."
   type        = string

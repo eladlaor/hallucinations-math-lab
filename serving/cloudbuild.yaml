@@ -1,7 +1,12 @@
-# Cloud Build config used by serving/deploy_vertex.sh. The source upload is
-# the repo root (so COPY src/... in serving/Dockerfile resolves), and the
+# Cloud Build config for the vLLM serving image. The source upload is the
+# repo root (so `COPY demo/...` in serving/Dockerfile resolves), and the
 # Dockerfile path is named explicitly. The image URI is passed via the
-# _IMAGE_URI substitution from the deploy script.
+# _IMAGE_URI substitution from the caller, e.g.:
+#
+#   gcloud builds submit . --config=serving/cloudbuild.yaml \
+#       --substitutions="_IMAGE_URI=<region>-docker.pkg.dev/<proj>/<repo>/<img>:<tag>"
+#
+# The image URI then becomes the value of `vllm_image_uri` in Terraform.
 
 steps:
   - name: gcr.io/cloud-builders/docker

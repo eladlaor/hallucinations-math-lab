@@ -35,4 +35,5 @@ the Dockerfile rebinds to 8080 and points `AIP_PREDICT_ROUTE` at
 ## Cold-start mitigation
 
 A Gemma 2 9B AWQ-INT4 image pulls + warms in ~5 minutes on L4. For interactive
-demos set `--min-replica-count=1` (already done in `deploy_vertex.sh`).
+demos set `--min-replica-count=1` (already done in the Terraform
+`null_resource.deploy_model` in `terraform/vertex.tf`).

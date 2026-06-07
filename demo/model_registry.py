@@ -30,9 +30,12 @@ in this registry, but the sweep is not derived from the default flags.
 The registry is consumed:
   - In Python by `VLLMOpenAIProvider` and `HFTransformersProvider` to pick
     runtime parameters by `model_id`.
-  - In shell by `serving/Dockerfile` and `serving/deploy_vertex.sh` via the
-    `serving/model_flags.py` CLI shim, which prints the vLLM launch flags
-    for a given `MODEL_ID`.
+  - In shell by `serving/Dockerfile` via the `serving/model_flags.py` CLI
+    shim, which prints the vLLM launch flags for a given `MODEL_ID`.
+  - In Terraform by `serving/model_flags.py <id> terraform`, which writes
+    `terraform/model_registry.auto.tfvars.json` so the deployed-model machine
+    type, accelerator, and `model_id` come from this registry rather than
+    drifting in HCL.
 """
 
 from dataclasses import dataclass

@@ -23,6 +23,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   promoted to a first-class in-scope detector alongside predictive entropy
   and Semantic Entropy.
 
+### Changed
+- Vertex serving is now end-to-end Terraform-managed. The `vertex.tf` stack
+  uploads the model, creates the endpoint, and uses a `null_resource` to call
+  `gcloud ai endpoints deploy-model` (closing a gap in the Google provider
+  for custom-container deployed models). The destroy provisioner undeploys
+  cleanly so a single `terraform apply -var deploy_vertex_endpoint=false`
+  tears the stack down.
+- Machine type, accelerator type/count, and `model_id` are sourced from the
+  Python model registry via `serving/model_flags.py <id> terraform`, which
+  writes `terraform/model_registry.auto.tfvars.json`. The Python registry
+  remains the single source of truth.
+- Predict route in `terraform/vertex.tf` corrected to `/v1/chat/completions`
+  to match the serving container.
+
+### Removed
+- `serving/deploy_vertex.sh` — replaced by the Terraform path; image build
+  remains a separate `gcloud builds submit` step using
+  `serving/cloudbuild.yaml`.
+
 ### Fixed
 - Removed unused `torch.nn` import in `eval/train_sep_probe.py`.
 

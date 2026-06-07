@@ -48,3 +48,15 @@ checkpoints/
 
 # OS
 .DS_Store
+
+# Terraform: local state, plan files, downloaded providers. The
+# *.auto.tfvars.json file generated from the model registry IS committed
+# (it's a derived artifact of demo/model_registry.py, not a per-user setting).
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.*
+terraform/*.tfvars
+!terraform/*.auto.tfvars.json
+!terraform/terraform.tfvars.example
+terraform/*.tfplan

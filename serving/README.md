@@ -1,31 +1,36 @@
 # Serving
 
-vLLM OpenAI-compatible server hosting `hugging-quants/gemma-2-9b-it-AWQ-INT4`,
-deployed to Vertex AI Prediction as a custom container.
+vLLM OpenAI-compatible server hosting a registry-selected Gemma SLM, deployed
+to Vertex AI Prediction as a custom container.
 
 ## Files
 
-- `Dockerfile` — CUDA 12.4 + vLLM ≥0.5.4 image. Exposes the OpenAI-compatible API on `:8080`.
-- `deploy_vertex.sh` — builds the image, uploads to Vertex Model Registry, deploys to an Endpoint on a single L4 GPU.
+- `Dockerfile` — CUDA 12.4 + vLLM ≥0.5.4. Exposes the OpenAI-compatible API on
+  `:8080`. Reads `MODEL_ID` at start and resolves the vLLM launch flags from
+  the model registry via `model_flags.py`. Optionally launches a sibling
+  embed-task vLLM when `VLLM_EMBED_PORT` is set (SEP support).
+- `cloudbuild.yaml` — Cloud Build config used to build and push the image to
+  Artifact Registry.
+- `model_flags.py` — registry shim. `vllm` mode prints the launch flags for
+  the container CMD; `terraform` mode prints a JSON blob the Terraform stack
+  consumes via `terraform/model_registry.auto.tfvars.json`.
 
 ## Quick test (local, before pushing to Vertex)
 
 ```bash
-docker build -t vllm-gemma2 serving/
-docker run --gpus all -p 8080:8080 vllm-gemma2
+docker build -t vllm-gemma -f serving/Dockerfile .
+docker run --gpus all -p 8080:8080 -e MODEL_ID=google/gemma-4-E4B-it vllm-gemma
 
 # In another shell:
 curl http://localhost:8080/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -d '{"model": "hugging-quants/gemma-2-9b-it-AWQ-INT4",
+  -d '{"model": "google/gemma-4-E4B-it",
        "messages": [{"role": "user", "content": "Who wrote 1984?"}],
        "n": 10, "temperature": 1.0, "logprobs": true, "top_logprobs": 5}'
 ```
 
 ## Deploy
 
-```bash
-export GCP_PROJECT_ID=your-project-id
-export GCP_REGION=us-central1
-bash serving/deploy_vertex.sh
-```
+Deployment is fully Terraform-driven. See
+`knowledge/usage_guides/DEVOPS_GUIDE.md` for the end-to-end runbook
+(build → push → `terraform apply -var deploy_vertex_endpoint=true`).

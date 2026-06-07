@@ -7,6 +7,7 @@
 - [Terraform bootstrap](#terraform-bootstrap)
 - [Migrating state to GCS](#migrating-state-to-gcs)
 - [Building and pushing the vLLM image](#building-and-pushing-the-vllm-image)
+- [Syncing the model registry into Terraform](#syncing-the-model-registry-into-terraform)
 - [Bringing the Vertex endpoint up for a benchmark](#bringing-the-vertex-endpoint-up-for-a-benchmark)
 - [Running the benchmark](#running-the-benchmark)
 - [Tearing the endpoint down](#tearing-the-endpoint-down)
@@ -77,16 +78,36 @@ disk:
 
 ## Building and pushing the vLLM image
 
+The image build runs on Cloud Build (the local machine does not need GPU
+drivers, docker, or large bandwidth). The build context is the repo root so
+the image can `COPY demo/model_registry.py`.
+
 ```bash
 REPO_URL=$(cd terraform && terraform output -raw artifact_registry_repository)
-IMAGE_URI="${REPO_URL}/vllm-gemma:latest"
+TAG=$(date +%Y%m%d-%H%M%S)
+IMAGE_URI="${REPO_URL}/vllm-gemma:${TAG}"
 
-gcloud auth configure-docker us-central1-docker.pkg.dev
-docker build -t "${IMAGE_URI}" serving/
-docker push "${IMAGE_URI}"
+gcloud builds submit . \
+  --config=serving/cloudbuild.yaml \
+  --substitutions="_IMAGE_URI=${IMAGE_URI}"
 ```
 
 Record `IMAGE_URI` — it becomes the value of `vllm_image_uri` below.
+
+## Syncing the model registry into Terraform
+
+The Terraform stack reads machine-type, accelerator-type and accelerator-count
+from the Python model registry (`demo/model_registry.py`) so the two never
+drift. Regenerate the auto-loaded tfvars file whenever the deployed-default
+SLM changes:
+
+```bash
+uv run python serving/model_flags.py google/gemma-4-E4B-it terraform \
+  > terraform/model_registry.auto.tfvars.json
+```
+
+The file is `*.auto.tfvars.json`, so Terraform picks it up on the next plan
+or apply with no extra flags.
 
 ## Bringing the Vertex endpoint up for a benchmark
 
@@ -97,10 +118,15 @@ terraform apply \
   -var="vllm_image_uri=${IMAGE_URI}"
 ```
 
-This creates the Vertex AI endpoint and model resources. The actual deployed
-model binding (the GPU node) is intentionally not managed by Terraform yet
-because vLLM warmup and health-check tuning are easier to iterate on with
-`gcloud ai endpoints deploy-model`; see `serving/deploy_vertex.sh`.
+Terraform creates the endpoint and uploads the model, then a `null_resource`
+runs `gcloud ai endpoints deploy-model` to attach the model with the
+configured machine type, accelerator, and the runtime service account. This
+is the step that spins up the L4 node and starts the hourly meter. Expect
+10–20 minutes for the deploy to converge.
+
+The `null_resource` is also the resource that performs `undeploy-model` on
+destroy, so a single Terraform apply with the flag flipped back to false
+tears everything down cleanly.
 
 ## Running the benchmark
 
@@ -119,13 +145,9 @@ cd terraform
 terraform apply -var="deploy_vertex_endpoint=false"
 ```
 
-If a deployed-model binding was created manually via `gcloud`, undeploy it
-first:
-
-```bash
-gcloud ai endpoints undeploy-model "${ENDPOINT_ID}" \
-  --region=us-central1 --deployed-model-id=<id>
-```
+The `null_resource.deploy_model` destroy provisioner runs `undeploy-model`
+for every deployed model on the endpoint before Terraform removes the
+endpoint and model resources themselves. No manual `gcloud` step is needed.
 
 ## Cost notes
 
