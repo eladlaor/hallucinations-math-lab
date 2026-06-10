@@ -34,6 +34,7 @@ from taste.custom_types.domain_types import (
     SampleSet,
     TokenLogprob,
 )
+from taste.escalation import AllAbove, AnyAbove, EscalationPolicy, SingleDetector
 from taste.evaluator import ResponseEvaluator, evaluate_responses
 from taste.judges.protocol import Judge
 from taste.services.detector_protocol import (
@@ -55,6 +56,11 @@ __all__ = [
     "Detector",
     "Judge",
     "SamplingProvider",
+    # Escalation policies
+    "EscalationPolicy",
+    "SingleDetector",
+    "AnyAbove",
+    "AllAbove",
     # Detector implementations
     "PredictiveEntropyDetector",
     "SemanticEntropyDetector",

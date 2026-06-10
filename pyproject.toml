@@ -1,7 +1,7 @@
 [project]
-name = "taste"
+name = "taste-llm-evals"
 version = "0.1.0"
-description = "Taste — response evaluators for LLM-native projects: Semantic Entropy, predictive entropy, Semantic Entropy Probes, plus optional LLM-as-a-judge escalation. Shippable as a library, with a reference vLLM-on-Vertex demo."
+description = "Response evaluators for LLM-native projects: Semantic Entropy, predictive entropy, Semantic Entropy Probes, plus optional LLM-as-a-judge escalation. Shippable as a library (import name: taste), with a reference vLLM-on-Vertex demo."
 readme = "README.md"
 authors = [
     { name = "Elad Laor", email = "eladlaor88@gmail.com" }
@@ -9,26 +9,38 @@ authors = [
 license = { text = "Apache-2.0" }
 requires-python = ">=3.12,<3.14"
 
+# Core: the Semantic-Entropy detection path that the library exposes by default.
+# torch + transformers are required because taste/__init__ eagerly imports the
+# DeBERTa-MNLI NLI detector. Everything provider/judge/demo/eval specific is an
+# optional extra below.
 dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
-    "openai>=1.40",
-    "transformers>=4.44",
     "torch>=2.3",
+    "transformers>=4.44",
     "numpy>=1.26",
-    "scipy>=1.13",
-    "datasets>=2.20",
-    "scikit-learn>=1.5",
-    "google-cloud-aiplatform>=1.71",
-    "google-adk>=2.0",
-    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# Reference vLLM / OpenAI-compatible sampling provider plus the demo CLI.
+demo = [
+    "openai>=1.40",
     "tenacity>=8.5",
     "typer>=0.12",
     "rich>=13.7",
 ]
-
-[project.optional-dependencies]
-ui = ["gradio>=4.40"]
+# Vertex AI Gemini judge (escalation path).
+judge = [
+    "google-cloud-aiplatform>=1.71",
+]
+# Eval / benchmarking harness (eval/*.py, not shipped in the wheel).
+eval = [
+    "datasets>=2.20",
+    "scikit-learn>=1.5",
+]
+all = [
+    "taste-llm-evals[demo,judge,eval]",
+]
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
@@ -36,15 +48,16 @@ dev = [
     "mypy>=1.10",
 ]
 
-[project.scripts]
-taste = "demo.cli:app"
-
 [build-system]
 requires = ["uv_build>=0.8.23,<0.9.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = "src"
+# Distribution is `taste-llm-evals` but the import package stays `taste`,
+# so the backend must be told the module name explicitly (it otherwise
+# infers `taste_llm_evals` from the project name).
+module-name = "taste"
 
 [tool.ruff]
 line-length = 100

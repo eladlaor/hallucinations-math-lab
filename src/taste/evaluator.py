@@ -25,6 +25,7 @@ import logging
 from taste.config import get_settings
 from taste.constants import LOG_EXTRA_KEY, AnswerSource, DetectorName
 from taste.custom_types.domain_types import DetectionResult, SampleSet
+from taste.escalation import EscalationPolicy, SingleDetector
 from taste.judges.protocol import Judge
 from taste.services.detector_protocol import (
     Detector,
@@ -45,6 +46,7 @@ def evaluate_responses(
     escalation_threshold: float,
     judge: Judge | None = None,
     greedy_answer: str | None = None,
+    escalation_policy: EscalationPolicy | None = None,
 ) -> DetectionResult:
     """Score a set of already-sampled responses against the configured detectors.
 
@@ -69,9 +71,16 @@ def evaluate_responses(
         because the library is not driving the LLM and so cannot produce
         a greedy decode on its own. ResponseEvaluator supplies this for
         the provider-shaped path.
+      escalation_policy: optional multi-detector escalation rule. When
+        supplied it takes precedence over escalation_detector /
+        escalation_threshold (which are still recorded as the caller-passed
+        baseline); the richer human-readable reason lives in the result's
+        escalation_policy_desc. When None, behavior is byte-identical to the
+        historical single-detector path (escalation_detector > threshold).
 
     Raises:
-      ValueError: if escalation_detector is not in the detectors list.
+      ValueError: if escalation_detector is not in the detectors list, or if
+        a supplied escalation_policy references a detector absent from scores.
       DetectorPrerequisiteError: if any detector's declared inputs are
         missing from the assembled DetectionContext.
     """
@@ -117,8 +126,19 @@ def evaluate_responses(
         if result.clusters is not None:
             clusters = result.clusters
 
-    escalation_score = scores[escalation_detector]
-    should_escalate = escalation_score > escalation_threshold
+    policy = (
+        escalation_policy
+        if escalation_policy is not None
+        else SingleDetector(name=escalation_detector, threshold=escalation_threshold)
+    )
+    for referenced in policy.detectors_referenced:
+        if referenced not in scores:
+            raise ValueError(
+                f"Escalation policy references detector {referenced!s}, which was not "
+                f"scored this run. Scored detectors: {[str(k) for k in scores]!s}."
+            )
+
+    should_escalate = policy.should_escalate(scores)
 
     logger.info(
         "Response evaluation complete.",
@@ -127,6 +147,7 @@ def evaluate_responses(
                 "scores": {str(k): round(v, 4) for k, v in scores.items()},
                 "escalation_detector": str(escalation_detector),
                 "escalation_threshold": escalation_threshold,
+                "escalation_policy": policy.describe(),
                 "escalate": should_escalate,
                 "n_clusters": len(clusters) if clusters else 0,
                 "judge_supplied": judge is not None,
@@ -158,6 +179,7 @@ def evaluate_responses(
         final_answer=final_answer,
         final_answer_source=final_source,
         judge_reasoning=judge_reasoning,
+        escalation_policy_desc=(None if escalation_policy is None else escalation_policy.describe()),
     )
 
 
@@ -218,6 +240,8 @@ class ResponseEvaluator:
         escalation_detector: DetectorName | None = None,
         escalation_threshold: float | None = None,
         judge: Judge | None = None,
+        *,
+        escalation_policy: EscalationPolicy | None = None,
     ) -> None:
         if slm is None:
             # Lazy import — demo isn't part of the library surface, so we
@@ -237,12 +261,22 @@ class ResponseEvaluator:
             escalation_threshold if escalation_threshold is not None else settings.se_threshold
         )
         self._judge = judge
+        self._escalation_policy = escalation_policy
 
         if not any(d.name == self._escalation_detector for d in self._detectors):
             raise ValueError(
                 f"Escalation detector {self._escalation_detector!s} is not in the enabled detector "
                 f"list {[d.name for d in self._detectors]!s}."
             )
+
+        if self._escalation_policy is not None:
+            enabled_names = [d.name for d in self._detectors]
+            for referenced in self._escalation_policy.detectors_referenced:
+                if referenced not in enabled_names:
+                    raise ValueError(
+                        f"Escalation policy references detector {referenced!s}, which is not in the "
+                        f"enabled detector list {enabled_names!s}."
+                    )
 
     def evaluate(self, prompt: str) -> DetectionResult:
         try:
@@ -264,6 +298,7 @@ class ResponseEvaluator:
                 escalation_threshold=self._escalation_threshold,
                 judge=self._judge,
                 greedy_answer=greedy,
+                escalation_policy=self._escalation_policy,
             )
         except Exception as e:
             raise RuntimeError(

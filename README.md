@@ -167,6 +167,47 @@ print(result.final_answer)           # "George Orwell."
 The library never drives an LLM in this path. Consumers like
 [langrag](../langrag) own their inference stack and pass samples in.
 
+### Multi-detector escalation policies
+
+The scalar `escalation_detector` / `escalation_threshold` pair encodes a
+single-detector decision (`SingleDetector`). To combine detectors, pass an
+`escalation_policy` instead — it **takes precedence** over the scalar pair:
+
+```python
+from taste import evaluate_responses, AnyAbove, DetectorName
+
+result = evaluate_responses(
+    prompt="Who wrote 1984?",
+    samples=samples,
+    detectors=[PredictiveEntropyDetector(), SemanticEntropyDetector()],
+    escalation_detector=DetectorName.SEMANTIC_ENTROPY,   # baseline, still recorded
+    escalation_threshold=1.0,
+    greedy_answer="George Orwell.",
+    escalation_policy=AnyAbove({
+        DetectorName.SEMANTIC_ENTROPY: 1.0,
+        DetectorName.PREDICTIVE_ENTROPY: 2.0,
+    }),
+)
+
+print(result.escalated)               # True if EITHER detector crosses
+print(result.escalation_policy_desc)  # "ANY(semantic_entropy > 1.0, predictive_entropy > 2.0)"
+```
+
+When `escalation_policy` is `None`, behavior is byte-identical to the
+single-detector path. When supplied, the policy decides and the
+human-readable reason is recorded on `result.escalation_policy_desc`; the
+scalar `escalation_detector` / `escalation_threshold` are still carried on
+the result as the caller-passed baseline.
+
+#### Detector roles in escalation policies
+
+A false-negative-prone detector (PE / predictive entropy) **MUST NOT** be
+used as a pre-filter or gate placed IN FRONT OF semantic entropy — never
+`AllAbove({PE, SE})` to require PE to fire first, because a PE miss would
+then suppress an SE-driven escalation. PE may only be an additive OR trigger
+(`AnyAbove({SE, PE})`), so it can raise escalation but never suppress an
+SE-driven one.
+
 ## Demo use
 
 ```bash
@@ -223,7 +264,8 @@ knowledge/                  # guides, plans, changelogs, obstacles
 ## Status
 
 The library API (`evaluate_responses`, `ResponseEvaluator`, three detectors,
-judge protocol) is stable for consumer use. The Pareto-frontier extension
+judge protocol, and the escalation policies `EscalationPolicy`,
+`SingleDetector`, `AnyAbove`, `AllAbove`) is stable for consumer use. The Pareto-frontier extension
 (LLM-judge detector, cost/latency reporting in the eval harness) is in
 flight — see `knowledge/plans/PARETO_DETECTOR_FRAMEWORK.md`.
 

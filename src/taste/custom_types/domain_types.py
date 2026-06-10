@@ -47,7 +47,9 @@ class DetectionResult(BaseModel):
     not enabled this run). The escalation decision is recorded as the
     `escalation_detector` name, the comparand value, and the threshold used —
     so a reader can reconstruct *why* the system escalated without
-    re-reading config."""
+    re-reading config. For multi-detector policies the human-readable reason
+    lives in `escalation_policy_desc`, while `escalation_detector` /
+    `escalation_threshold` remain populated for the single-detector path."""
 
     prompt: str
     greedy_answer: str
@@ -60,3 +62,4 @@ class DetectionResult(BaseModel):
     final_answer: str
     final_answer_source: AnswerSource
     judge_reasoning: str | None = None
+    escalation_policy_desc: str | None = None
