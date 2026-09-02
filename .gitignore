@@ -60,3 +60,11 @@ terraform/*.tfvars
 !terraform/*.auto.tfvars.json
 !terraform/terraform.tfvars.example
 terraform/*.tfplan
+
+# Talk-prep and long-form internal notes — kept out of the public repo.
+# This remote (github.com/eladlaor/ai-eval-math-lab) is PUBLIC; these are
+# personal delivery material, not shipped artifacts.
+knowledge/lectures/
+knowledge/theory/
+knowledge/CAVEATS.md
+knowledge/GLOSSARY.md
