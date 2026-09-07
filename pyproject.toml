@@ -1,5 +1,5 @@
 [project]
-name = "ai-eval-math-lab"
+name = "hallucinations-math-lab"
 version = "0.1.0"
 description = "Response evaluators for LLM-native projects: Semantic Entropy, predictive entropy, Semantic Entropy Probes, plus optional LLM-as-a-judge escalation. Shippable as a library (import name: taste), with a reference vLLM-on-Vertex demo."
 readme = "README.md"
@@ -39,7 +39,7 @@ eval = [
     "scikit-learn>=1.5",
 ]
 all = [
-    "ai-eval-math-lab[demo,judge,eval]",
+    "hallucinations-math-lab[demo,judge,eval]",
 ]
 dev = [
     "pytest>=8.2",
@@ -54,7 +54,7 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = "src"
-# Distribution is `ai-eval-math-lab` but the import package stays `taste`,
+# Distribution is `hallucinations-math-lab` but the import package stays `taste`,
 # so the backend must be told the module name explicitly (it otherwise
 # infers `ai_eval_math_lab` from the project name).
 module-name = "taste"
