@@ -1,0 +1,719 @@
+<title>Teaching the Cheap Gauge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+  :root{
+    --ground:#F7F5F0;
+    --surface:#FFFFFF;
+    --surface-sunk:#EEEBE3;
+    --ink:#1B1F27;
+    --ink-soft:#585349;
+    --ink-faint:#8A857C;
+    --rule:#DBD6CB;
+    --rule-strong:#C2BCAE;
+    --se:#B26A12;
+    --se-wash:#F6E8D4;
+    --sep:#2F7C96;
+    --sep-wash:#DDEDF2;
+    --pe:#7A7466;
+    --shadow:0 1px 2px rgba(27,31,39,.06), 0 8px 24px -12px rgba(27,31,39,.18);
+
+    --display:"Fraunces",Georgia,"Times New Roman",serif;
+    --body:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+
+    --measure:66ch;
+    --pad:clamp(1.15rem,4vw,2.5rem);
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#141821;
+      --surface:#1C212C;
+      --surface-sunk:#11151D;
+      --ink:#EDE9E1;
+      --ink-soft:#B0AAA0;
+      --ink-faint:#7E786E;
+      --rule:#2C3341;
+      --rule-strong:#3D4658;
+      --se:#E5A44E;
+      --se-wash:#33281A;
+      --sep:#6FB9D2;
+      --sep-wash:#16303A;
+      --pe:#8D8779;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#141821;
+    --surface:#1C212C;
+    --surface-sunk:#11151D;
+    --ink:#EDE9E1;
+    --ink-soft:#B0AAA0;
+    --ink-faint:#7E786E;
+    --rule:#2C3341;
+    --rule-strong:#3D4658;
+    --se:#E5A44E;
+    --se-wash:#33281A;
+    --sep:#6FB9D2;
+    --sep-wash:#16303A;
+    --pe:#8D8779;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--body);
+    font-size:17px;
+    line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:0 var(--pad) 6rem}
+
+  /* ---------- masthead ---------- */
+  .mast{
+    padding:clamp(3rem,9vw,6rem) 0 clamp(2rem,5vw,3.5rem);
+    border-bottom:1px solid var(--rule);
+  }
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:.7rem;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin:0 0 1.4rem;
+  }
+  h1{
+    font-family:var(--display);
+    font-optical-sizing:auto;
+    font-weight:600;
+    font-size:clamp(2.3rem,6.2vw,4rem);
+    line-height:1.04;
+    letter-spacing:-.022em;
+    margin:0 0 1.2rem;
+    text-wrap:balance;
+    max-width:19ch;
+  }
+  .standfirst{
+    font-size:clamp(1.05rem,2.3vw,1.28rem);
+    line-height:1.55;
+    color:var(--ink-soft);
+    max-width:60ch;
+    margin:0;
+  }
+  .standfirst em{color:var(--ink);font-style:italic}
+
+  /* ---------- generic sections ---------- */
+  section{padding-top:clamp(3rem,7vw,5rem)}
+  h2{
+    font-family:var(--display);
+    font-weight:600;
+    font-size:clamp(1.55rem,3.4vw,2.1rem);
+    line-height:1.15;
+    letter-spacing:-.014em;
+    margin:0 0 .5rem;
+    text-wrap:balance;
+  }
+  h3{
+    font-family:var(--body);
+    font-weight:600;
+    font-size:1.02rem;
+    letter-spacing:.01em;
+    margin:0 0 .45rem;
+  }
+  p{margin:0 0 1.05rem;max-width:var(--measure)}
+  .lede{color:var(--ink-soft);max-width:62ch;margin-bottom:2rem}
+  .stage-no{
+    font-family:var(--mono);
+    font-size:.72rem;
+    font-weight:700;
+    letter-spacing:.14em;
+    color:var(--ink-faint);
+    display:block;
+    margin-bottom:.7rem;
+  }
+  code{
+    font-family:var(--mono);
+    font-size:.86em;
+    background:var(--surface-sunk);
+    border:1px solid var(--rule);
+    border-radius:3px;
+    padding:.08em .34em;
+  }
+  a{color:var(--sep)}
+
+  /* ---------- the four-tool table ---------- */
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  table{
+    border-collapse:collapse;
+    width:100%;
+    min-width:600px;
+    font-size:.94rem;
+  }
+  th,td{
+    text-align:left;
+    padding:.82rem 1rem;
+    border-bottom:1px solid var(--rule);
+    vertical-align:top;
+  }
+  thead th{
+    font-family:var(--mono);
+    font-size:.68rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    font-weight:400;
+    border-bottom:1px solid var(--rule-strong);
+  }
+  tbody th{
+    font-family:var(--body);
+    font-weight:600;
+    white-space:nowrap;
+  }
+  tr.is-se th,tr.is-se td:first-of-type{color:var(--se)}
+  tr.is-sep th,tr.is-sep td:first-of-type{color:var(--sep)}
+  .q{font-style:italic}
+
+  /* ---------- pipeline spine ---------- */
+  .spine{
+    display:grid;
+    gap:1px;
+    background:var(--rule);
+    border:1px solid var(--rule);
+    border-radius:6px;
+    overflow:hidden;
+    margin:2rem 0;
+  }
+  .step{
+    background:var(--surface);
+    padding:1.3rem clamp(1rem,2.5vw,1.6rem);
+    display:grid;
+    grid-template-columns:2.4rem 1fr;
+    gap:0 1.1rem;
+    align-items:start;
+  }
+  .step .idx{
+    font-family:var(--mono);
+    font-size:.78rem;
+    font-weight:700;
+    color:var(--se);
+    padding-top:.16rem;
+  }
+  .step p{margin:0;font-size:.95rem;color:var(--ink-soft);max-width:58ch}
+  .step .math{
+    grid-column:2;
+    font-family:var(--mono);
+    font-size:.82rem;
+    color:var(--ink);
+    background:var(--surface-sunk);
+    border-left:2px solid var(--se);
+    padding:.5rem .75rem;
+    margin-top:.7rem;
+    overflow-x:auto;
+    white-space:pre;
+  }
+
+  /* ---------- the training-loop centerpiece ---------- */
+  .loop{
+    background:var(--surface);
+    border:1px solid var(--rule);
+    border-radius:6px;
+    padding:clamp(1.1rem,3vw,2rem);
+    margin:2rem 0;
+    box-shadow:var(--shadow);
+  }
+  .loop-head{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.5rem 1rem;
+    align-items:baseline;
+    justify-content:space-between;
+    border-bottom:1px solid var(--rule);
+    padding-bottom:.85rem;
+    margin-bottom:1.4rem;
+  }
+  .loop-head h3{margin:0;font-size:1.06rem}
+  .tag{
+    font-family:var(--mono);
+    font-size:.66rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    border:1px solid var(--rule-strong);
+    border-radius:99px;
+    padding:.2rem .6rem;
+  }
+  .fork{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:1rem;
+  }
+  @media(min-width:820px){
+    .fork{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr) minmax(0,1.1fr);align-items:stretch}
+  }
+  .node{
+    border:1px solid var(--rule);
+    border-radius:5px;
+    padding:.95rem 1.05rem;
+    background:var(--surface-sunk);
+    display:flex;
+    flex-direction:column;
+    gap:.45rem;
+  }
+  .node.se{border-color:var(--se);background:var(--se-wash)}
+  .node.sep{border-color:var(--sep);background:var(--sep-wash)}
+  .node .nlabel{
+    font-family:var(--mono);
+    font-size:.66rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+  }
+  .node.se .nlabel{color:var(--se)}
+  .node.sep .nlabel{color:var(--sep)}
+  .node .ntitle{font-weight:600;font-size:.96rem;line-height:1.3}
+  .node p{font-size:.87rem;margin:0;color:var(--ink-soft);max-width:none}
+  .node .val{
+    font-family:var(--mono);
+    font-size:.82rem;
+    color:var(--ink);
+    margin-top:auto;
+    padding-top:.5rem;
+  }
+  .cost{
+    font-family:var(--mono);
+    font-size:.7rem;
+    letter-spacing:.06em;
+    color:var(--ink-faint);
+  }
+
+  .pairs{margin-top:1.5rem}
+  .pairs-cap{
+    font-family:var(--mono);
+    font-size:.68rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin-bottom:.6rem;
+  }
+  table.pairtab{min-width:520px;font-family:var(--mono);font-size:.8rem}
+  table.pairtab td{padding:.5rem .9rem;font-variant-numeric:tabular-nums}
+  table.pairtab td.h{color:var(--sep)}
+  table.pairtab td.y{color:var(--se);font-weight:700}
+  table.pairtab .ell td{color:var(--ink-faint)}
+
+  /* ---------- the nats scale ---------- */
+  .unit{
+    background:var(--surface);
+    border:1px solid var(--rule);
+    border-radius:6px;
+    padding:clamp(1.1rem,3vw,1.6rem) clamp(1.1rem,3vw,1.8rem);
+    margin:1.8rem 0;
+  }
+  .unit h3{margin-bottom:.35rem}
+  .unit > p{font-size:.94rem;color:var(--ink-soft);max-width:60ch}
+  .ruler{margin-top:1.5rem}
+  .ruler svg{width:100%;height:auto;display:block;overflow:visible}
+
+  /* ---------- fit / geometry figure ---------- */
+  figure{margin:2rem 0;max-width:100%}
+  figcaption{
+    font-size:.86rem;
+    color:var(--ink-soft);
+    margin-top:.8rem;
+    max-width:58ch;
+  }
+  .plot{
+    width:100%;
+    height:auto;
+    display:block;
+    background:var(--surface);
+    border:1px solid var(--rule);
+    border-radius:6px;
+  }
+
+  /* ---------- two-column compare ---------- */
+  .cols{
+    display:grid;
+    gap:1rem;
+    grid-template-columns:1fr;
+    margin:1.8rem 0;
+  }
+  @media(min-width:760px){.cols{grid-template-columns:1fr 1fr}}
+  .card{
+    border:1px solid var(--rule);
+    border-radius:6px;
+    padding:1.15rem 1.25rem;
+    background:var(--surface);
+    display:flex;
+    flex-direction:column;
+    gap:.5rem;
+  }
+  .card.se{border-top:3px solid var(--se)}
+  .card.sep{border-top:3px solid var(--sep)}
+  .card ul{margin:0;padding-left:1.1rem;font-size:.92rem;color:var(--ink-soft)}
+  .card li{margin-bottom:.3rem}
+  .card li::marker{color:var(--ink-faint)}
+
+  /* ---------- caveat block ---------- */
+  .caveats{
+    border:1px solid var(--rule-strong);
+    border-left:3px solid var(--se);
+    border-radius:0 6px 6px 0;
+    background:var(--surface);
+    padding:1.2rem 1.4rem;
+    margin:2rem 0;
+  }
+  .caveats h3{margin-bottom:.7rem}
+  .caveats ol{margin:0;padding-left:1.2rem;font-size:.94rem;color:var(--ink-soft)}
+  .caveats li{margin-bottom:.55rem}
+  .caveats strong{color:var(--ink)}
+
+  /* ---------- code ---------- */
+  pre{
+    background:var(--surface-sunk);
+    border:1px solid var(--rule);
+    border-radius:5px;
+    padding:1rem 1.1rem;
+    overflow-x:auto;
+    font-family:var(--mono);
+    font-size:.8rem;
+    line-height:1.6;
+    margin:1.2rem 0;
+  }
+  pre code{background:none;border:none;padding:0;font-size:inherit}
+  .cm{color:var(--ink-faint)}
+  .kw{color:var(--sep)}
+  .st{color:var(--se)}
+
+  .src{
+    font-family:var(--mono);
+    font-size:.72rem;
+    color:var(--ink-faint);
+    letter-spacing:.02em;
+    margin-top:.5rem;
+  }
+
+  /* ---------- closing ---------- */
+  .kicker{
+    border-top:1px solid var(--rule);
+    margin-top:clamp(3rem,7vw,5rem);
+    padding-top:2rem;
+  }
+  .kicker p{
+    font-family:var(--display);
+    font-size:clamp(1.15rem,2.7vw,1.5rem);
+    line-height:1.4;
+    max-width:34ch;
+    text-wrap:balance;
+  }
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">taste · detector notes</p>
+  <h1>Teaching the Cheap Gauge</h1>
+  <p class="standfirst">Semantic Entropy works by asking the model ten times. A probe learns to guess its answer from one. This is the walk from one to the other — and specifically, what those <em>(hidden state → SE value)</em> pairs actually are.</p>
+</header>
+
+<section>
+  <h2>Four tools, three questions</h2>
+  <p class="lede">Before the mechanism, the place SEP occupies. Sort these by <em>what each one asks</em> and the confusion resolves: SEP is not a fourth question. It is a second way of answering the third.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Tool</th><th scope="col">The question it asks</th><th scope="col">What it looks at</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">LLM-judge</th><td class="q">"Is this answer good?"</td><td>the answer text, via another LLM</td></tr>
+        <tr><th scope="row">PE</th><td class="q">"Was the model confident in these words?"</td><td>token logprobs</td></tr>
+        <tr class="is-se"><th scope="row">SE</th><td class="q">"Do independent samples agree in meaning?"</td><td>N answers + NLI clustering</td></tr>
+        <tr class="is-sep"><th scope="row">SEP</th><td class="q">← the same question as SE</td><td>one forward pass' hidden states</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="src">Colour is load-bearing on this page: <span style="color:var(--se)">amber = SE, the expensive teacher</span> · <span style="color:var(--sep)">cyan = SEP, the cheap student</span>.</p>
+</section>
+
+<section>
+  <span class="stage-no">Stage 1 — the expensive measurement</span>
+  <h2>What SE does, per question</h2>
+  <p class="lede">Four steps, run once per prompt. Every one of them costs something, and together they are the reason a cheaper route is worth building.</p>
+
+  <div class="spine">
+    <div class="step">
+      <span class="idx">01</span>
+      <div>
+        <h3>Sample N answers</h3>
+        <p>Ask the same question ten times at temperature&nbsp;&gt;&nbsp;0. One request with <code>n=10</code> — the prompt is prefilled once and the ten continuations decode as a batch.</p>
+      </div>
+      <div class="math">s₁ … s₁₀  ~  p(· | x)</div>
+    </div>
+    <div class="step">
+      <span class="idx">02</span>
+      <div>
+        <h3>Test pairs for equivalence</h3>
+        <p>A separate NLI model judges whether two answers mean the same thing — entailment required in <em>both</em> directions, so "Paris" doesn't merge with the vaguer "somewhere in Europe".</p>
+      </div>
+      <div class="math">equiv(a,b) ⟺ NLI(a,b)=entail AND NLI(b,a)=entail</div>
+    </div>
+    <div class="step">
+      <span class="idx">03</span>
+      <div>
+        <h3>Cluster by meaning</h3>
+        <p>Walk the answers, dropping each into the first cluster whose representative it matches, or opening a new one. Ten strings collapse into K distinct claims.</p>
+      </div>
+      <div class="math">C₁ … C_K     p(C_k) = |C_k| / N</div>
+    </div>
+    <div class="step">
+      <span class="idx">04</span>
+      <div>
+        <h3>Entropy over the clusters</h3>
+        <p>Shannon entropy of the cluster-size distribution. All ten in one cluster → 0 nats, the model is committed. Ten singletons → log&nbsp;10 = 2.303, it is confabulating.</p>
+      </div>
+      <div class="math">SE = −Σ p(C_k) · log p(C_k)          0 ≤ SE ≤ log N</div>
+    </div>
+  </div>
+  <p class="src">src/taste/services/semantic_entropy.py · src/taste/services/nli.py</p>
+
+  <div class="unit">
+    <h3>A note on the unit: what is a "nat"?</h3>
+    <p>Entropy answers "how uncertain?", and the answer is a number <em>of something</em> — the way a distance is a number of metres. Which unit you get depends only on which logarithm you use: <code>log₂</code> gives <strong>bits</strong>, natural log gives <strong>nats</strong>. The code calls <code>np.log</code>, so these numbers are nats. Same quantity, different ruler.</p>
+    <p style="margin-top:.7rem">Nats have no everyday intuition attached, so don't try to feel the unit — read positions on the scale instead:</p>
+    <div class="ruler">
+      <svg viewBox="0 0 720 132" role="img" aria-labelledby="ru-t ru-d">
+        <title id="ru-t">The semantic entropy scale from 0 to 2.303 nats</title>
+        <desc id="ru-d">A horizontal scale marking 0 for full agreement, 0.693 for a two-way split, 1.0 as the escalation threshold, and 2.303 as the maximum where all ten samples disagree.</desc>
+        <defs>
+          <linearGradient id="rg" x1="0" x2="1">
+            <stop offset="0" stop-color="var(--sep)"/>
+            <stop offset="1" stop-color="var(--se)"/>
+          </linearGradient>
+        </defs>
+        <rect x="40" y="46" width="640" height="9" rx="4.5" fill="url(#rg)" opacity=".55"/>
+        <g stroke="var(--ink)" stroke-width="1.5">
+          <line x1="40" y1="38" x2="40" y2="63"/>
+          <line x1="232.6" y1="38" x2="232.6" y2="63"/>
+          <line x1="317.9" y1="38" x2="317.9" y2="63"/>
+          <line x1="680" y1="38" x2="680" y2="63"/>
+        </g>
+        <g font-family="JetBrains Mono, monospace" font-size="12" font-weight="700" fill="var(--ink)" text-anchor="middle">
+          <text x="40" y="28">0</text>
+          <text x="232.6" y="28">0.693</text>
+          <text x="317.9" y="28">1.0</text>
+          <text x="680" y="28">2.303</text>
+        </g>
+        <g font-family="Source Sans 3, sans-serif" font-size="11.5" fill="var(--ink-soft)" text-anchor="middle">
+          <text x="46" y="80">all 10 agree</text>
+          <text x="46" y="95">one meaning</text>
+          <text x="232.6" y="80">a 50/50 split</text>
+          <text x="232.6" y="95">= ln 2</text>
+          <text x="317.9" y="112" fill="var(--se)">threshold — above this, escalate</text>
+          <text x="666" y="80">10 samples,</text>
+          <text x="666" y="95">10 meanings = ln 10</text>
+        </g>
+        <line x1="317.9" y1="63" x2="317.9" y2="103" stroke="var(--se)" stroke-width="1" stroke-dasharray="3 3"/>
+      </svg>
+    </div>
+    <p style="margin-top:1.2rem">So <code>SE = 1.973</code> is not a mysterious quantity — it is simply <em>near the top of a 0&nbsp;to&nbsp;2.303 scale</em>, meaning the ten answers fragmented badly. And <strong>"a regressor predicting SE in nats"</strong> unpacks to: a thing that outputs a number <em>on this same scale</em>, rather than a yes/no label. Which is exactly why it can reuse SE's threshold without recalibration.</p>
+  </div>
+</section>
+
+<section>
+  <span class="stage-no">Stage 2 — the part that was unclear</span>
+  <h2>Where the training pairs come from</h2>
+  <p class="lede">This is the crux. For each calibration prompt, the model is asked to produce <strong>two different things from the same input</strong> — and they are collected in parallel, not in sequence. One is cheap and will be the probe's input. One is expensive and will be its answer key.</p>
+
+  <div class="loop">
+    <div class="loop-head">
+      <h3>One row of the training set, from one prompt</h3>
+      <span class="tag">runs ~500 times, offline</span>
+    </div>
+
+    <div class="fork">
+      <div class="node">
+        <span class="nlabel">the prompt</span>
+        <span class="ntitle">"In what year was the Treaty of Bruges signed?"</span>
+        <p>One line from the calibration set. Note: no correct answer is needed. Nothing here is human-labelled.</p>
+        <span class="val">x</span>
+      </div>
+
+      <div class="node sep">
+        <span class="nlabel">↓ collected — becomes the INPUT</span>
+        <span class="ntitle">Pooled hidden state</span>
+        <p>Run the prompt through the model and read the last-layer activations at the final prompt token — before a single answer token is generated. A vector of numbers describing the model's internal state as it is <em>about to</em> answer.</p>
+        <span class="val">h = [0.031, −0.882, 0.147, … ]<br><span class="cost">3584 floats · one forward pass</span></span>
+      </div>
+
+      <div class="node se">
+        <span class="nlabel">↓ computed — becomes the LABEL</span>
+        <span class="ntitle">The full SE value</span>
+        <p>Run all four stages above on the same prompt: ten samples, NLI clustering, entropy. This is the expensive ground truth — the number the probe will be trained to reproduce.</p>
+        <span class="val">y = 1.973 nats<br><span class="cost">10 generations · ~80 NLI passes</span></span>
+      </div>
+    </div>
+
+    <div class="pairs">
+      <p class="pairs-cap">After ~500 prompts, the collected set</p>
+      <div class="scroll">
+        <table class="pairtab">
+          <thead>
+            <tr><th scope="col">#</th><th scope="col">h — pooled hidden state (input)</th><th scope="col">y — SE in nats (label)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td class="h">[ 0.031, −0.882, 0.147, … ]</td><td class="y">1.973</td></tr>
+            <tr><td>2</td><td class="h">[−0.204,  0.551, 0.019, … ]</td><td class="y">0.000</td></tr>
+            <tr><td>3</td><td class="h">[ 0.118, −0.093, 0.702, … ]</td><td class="y">0.325</td></tr>
+            <tr class="ell"><td>⋮</td><td>⋮</td><td>⋮</td></tr>
+            <tr><td>500</td><td class="h">[−0.077,  0.412, 0.238, … ]</td><td class="y">2.115</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <p><strong>That is the whole of it.</strong> A table with 500 rows. Each row is one prompt's internal state paired with the expensive verdict on that same prompt. The hidden state is <em>not</em> derived from the ten samples — it comes from a separate, single forward pass over the prompt alone. The two halves of the row are collected independently and simply filed together.</p>
+  <p class="src">eval/train_sep_probe.py</p>
+</section>
+
+<section>
+  <span class="stage-no">Stage 3 — the fit</span>
+  <h2>500 rows become 3585 numbers</h2>
+  <p class="lede">Now it is ordinary linear regression. Find the weight vector that best predicts the amber column from the cyan column — in this implementation, ridge regression, which is least-squares with a penalty on large weights to stop 3584 dimensions from overfitting 500 rows.</p>
+
+  <figure>
+    <svg class="plot" viewBox="0 0 720 330" role="img" aria-labelledby="fit-t fit-d">
+      <title id="fit-t">Scatter of true semantic entropy against probe-predicted semantic entropy</title>
+      <desc id="fit-d">Points cluster along a diagonal line of perfect agreement, showing the probe approximates but does not exactly reproduce the expensive measurement.</desc>
+      <defs>
+        <clipPath id="pc"><rect x="72" y="26" width="590" height="236"/></clipPath>
+      </defs>
+      <!-- grid -->
+      <g stroke="var(--rule)" stroke-width="1">
+        <line x1="72" y1="26" x2="72" y2="262"/>
+        <line x1="72" y1="262" x2="662" y2="262"/>
+      </g>
+      <g stroke="var(--rule)" stroke-width="1" stroke-dasharray="2 4" opacity=".7">
+        <line x1="72" y1="203" x2="662" y2="203"/>
+        <line x1="72" y1="144" x2="662" y2="144"/>
+        <line x1="72" y1="85" x2="662" y2="85"/>
+      </g>
+      <!-- ideal diagonal -->
+      <g clip-path="url(#pc)">
+        <line x1="72" y1="262" x2="662" y2="26" stroke="var(--se)" stroke-width="1.5" stroke-dasharray="6 5" opacity=".85"/>
+      </g>
+      <!-- points -->
+      <g fill="var(--sep)" opacity=".72">
+        <circle cx="104" cy="252" r="4"/><circle cx="121" cy="238" r="4"/>
+        <circle cx="96" cy="243" r="4"/><circle cx="147" cy="234" r="4"/>
+        <circle cx="168" cy="219" r="4"/><circle cx="139" cy="248" r="4"/>
+        <circle cx="196" cy="207" r="4"/><circle cx="212" cy="223" r="4"/>
+        <circle cx="183" cy="196" r="4"/><circle cx="241" cy="188" r="4"/>
+        <circle cx="258" cy="205" r="4"/><circle cx="229" cy="176" r="4"/>
+        <circle cx="287" cy="171" r="4"/><circle cx="303" cy="186" r="4"/>
+        <circle cx="274" cy="159" r="4"/><circle cx="331" cy="152" r="4"/>
+        <circle cx="349" cy="167" r="4"/><circle cx="318" cy="140" r="4"/>
+        <circle cx="377" cy="135" r="4"/><circle cx="394" cy="149" r="4"/>
+        <circle cx="365" cy="122" r="4"/><circle cx="422" cy="115" r="4"/>
+        <circle cx="440" cy="130" r="4"/><circle cx="411" cy="103" r="4"/>
+        <circle cx="468" cy="98" r="4"/><circle cx="485" cy="112" r="4"/>
+        <circle cx="456" cy="86" r="4"/><circle cx="513" cy="79" r="4"/>
+        <circle cx="530" cy="93" r="4"/><circle cx="501" cy="67" r="4"/>
+        <circle cx="558" cy="62" r="4"/><circle cx="575" cy="75" r="4"/>
+        <circle cx="547" cy="50" r="4"/><circle cx="604" cy="44" r="4"/>
+        <circle cx="621" cy="57" r="4"/><circle cx="592" cy="38" r="4"/>
+        <circle cx="209" cy="151" r="4"/><circle cx="286" cy="221" r="4"/>
+        <circle cx="437" cy="171" r="4"/><circle cx="352" cy="97" r="4"/>
+      </g>
+      <!-- axis labels -->
+      <g font-family="JetBrains Mono, monospace" font-size="11" fill="var(--ink-faint)">
+        <text x="72" y="282" text-anchor="middle">0</text>
+        <text x="367" y="282" text-anchor="middle">1.15</text>
+        <text x="662" y="282" text-anchor="middle">2.30</text>
+        <text x="62" y="266" text-anchor="end">0</text>
+        <text x="62" y="148" text-anchor="end">1.15</text>
+        <text x="62" y="31" text-anchor="end">2.30</text>
+      </g>
+      <g font-family="Source Sans 3, sans-serif" font-size="12.5">
+        <text x="367" y="306" text-anchor="middle" fill="var(--se)">true SE (nats) — the expensive measurement</text>
+        <text x="20" y="144" text-anchor="middle" fill="var(--sep)" transform="rotate(-90 20 144)">probe prediction</text>
+      </g>
+      <g font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--ink-faint)">
+        <text x="648" y="20" text-anchor="end">perfect agreement</text>
+      </g>
+    </svg>
+    <figcaption>The probe's job is to land points on the amber diagonal. It never lands exactly — that residual scatter is the accuracy you trade away for dropping from ten generations to one. Validation target is Pearson&nbsp;r between the two columns.</figcaption>
+  </figure>
+
+<pre><code><span class="cm"># eval/train_sep_probe.py — the fit, in full</span>
+X = np.stack(hidden_states)      <span class="cm"># [500, 3584]  the cyan column</span>
+y = np.asarray(se_labels)        <span class="cm"># [500]        the amber column</span>
+
+ridge = Ridge(alpha=<span class="st">1.0</span>)
+ridge.fit(X, y)                  <span class="cm"># ← the entire "training"</span>
+
+probe.linear.weight.copy_(...)   <span class="cm"># 3584 weights</span>
+probe.linear.bias.copy_(...)     <span class="cm"># + 1 bias</span>
+torch.save(probe.state_dict(), output_path)</code></pre>
+
+  <p>No gradient descent, no epochs, no GPU. A closed-form least-squares solve over a 500×3584 matrix — seconds of CPU. The <em>expensive</em> part was building <code>X</code> and <code>y</code> in the first place: 500 prompts × (10 generations + ~80 NLI passes) each.</p>
+</section>
+
+<section>
+  <span class="stage-no">Stage 4 — runtime</span>
+  <h2>What actually happens per request</h2>
+  <p class="lede">The saved file is 3585 floats. At serving time the two paths diverge completely.</p>
+
+  <div class="cols">
+    <div class="card se">
+      <span class="nlabel cost">SE · the teacher</span>
+      <h3>Ten generations, then clustering</h3>
+      <ul>
+        <li>Sample N=10 from the model</li>
+        <li>~80 NLI forward passes, sequentially</li>
+        <li>Cluster, then take entropy of the sizes</li>
+        <li>A second model resident in VRAM</li>
+      </ul>
+      <p style="font-family:var(--mono);font-size:.78rem;margin-top:auto;padding-top:.6rem;color:var(--se)">≈10× compute · latency dominated by NLI</p>
+    </div>
+    <div class="card sep">
+      <span class="nlabel cost">SEP · the student</span>
+      <h3>One dot product</h3>
+      <ul>
+        <li>Read the pooled hidden state you already computed</li>
+        <li>Multiply by 3584 weights, add a bias</li>
+        <li>That number <em>is</em> the score, in nats</li>
+        <li>No second model, no extra generations</li>
+      </ul>
+      <p style="font-family:var(--mono);font-size:.78rem;margin-top:auto;padding-top:.6rem;color:var(--sep)">SE = w·h + b · sub-millisecond</p>
+    </div>
+  </div>
+
+  <p>Because the probe was fit against SE in nats, its output lands on <strong>the same scale as SE</strong>. The threshold carries over unchanged — SEP drops into the escalation comparator wherever SE sat, with no recalibration of <code>se_threshold</code>. That is a deliberate implementation choice: a regressor, not a classifier.</p>
+  <p class="src">src/taste/services/semantic_entropy_probe.py</p>
+</section>
+
+<section>
+  <h2>Why this works at all</h2>
+  <p>The claim underneath SEP is genuinely surprising, and worth stating plainly: <strong>the model's hidden state, taken over the prompt alone and before any answer exists, already encodes whether it is about to confabulate.</strong></p>
+  <p>Predictive entropy fails at exactly this because it reads the <em>output</em> distribution — how confidently the words were chosen. A fluent lie has confident tokens. The hidden state is a different place to look, and the information is apparently sitting there, linearly decodable, the whole time. A single <code>nn.Linear</code> is enough to pull it out.</p>
+
+  <div class="caveats">
+    <h3>What you give up</h3>
+    <ol>
+      <li><strong>White-box access is mandatory.</strong> You must be able to read hidden states. No vendor API exposes them, so this only works on a model you serve yourself — disqualifying for most teams before any other consideration.</li>
+      <li><strong>The probe is per-model.</strong> Weights fit on one backbone are meaningless on another; the code raises on a dimension mismatch rather than silently scoring nonsense. Retrain on every model change.</li>
+      <li><strong>It approximates.</strong> SEP inherits every one of SE's failure modes, then adds its own prediction error. Where the linear assumption breaks — adversarial or out-of-distribution prompts — it degrades quietly.</li>
+      <li><strong>SE does not go away.</strong> You need it to produce the labels, and to re-check periodically that the probe hasn't drifted. SE moves from the hot path to the calibration bench; it does not get deleted.</li>
+    </ol>
+  </div>
+</section>
+
+<div class="kicker">
+  <p>The teacher is not replaced. It is moved off the hot path and kept for calibration.</p>
+</div>
+
+</div>

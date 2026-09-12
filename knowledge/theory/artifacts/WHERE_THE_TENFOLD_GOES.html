@@ -1,0 +1,583 @@
+<title>Where the Tenfold Goes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;700&display=swap">
+<style>
+  :root{
+    --ground:#F7F5F0;
+    --surface:#FFFFFF;
+    --surface-sunk:#EEEBE3;
+    --ink:#1B1F27;
+    --ink-soft:#585349;
+    --ink-faint:#8A857C;
+    --rule:#DBD6CB;
+    --rule-strong:#C2BCAE;
+    --perseq:#B26A12;
+    --perseq-wash:#F6E8D4;
+    --shared:#2F7C96;
+    --shared-wash:#DDEDF2;
+    --shadow:0 1px 2px rgba(27,31,39,.06), 0 8px 24px -12px rgba(27,31,39,.18);
+
+    --display:"Fraunces",Georgia,"Times New Roman",serif;
+    --body:"Source Sans 3",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+
+    --measure:66ch;
+    --pad:clamp(1.15rem,4vw,2.5rem);
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#141821;
+      --surface:#1C212C;
+      --surface-sunk:#11151D;
+      --ink:#EDE9E1;
+      --ink-soft:#B0AAA0;
+      --ink-faint:#7E786E;
+      --rule:#2C3341;
+      --rule-strong:#3D4658;
+      --perseq:#E5A44E;
+      --perseq-wash:#33281A;
+      --shared:#6FB9D2;
+      --shared-wash:#16303A;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#141821;
+    --surface:#1C212C;
+    --surface-sunk:#11151D;
+    --ink:#EDE9E1;
+    --ink-soft:#B0AAA0;
+    --ink-faint:#7E786E;
+    --rule:#2C3341;
+    --rule-strong:#3D4658;
+    --perseq:#E5A44E;
+    --perseq-wash:#33281A;
+    --shared:#6FB9D2;
+    --shared-wash:#16303A;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:var(--body);
+    font-size:17px;
+    line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:0 var(--pad) 6rem}
+
+  /* ---------- masthead ---------- */
+  .mast{
+    padding:clamp(3rem,9vw,6rem) 0 clamp(2rem,5vw,3.5rem);
+    border-bottom:1px solid var(--rule);
+  }
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:.7rem;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    margin:0 0 1.4rem;
+  }
+  h1{
+    font-family:var(--display);
+    font-optical-sizing:auto;
+    font-weight:600;
+    font-size:clamp(2.3rem,6.2vw,4rem);
+    line-height:1.04;
+    letter-spacing:-.022em;
+    margin:0 0 1.2rem;
+    text-wrap:balance;
+    max-width:19ch;
+  }
+  .standfirst{
+    font-size:clamp(1.05rem,2.3vw,1.28rem);
+    line-height:1.55;
+    color:var(--ink-soft);
+    max-width:60ch;
+    margin:0;
+  }
+  .standfirst em{color:var(--ink);font-style:italic}
+
+  /* ---------- generic sections ---------- */
+  section{padding-top:clamp(3rem,7vw,5rem)}
+  h2{
+    font-family:var(--display);
+    font-weight:600;
+    font-size:clamp(1.55rem,3.4vw,2.1rem);
+    line-height:1.15;
+    letter-spacing:-.014em;
+    margin:0 0 .5rem;
+    text-wrap:balance;
+  }
+  h3{
+    font-family:var(--body);
+    font-weight:600;
+    font-size:1.02rem;
+    letter-spacing:.01em;
+    margin:0 0 .45rem;
+  }
+  p{margin:0 0 1.05rem;max-width:var(--measure)}
+  .lede{color:var(--ink-soft);max-width:62ch;margin-bottom:2rem}
+  .stage-no{
+    font-family:var(--mono);
+    font-size:.72rem;
+    font-weight:700;
+    letter-spacing:.14em;
+    color:var(--ink-faint);
+    display:block;
+    margin-bottom:.7rem;
+  }
+  code{
+    font-family:var(--mono);
+    font-size:.86em;
+    background:var(--surface-sunk);
+    border:1px solid var(--rule);
+    border-radius:3px;
+    padding:.08em .34em;
+  }
+  .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+  /* ---------- the misconception / correction pair ---------- */
+  .claimpair{
+    display:grid;
+    gap:1rem;
+    grid-template-columns:1fr;
+    margin:2rem 0;
+  }
+  @media(min-width:780px){.claimpair{grid-template-columns:1fr 1fr}}
+  .claim{
+    border:1px solid var(--rule);
+    border-radius:6px;
+    padding:1.15rem 1.3rem;
+    background:var(--surface);
+    display:flex;
+    flex-direction:column;
+    gap:.5rem;
+  }
+  .claim .clabel{
+    font-family:var(--mono);
+    font-size:.66rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+  }
+  .claim.wrong{border-left:3px solid var(--rule-strong)}
+  .claim.right{border-left:3px solid var(--shared)}
+  .claim.right .clabel{color:var(--shared)}
+  .claim .cbody{font-size:.95rem;color:var(--ink-soft);max-width:none}
+  .claim .cbody strong{color:var(--ink)}
+  .strike{text-decoration:line-through;text-decoration-color:var(--ink-faint);color:var(--ink-faint)}
+
+  /* ---------- phase diagram ---------- */
+  .phases{
+    background:var(--surface);
+    border:1px solid var(--rule);
+    border-radius:6px;
+    padding:clamp(1.1rem,3vw,2rem);
+    margin:2rem 0;
+    box-shadow:var(--shadow);
+  }
+  .phases-head{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.5rem 1rem;
+    align-items:baseline;
+    justify-content:space-between;
+    border-bottom:1px solid var(--rule);
+    padding-bottom:.85rem;
+    margin-bottom:1.4rem;
+  }
+  .phases-head h3{margin:0;font-size:1.06rem}
+  .tag{
+    font-family:var(--mono);
+    font-size:.66rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    border:1px solid var(--rule-strong);
+    border-radius:99px;
+    padding:.2rem .6rem;
+  }
+  .phases svg{width:100%;height:auto;display:block;overflow:visible}
+  .legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.6rem 1.5rem;
+    margin-top:1.3rem;
+    font-family:var(--mono);
+    font-size:.72rem;
+    color:var(--ink-faint);
+  }
+  .legend span{display:flex;align-items:center;gap:.45rem}
+  .swatch{width:11px;height:11px;border-radius:2px;flex:none}
+
+  /* ---------- phase breakdown cards ---------- */
+  .cols{
+    display:grid;
+    gap:1rem;
+    grid-template-columns:1fr;
+    margin:1.8rem 0;
+  }
+  @media(min-width:760px){.cols{grid-template-columns:1fr 1fr}}
+  .card{
+    border:1px solid var(--rule);
+    border-radius:6px;
+    padding:1.15rem 1.25rem;
+    background:var(--surface);
+    display:flex;
+    flex-direction:column;
+    gap:.5rem;
+  }
+  .card.shared{border-top:3px solid var(--shared)}
+  .card.perseq{border-top:3px solid var(--perseq)}
+  .card .nlabel{
+    font-family:var(--mono);
+    font-size:.66rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+  }
+  .card.shared .nlabel{color:var(--shared)}
+  .card.perseq .nlabel{color:var(--perseq)}
+  .card ul{margin:0;padding-left:1.1rem;font-size:.92rem;color:var(--ink-soft)}
+  .card li{margin-bottom:.3rem}
+  .card li::marker{color:var(--ink-faint)}
+  .card .foot{
+    font-family:var(--mono);
+    font-size:.78rem;
+    margin-top:auto;
+    padding-top:.6rem;
+  }
+  .card.shared .foot{color:var(--shared)}
+  .card.perseq .foot{color:var(--perseq)}
+
+  /* ---------- ratio table ---------- */
+  table{
+    border-collapse:collapse;
+    width:100%;
+    min-width:640px;
+    font-size:.94rem;
+  }
+  th,td{
+    text-align:left;
+    padding:.82rem 1rem;
+    border-bottom:1px solid var(--rule);
+    vertical-align:top;
+  }
+  thead th{
+    font-family:var(--mono);
+    font-size:.68rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--ink-faint);
+    font-weight:400;
+    border-bottom:1px solid var(--rule-strong);
+  }
+  tbody th{
+    font-family:var(--body);
+    font-weight:600;
+  }
+  td.num{
+    font-family:var(--mono);
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+  }
+  td.mult{font-weight:700;color:var(--perseq)}
+  td.cap{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--shared)}
+
+  /* ---------- memory callout ---------- */
+  .memo{
+    border:1px solid var(--rule-strong);
+    border-left:3px solid var(--perseq);
+    border-radius:0 6px 6px 0;
+    background:var(--surface);
+    padding:1.2rem 1.4rem;
+    margin:2rem 0;
+  }
+  .memo h3{margin-bottom:.7rem}
+  .memo p{font-size:.94rem;color:var(--ink-soft);max-width:62ch}
+  .memo p:last-child{margin-bottom:0}
+  .memo strong{color:var(--ink)}
+
+  /* ---------- caveat block ---------- */
+  .caveats{
+    border:1px solid var(--rule-strong);
+    border-left:3px solid var(--shared);
+    border-radius:0 6px 6px 0;
+    background:var(--surface);
+    padding:1.2rem 1.4rem;
+    margin:2rem 0;
+  }
+  .caveats h3{margin-bottom:.7rem}
+  .caveats ol{margin:0;padding-left:1.2rem;font-size:.94rem;color:var(--ink-soft)}
+  .caveats li{margin-bottom:.55rem}
+  .caveats strong{color:var(--ink)}
+
+  .src{
+    font-family:var(--mono);
+    font-size:.72rem;
+    color:var(--ink-faint);
+    letter-spacing:.02em;
+    margin-top:.5rem;
+  }
+
+  /* ---------- closing ---------- */
+  .kicker{
+    border-top:1px solid var(--rule);
+    margin-top:clamp(3rem,7vw,5rem);
+    padding-top:2rem;
+  }
+  .kicker p{
+    font-family:var(--display);
+    font-size:clamp(1.15rem,2.7vw,1.5rem);
+    line-height:1.4;
+    max-width:36ch;
+    text-wrap:balance;
+  }
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <p class="eyebrow">taste · detector notes</p>
+  <h1>Where the Tenfold Goes</h1>
+  <p class="standfirst">Semantic Entropy asks the model ten times, and the instinct is to brace for ten times the wait. That instinct is wrong, and understanding <em>why</em> tells you exactly what the tenfold does cost — and on which axis you'll actually feel it.</p>
+</header>
+
+<section>
+  <h2>The bill lands on the wrong axis</h2>
+  <p class="lede">Start with the correction, because everything after it is the mechanism that makes it true.</p>
+
+  <div class="claimpair">
+    <div class="claim wrong">
+      <span class="clabel">the instinct</span>
+      <p class="cbody"><span class="strike">Ten generations means ten times the latency.</span> One user waits ten times as long as they would for a plain answer.</p>
+    </div>
+    <div class="claim right">
+      <span class="clabel">what actually happens</span>
+      <p class="cbody">Ten generations means <strong>ten times the throughput cost</strong>, at close to unchanged latency for the one user. The same box now serves a fraction of the people it used to.</p>
+    </div>
+  </div>
+
+  <p>The ten sequences do not queue up behind each other. They are issued as a single request with <code>n=10</code>, and the server runs them <em>together</em> — one batch, advancing all ten a token at a time in lockstep. A GPU is enormously parallel and mostly idle during single-sequence generation; ten sequences fill capacity that was already sitting there.</p>
+  <p>So the user's wall-clock wait barely moves. What moves is how much of the machine that one request consumed — and therefore how many other users fit alongside it.</p>
+</section>
+
+<section>
+  <span class="stage-no">The mechanism — two phases, priced differently</span>
+  <h2>Prefill is shared. Decode is not.</h2>
+  <p class="lede">Generation is not one uniform activity. It splits into two phases with completely different cost structures, and the entire tenfold question turns on which phase your workload lives in.</p>
+
+  <div class="phases">
+    <div class="phases-head">
+      <h3>One request, <code>n=10</code>, from prompt to ten answers</h3>
+      <span class="tag">width ∝ compute</span>
+    </div>
+
+    <svg viewBox="0 0 760 340" role="img" aria-labelledby="ph-t ph-d">
+      <title id="ph-t">Prefill processed once, feeding ten parallel decode lanes</title>
+      <desc id="ph-d">A single wide block on the left represents the prompt being processed once. Its output, the shared KV cache, feeds ten thin horizontal lanes on the right, each generating its own answer tokens independently.</desc>
+
+      <!-- phase labels -->
+      <g font-family="JetBrains Mono, monospace" font-size="11" letter-spacing="1.4" fill="var(--ink-faint)">
+        <text x="14" y="20">PHASE 1 · PREFILL</text>
+        <text x="330" y="20">PHASE 2 · DECODE</text>
+      </g>
+
+      <!-- prefill block -->
+      <rect x="14" y="36" width="250" height="250" rx="5"
+            fill="var(--shared-wash)" stroke="var(--shared)" stroke-width="1.5"/>
+      <g font-family="Source Sans 3, sans-serif" font-size="13" fill="var(--ink)">
+        <text x="32" y="66" font-weight="600">The prompt, processed once</text>
+      </g>
+      <g font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--ink-soft)">
+        <text x="32" y="90">"In what year was the</text>
+        <text x="32" y="106">Treaty of Bruges signed?"</text>
+      </g>
+      <line x1="32" y1="122" x2="246" y2="122" stroke="var(--shared)" stroke-width="1" opacity=".4"/>
+      <g font-family="Source Sans 3, sans-serif" font-size="12" fill="var(--ink-soft)">
+        <text x="32" y="146">Every prompt token attends over</text>
+        <text x="32" y="163">every other — one dense pass.</text>
+        <text x="32" y="187">It produces the KV cache:</text>
+        <text x="32" y="204">the model's read of the prompt.</text>
+      </g>
+      <rect x="32" y="220" width="214" height="46" rx="4"
+            fill="var(--surface)" stroke="var(--shared)" stroke-width="1" stroke-dasharray="4 3"/>
+      <g font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--shared)">
+        <text x="44" y="240" font-weight="700">KV CACHE</text>
+        <text x="44" y="257">computed 1× · read 10×</text>
+      </g>
+
+      <!-- fan-out arrows -->
+      <g stroke="var(--shared)" stroke-width="1.2" fill="none" opacity=".55">
+        <path d="M264 161 C 292 161, 292 48, 320 48"/>
+        <path d="M264 161 C 292 161, 292 74, 320 74"/>
+        <path d="M264 161 C 292 161, 292 100, 320 100"/>
+        <path d="M264 161 C 292 161, 292 126, 320 126"/>
+        <path d="M264 161 C 292 161, 292 152, 320 152"/>
+        <path d="M264 161 C 292 161, 292 178, 320 178"/>
+        <path d="M264 161 C 292 161, 292 204, 320 204"/>
+        <path d="M264 161 C 292 161, 292 230, 320 230"/>
+        <path d="M264 161 C 292 161, 292 256, 320 256"/>
+        <path d="M264 161 C 292 161, 292 282, 320 282"/>
+      </g>
+
+      <!-- decode lanes -->
+      <g>
+        <rect x="320" y="40" width="380" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="66" width="356" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="92" width="398" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="118" width="364" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="144" width="386" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="170" width="342" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="196" width="374" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="222" width="352" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="248" width="390" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+        <rect x="320" y="274" width="368" height="16" rx="3" fill="var(--perseq-wash)" stroke="var(--perseq)" stroke-width="1"/>
+      </g>
+      <g font-family="JetBrains Mono, monospace" font-size="9" fill="var(--perseq)">
+        <text x="328" y="52">s₁ → "1375"</text>
+        <text x="328" y="78">s₂ → "It was 1375."</text>
+        <text x="328" y="104">s₃ → "Around 1370, I believe."</text>
+        <text x="328" y="130">s₄ → "1375"</text>
+        <text x="328" y="156">s₅ → "The year 1375."</text>
+        <text x="328" y="182">s₆ → "1379"</text>
+        <text x="328" y="208">s₇ → "Sometime in the 1370s."</text>
+        <text x="328" y="234">s₈ → "1375"</text>
+        <text x="328" y="260">s₉ → "I'm not certain — 1381?"</text>
+        <text x="328" y="286">s₁₀ → "1375"</text>
+      </g>
+
+      <!-- footer measures -->
+      <line x1="14" y1="300" x2="264" y2="300" stroke="var(--shared)" stroke-width="2"/>
+      <line x1="320" y1="300" x2="718" y2="300" stroke="var(--perseq)" stroke-width="2"/>
+      <g font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="700">
+        <text x="14" y="322" fill="var(--shared)">paid once — 1×</text>
+        <text x="320" y="322" fill="var(--perseq)">paid per sequence — 10×</text>
+      </g>
+    </svg>
+
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--shared)"></i> shared across all ten sequences</span>
+      <span><i class="swatch" style="background:var(--perseq)"></i> multiplied by ten</span>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="card shared">
+      <span class="nlabel">Phase 1 · prefill</span>
+      <h3>Reading the question</h3>
+      <ul>
+        <li>Every prompt token attends over every other — one dense, highly parallel pass</li>
+        <li>Produces the KV cache: the model's internal read of the prompt</li>
+        <li>All ten sequences continue from that <em>same</em> cache</li>
+        <li>Compute-bound; the GPU is genuinely busy here</li>
+      </ul>
+      <p class="foot">cost with n=10 · unchanged</p>
+    </div>
+    <div class="card perseq">
+      <span class="nlabel">Phase 2 · decode</span>
+      <h3>Writing the answers</h3>
+      <ul>
+        <li>One token at a time, per sequence, each appending to its own cache</li>
+        <li>Ten different continuations means ten separate token streams</li>
+        <li>Nothing is shared — this is where the multiplier is real</li>
+        <li>Memory-bandwidth-bound; batching is what makes it survivable</li>
+      </ul>
+      <p class="foot">cost with n=10 · ×10</p>
+    </div>
+  </div>
+
+  <p>This is what prefix caching buys you, and it is worth being precise about the claim: the saving is not a clever optimisation you enable. It is structural. The ten sequences share a prompt, so they share its cache, so the prompt is read once no matter how many answers you ask for.</p>
+</section>
+
+<section>
+  <span class="stage-no">The consequence — how bad is it really</span>
+  <h2>Your prompt-to-answer ratio sets the multiplier</h2>
+  <p class="lede">Because one phase is shared and the other is not, the true cost of <code>n=10</code> is not a fixed 10×. It slides with the shape of your workload — and the direction of the slide is favourable for exactly the workloads people actually run.</p>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Workload shape</th>
+          <th scope="col">Prompt</th>
+          <th scope="col">Answer</th>
+          <th scope="col">Cost at n=10</th>
+          <th scope="col">Concurrent users</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">RAG with retrieved context</th>
+          <td class="num">2000 tok</td>
+          <td class="num">40 tok</td>
+          <td class="num mult">≈ 2.6×</td>
+          <td class="num cap">≈ 38% of before</td>
+        </tr>
+        <tr>
+          <th scope="row">Long system prompt, short reply</th>
+          <td class="num">800 tok</td>
+          <td class="num">50 tok</td>
+          <td class="num mult">≈ 4.4×</td>
+          <td class="num cap">≈ 23% of before</td>
+        </tr>
+        <tr>
+          <th scope="row">Bare factual question</th>
+          <td class="num">20 tok</td>
+          <td class="num">15 tok</td>
+          <td class="num mult">≈ 8.7×</td>
+          <td class="num cap">≈ 11% of before</td>
+        </tr>
+        <tr>
+          <th scope="row">Open-ended generation</th>
+          <td class="num">50 tok</td>
+          <td class="num">600 tok</td>
+          <td class="num mult">≈ 9.9×</td>
+          <td class="num cap">≈ 10% of before</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="src">Illustrative arithmetic on total token-work, prefill shared and decode multiplied. Real numbers depend on model, hardware and server; measure your own.</p>
+
+  <p>The pattern is clean: <strong>the longer your prompt relative to your answer, the cheaper SE gets.</strong> A long shared prefix is a large fixed cost you now amortise over ten outputs instead of one.</p>
+  <p>Which lands awkwardly for the benchmark this method is usually evaluated on. TriviaQA is short question, short answer — the worst corner of the table. The literature's headline cost is close to the honest worst case, and a production RAG pipeline typically fares better than the paper implies.</p>
+</section>
+
+<section>
+  <span class="stage-no">The constraint that bites first</span>
+  <h2>You may run out of memory before you run out of compute</h2>
+
+  <div class="memo">
+    <h3>Ten caches, not one</h3>
+    <p>Each of the ten sequences accumulates its own KV cache as it decodes. The prompt's portion is shared, but every generated token adds per-sequence state — so VRAM use grows with the batch, and it grows during generation, not just at the start.</p>
+    <p>On a memory-constrained card this is the ceiling you hit first. The server will simply admit fewer concurrent requests, or preempt and requeue some, long before the arithmetic above becomes the binding constraint. <strong>On an L4 this is a real limit, not a footnote.</strong></p>
+    <p>The practical symptom is not an error. It is throughput quietly falling short of what the compute numbers predicted, because the scheduler is holding requests back to fit the caches it already has in flight.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What this means for the choice</h2>
+  <p>The tenfold is real, but it is a <em>capacity</em> cost, not a <em>waiting</em> cost. That distinction decides where SE can live.</p>
+
+  <div class="caveats">
+    <h3>Reading the tradeoff correctly</h3>
+    <ol>
+      <li><strong>Latency is not the objection.</strong> If someone rejects SE because "users would wait ten times longer," they have the wrong model of how batched inference works. Say so plainly — the wait is roughly unchanged.</li>
+      <li><strong>Capacity is the objection.</strong> The same hardware serves a fraction of the users. That is a real, budget-visible cost, and it is why SE belongs off the request path for most teams.</li>
+      <li><strong>Your ratio matters more than the number ten.</strong> Long-prompt workloads pay a fraction of the headline multiplier. Measure your own prompt-to-answer ratio before accepting 10× as your number.</li>
+      <li><strong>The NLI pass is a separate bill.</strong> Everything above concerns generation only. Clustering ten answers adds tens of small forward passes through a second model that must also be resident in VRAM.</li>
+      <li><strong>None of this is what the probe fixes.</strong> SEP removes the ten generations entirely — one forward pass, one dot product. The arithmetic here is the size of the problem it exists to delete.</li>
+    </ol>
+  </div>
+</section>
+
+<div class="kicker">
+  <p>The wait stays. The capacity is what you spend.</p>
+</div>
+
+</div>
