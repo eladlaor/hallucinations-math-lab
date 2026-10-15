@@ -36,6 +36,11 @@ demo = [
 judge = [
     "google-genai>=1.0",
 ]
+# Uploading and deploying the serving image to Vertex AI (serving/vertex_deploy.py,
+# run by Terraform). 2.5+ is the verified version with invoke-route support.
+deploy = [
+    "google-cloud-aiplatform>=2.5",
+]
 # Eval / benchmarking harness (eval/*.py, not shipped in the wheel).
 eval = [
     "datasets>=2.20",
@@ -43,7 +48,7 @@ eval = [
     "scipy>=1.13",
 ]
 all = [
-    "hallucinations-math-lab[demo,judge,eval]",
+    "hallucinations-math-lab[demo,judge,eval,deploy]",
 ]
 dev = [
     "pytest>=8.2",

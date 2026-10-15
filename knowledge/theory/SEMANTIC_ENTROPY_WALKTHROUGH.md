@@ -92,9 +92,10 @@ H = - Σ_i  p_i · log(p_i)
 ```python
 import numpy as np
 
+
 def entropy(probs: list[float]) -> float:
     p = np.array(probs, dtype=np.float64)
-    return float(-np.sum(p * np.log(p + 1e-12)))   # +1e-12 guards log(0)
+    return float(-np.sum(p * np.log(p + 1e-12)))  # +1e-12 guards log(0)
 ```
 
 ### Plain English
@@ -107,10 +108,10 @@ lot of surprise — weighted by how often it actually happens.
 Two anchors worth memorizing:
 
 ```python
-entropy([1.0])                      # 0.0     — certainty, no surprise
-entropy([0.5, 0.5])                 # 0.693   — = log(2), a coin flip
-entropy([0.1]*10)                   # 2.303   — = log(10), maximum for 10 outcomes
-entropy([0.9, 0.05, 0.05])          # 0.394   — one dominant outcome, low uncertainty
+entropy([1.0])  # 0.0     — certainty, no surprise
+entropy([0.5, 0.5])  # 0.693   — = log(2), a coin flip
+entropy([0.1] * 10)  # 2.303   — = log(10), maximum for 10 outcomes
+entropy([0.9, 0.05, 0.05])  # 0.394   — one dominant outcome, low uncertainty
 ```
 
 The maximum for `K` equally-likely outcomes is `log(K)`. That gives you the ceiling
@@ -151,11 +152,11 @@ def length_normalized_predictive_entropy(sample_set: SampleSet) -> float:
         if not s.token_logprobs:
             logger.warning("Sample missing token logprobs; skipping.", ...)
             continue
-        mean_lp = s.mean_token_logprob          # (1/T) * Σ_t log p(token_t)
-        per_sample_nll.append(-mean_lp)         # negate → NLL
+        mean_lp = s.mean_token_logprob  # (1/T) * Σ_t log p(token_t)
+        per_sample_nll.append(-mean_lp)  # negate → NLL
     if not per_sample_nll:
         raise ValueError("No samples had token logprobs; cannot compute predictive entropy.")
-    return float(np.mean(per_sample_nll))       # (1/N) * Σ_n
+    return float(np.mean(per_sample_nll))  # (1/N) * Σ_n
 ```
 
 `mean_token_logprob` lives on the `Sample` model in
@@ -209,6 +210,7 @@ class Sample(BaseModel):
     text: str
     token_logprobs: list[TokenLogprob] = Field(default_factory=list)
 
+
 class SampleSet(BaseModel):
     prompt: str
     samples: list[Sample]
@@ -260,12 +262,10 @@ def classify(self, premise: str, hypothesis: str) -> NLILabel:
     idx = int(torch.argmax(logits, dim=-1).item())
     return DEBERTA_MNLI_LABEL_ORDER[idx]
 
+
 def bidirectional_entails(self, a: str, b: str) -> bool:
     """True iff a entails b AND b entails a (the SE paper's clustering criterion)."""
-    return (
-        self.classify(a, b) == NLILabel.ENTAILMENT
-        and self.classify(b, a) == NLILabel.ENTAILMENT
-    )
+    return self.classify(a, b) == NLILabel.ENTAILMENT and self.classify(b, a) == NLILabel.ENTAILMENT
 ```
 
 The model is DeBERTa-MNLI, configured via `settings.nli_model_id`, loaded lazily on
@@ -405,7 +405,9 @@ Bounds: `0 ≤ H_SE ≤ log(N)`.
 ### Python (`src/hallucinations_math_lab/services/semantic_entropy.py`)
 
 ```python
-def compute_semantic_entropy(sample_set: SampleSet, scorer: NLIScorer | None = None) -> SemanticEntropyResult:
+def compute_semantic_entropy(
+    sample_set: SampleSet, scorer: NLIScorer | None = None
+) -> SemanticEntropyResult:
     if not sample_set.samples:
         raise ValueError(
             f"Cannot compute SE: empty sample set for prompt={sample_set.prompt[:80]!r}"
@@ -647,12 +649,14 @@ To compute the reference table above by hand:
 ```python
 import numpy as np
 
+
 def se_from_cluster_sizes(sizes: list[int]) -> float:
     n = sum(sizes)
     p = np.array(sizes, dtype=np.float64) / n
     return float(-np.sum(p * np.log(p + 1e-12)))
 
-for sizes in ([10], [9,1], [8,2], [7,2,1], [5,5], [4,3,2,1], [1]*10):
+
+for sizes in ([10], [9, 1], [8, 2], [7, 2, 1], [5, 5], [4, 3, 2, 1], [1] * 10):
     print(f"{str(sizes):<18} K={len(sizes):<3} SE={se_from_cluster_sizes(sizes):.3f}")
 ```
 
@@ -662,18 +666,20 @@ To exercise the real pipeline with a stub NLI scorer:
 from hallucinations_math_lab.services.semantic_entropy import compute_semantic_entropy
 from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet
 
+
 class FakeNLI:
     """Equivalent iff the strings share a lowercase token — stands in for DeBERTa."""
+
     def bidirectional_entails(self, a: str, b: str) -> bool:
         return bool(set(a.lower().split()) & set(b.lower().split()))
 
+
 samples = SampleSet(
     prompt="What is the capital of France?",
-    samples=[Sample(text=t) for t in
-             ["Paris", "in Paris", "Paris France", "Lyon"]],
+    samples=[Sample(text=t) for t in ["Paris", "in Paris", "Paris France", "Lyon"]],
 )
 result = compute_semantic_entropy(samples, scorer=FakeNLI())
-print(result.semantic_entropy)          # 0.562
+print(result.semantic_entropy)  # 0.562
 print([(c.representative_text, c.size) for c in result.clusters])
 # [('Paris', 3), ('Lyon', 1)]
 

@@ -3,22 +3,18 @@ terraform {
 
   required_providers {
     google = {
-      source  = "hashicorp/google"
-      version = "~> 5.40"
+      source = "hashicorp/google"
+      # dedicated_endpoint_enabled on google_vertex_ai_endpoint needs >= 6.11.
+      version = "~> 8.0"
     }
-    google-beta = {
-      source  = "hashicorp/google-beta"
-      version = "~> 5.40"
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.2"
     }
   }
 }
 
 provider "google" {
-  project = var.project_id
-  region  = var.region
-}
-
-provider "google-beta" {
   project = var.project_id
   region  = var.region
 }

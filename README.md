@@ -169,8 +169,13 @@ Collect N samples with per-token logprobs from any LLM, wrap them, and call
 
 ```python
 from hallucinations_math_lab import (
-    DetectorName, PredictiveEntropyDetector, Sample, SampleSet,
-    SemanticEntropyDetector, TokenLogprob, evaluate_responses,
+    DetectorName,
+    PredictiveEntropyDetector,
+    Sample,
+    SampleSet,
+    SemanticEntropyDetector,
+    TokenLogprob,
+    evaluate_responses,
 )
 
 samples = SampleSet(
@@ -188,13 +193,13 @@ result = evaluate_responses(
     escalation_detector=DetectorName.SEMANTIC_ENTROPY,
     escalation_threshold=1.0,
     greedy_answer="George Orwell.",  # your model's temperature-0 answer
-    judge=None,                      # or any object with .answer(prompt) -> (str, str)
+    judge=None,  # or any object with .answer(prompt) -> (str, str)
 )
 
 result.detector_scores  # {predictive_entropy: ..., semantic_entropy: ...}
-result.clusters         # the meaning clusters SE found
-result.escalated        # did the rule fire?
-result.final_answer     # greedy answer, or the judge's if it escalated
+result.clusters  # the meaning clusters SE found
+result.escalated  # did the rule fire?
+result.final_answer  # greedy answer, or the judge's if it escalated
 ```
 
 [`examples/langrag_integration.py`](examples/langrag_integration.py) shows the
@@ -213,10 +218,12 @@ from hallucinations_math_lab import AnyAbove, DetectorName
 
 result = evaluate_responses(
     ...,
-    escalation_policy=AnyAbove({
-        DetectorName.SEMANTIC_ENTROPY: 1.0,
-        DetectorName.PREDICTIVE_ENTROPY: 2.0,
-    }),
+    escalation_policy=AnyAbove(
+        {
+            DetectorName.SEMANTIC_ENTROPY: 1.0,
+            DetectorName.PREDICTIVE_ENTROPY: 2.0,
+        }
+    ),
 )
 result.escalation_policy_desc  # "ANY(semantic_entropy > 1.0, predictive_entropy > 2.0)"
 ```

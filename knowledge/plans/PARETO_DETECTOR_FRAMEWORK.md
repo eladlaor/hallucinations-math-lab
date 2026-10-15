@@ -63,14 +63,14 @@ Out: see [Out of scope](#out-of-scope).
 
 ```python
 class DetectorCategory(StrEnum):
-    UNCERTAINTY = "uncertainty"        # PE, SE, SEP
+    UNCERTAINTY = "uncertainty"  # PE, SE, SEP
     EXTERNAL_JUDGMENT = "external_judgment"  # LlamaJudge*
 
 
 @dataclass(frozen=True)
 class DetectorMetadata:
-    signal: str           # what is measured, in one sentence
-    assumption: str       # the correlational link to hallucination
+    signal: str  # what is measured, in one sentence
+    assumption: str  # the correlational link to hallucination
     failure_modes: list[str]
     category: DetectorCategory
 ```
