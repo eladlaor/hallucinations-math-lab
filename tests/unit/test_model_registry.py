@@ -24,7 +24,6 @@ from demo.model_registry import (
     list_model_ids,
 )
 
-
 _GEMMA4_IDS = [
     "google/gemma-4-E2B-it",
     "google/gemma-4-E4B-it",

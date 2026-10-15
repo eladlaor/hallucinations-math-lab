@@ -10,9 +10,8 @@ Pin the probe's contract end-to-end:
   - A missing probe file raises at construction time, not request time.
 """
 
-import torch
-
 import pytest
+import torch
 
 from hallucinations_math_lab.constants import DetectorName
 from hallucinations_math_lab.services.detector_protocol import (
@@ -20,8 +19,8 @@ from hallucinations_math_lab.services.detector_protocol import (
     DetectorPrerequisiteError,
 )
 from hallucinations_math_lab.services.semantic_entropy_probe import (
-    SEPProbe,
     SemanticEntropyProbeDetector,
+    SEPProbe,
 )
 
 

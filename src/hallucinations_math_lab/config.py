@@ -7,7 +7,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from hallucinations_math_lab.constants import DetectorName, VLLMAuthMode
 
-
 _DEFAULT_TARGET_MODEL_IDS: list[str] = [
     "google/gemma-4-E2B-it",
     "google/gemma-4-E4B-it",

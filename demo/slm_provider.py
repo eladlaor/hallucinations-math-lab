@@ -33,12 +33,11 @@ from openai import OpenAI
 from openai.types import CreateEmbeddingResponse
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from demo.google_auth import GoogleAccessToken
+from demo.model_registry import ProviderKind, list_model_ids
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY, VLLMAuthMode
 from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
-
-from demo.google_auth import GoogleAccessToken
-from demo.model_registry import ProviderKind, list_model_ids
 
 if TYPE_CHECKING:
     from transformers import (
@@ -48,7 +47,6 @@ if TYPE_CHECKING:
         PreTrainedModel,
         PreTrainedTokenizerBase,
     )
-
     from transformers.generation.utils import GenerateDecoderOnlyOutput
 
     class CausalLM(PreTrainedModel, GenerationMixin):

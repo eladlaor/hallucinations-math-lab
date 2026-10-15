@@ -98,9 +98,14 @@ class GeminiJudge:
             ) from e
 
         verdict = resp.parsed
-        if not isinstance(verdict, JudgeVerdict):
+        if verdict is None:
             raise RuntimeError(
                 f"Gemini judge returned no valid JudgeVerdict for model={self._model_id!r} "
                 f"prompt={prompt[:80]!r}; raw text={(resp.text or '')[:200]!r}"
+            )
+        if not isinstance(verdict, JudgeVerdict):
+            raise TypeError(
+                f"Gemini judge parsed {type(verdict).__name__}, expected JudgeVerdict "
+                f"(model={self._model_id!r})."
             )
         return verdict.answer.strip(), verdict.reasoning.strip()

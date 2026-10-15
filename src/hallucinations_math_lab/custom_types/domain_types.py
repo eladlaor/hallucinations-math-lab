@@ -1,6 +1,6 @@
 """Domain types: SampleSet, Cluster, DetectionResult."""
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from hallucinations_math_lab.constants import AnswerSource, DetectorName
 

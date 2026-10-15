@@ -40,7 +40,6 @@ from hallucinations_math_lab.services.detector_protocol import (
     DetectorScore,
 )
 
-
 _TEST_METADATA = DetectorMetadata(
     signal="test double",
     assumption="for test isolation only",

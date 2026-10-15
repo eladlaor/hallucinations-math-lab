@@ -22,6 +22,8 @@ tests/unit/test_semantic_entropy.py.
 import time
 from collections import Counter
 
+from score_precollected_samples import SCENARIOS, ExactMatchNLI, _normalize
+
 from hallucinations_math_lab import (
     DetectionContext,
     DetectorName,
@@ -34,8 +36,6 @@ from hallucinations_math_lab import (
 )
 from hallucinations_math_lab.constants import DetectorCategory
 from hallucinations_math_lab.services.detector_protocol import DetectorMetadata
-
-from score_precollected_samples import SCENARIOS, ExactMatchNLI, _normalize
 
 # Reuses an existing id so the example needs no edit to the library. A real
 # detector gets its own DetectorName member (see module docstring).

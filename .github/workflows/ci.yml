@@ -12,13 +12,15 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    # Pinned to the version in uv.lock: ruff's default rules change between
+    # releases, and an unpinned linter would fail CI on its own.
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - name: Ruff lint
-        run: uvx ruff check .
+        run: uvx ruff@0.17.0 check .
       - name: Ruff format
-        run: uvx ruff format --check .
+        run: uvx ruff@0.17.0 format --check .
 
   terraform:
     runs-on: ubuntu-latest

@@ -36,7 +36,7 @@ import time
 from pathlib import Path
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
 from hallucinations_math_lab.services.detector_protocol import (

@@ -23,7 +23,7 @@ for _entry in (_REPO_ROOT, _REPO_ROOT / "src"):
     if _entry.is_dir() and str(_entry) not in sys.path:
         sys.path.insert(0, str(_entry))
 
-from demo.model_registry import ServingRunner, get_model_entry  # noqa: E402
+from demo.model_registry import ServingRunner, get_model_entry
 
 logger = logging.getLogger(__name__)
 

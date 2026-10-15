@@ -7,7 +7,7 @@ Contract pinned here:
   - The real OpenAI client calls the provider on chat and embedding requests.
 """
 
-import httpx
+import httpx2 as httpx
 import pytest
 from openai import OpenAI
 from openai.types import CreateEmbeddingResponse
@@ -48,7 +48,8 @@ def test_refresh_without_token_fails_fast():
 
 def test_openai_client_sends_a_refreshed_token_on_chat_and_embedding_requests():
     """Contract with the real OpenAI SDK (no mocks of it): the token provider
-    is consulted per request, including the hand-built /embeddings call."""
+    is consulted per request, including the hand-built /embeddings call.
+    (openai 3 ships its HTTP layer as `httpx2`, hence the import alias.)"""
     seen_auth: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

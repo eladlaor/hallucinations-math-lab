@@ -53,7 +53,7 @@ all = [
 dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
-    "ruff>=0.5",
+    "ruff>=0.17",
     "mypy>=1.10",
 ]
 
@@ -80,6 +80,11 @@ ignore_missing_imports = true
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+# The public API list is grouped by role (entry points, protocols, detectors,
+# ...) with comments; alphabetical sorting would scatter the groups.
+"src/hallucinations_math_lab/__init__.py" = ["RUF022"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

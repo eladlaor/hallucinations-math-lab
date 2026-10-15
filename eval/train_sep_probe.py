@@ -45,11 +45,11 @@ import numpy as np
 import torch
 from sklearn.linear_model import Ridge
 
+from demo.slm_provider import build_default_provider
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY, RANDOM_SEED
 from hallucinations_math_lab.services.semantic_entropy import compute_semantic_entropy
 from hallucinations_math_lab.services.semantic_entropy_probe import SEPProbe
-from demo.slm_provider import build_default_provider
 
 logger = logging.getLogger("train_sep_probe")
 
@@ -65,7 +65,7 @@ def holdout_pearson_r(
     the probe's predictions and true SE on the held-out rows."""
     if not 0.0 < holdout_fraction < 1.0:
         raise ValueError(f"holdout_fraction must be in (0, 1), got {holdout_fraction}.")
-    n_holdout = int(round(len(y) * holdout_fraction))
+    n_holdout = round(len(y) * holdout_fraction)
     n_train = len(y) - n_holdout
     if n_holdout < MIN_HOLDOUT_ROWS or n_train < MIN_HOLDOUT_ROWS:
         raise ValueError(

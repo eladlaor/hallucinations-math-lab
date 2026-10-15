@@ -28,8 +28,8 @@ from hallucinations_math_lab.custom_types.domain_types import DetectionResult, S
 from hallucinations_math_lab.escalation import EscalationPolicy, SingleDetector
 from hallucinations_math_lab.judges.protocol import Judge
 from hallucinations_math_lab.services.detector_protocol import (
-    Detector,
     DetectionContext,
+    Detector,
 )
 from hallucinations_math_lab.services.sampling_provider import SamplingProvider
 
