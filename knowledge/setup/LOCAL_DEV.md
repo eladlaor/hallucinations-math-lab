@@ -47,6 +47,7 @@ docker run --gpus all -p 8080:8080 -e MODEL_ID=google/gemma-4-E4B-it vllm-gemma
 ```
 
 Then point your local `.env` at it: `SLM_PROVIDER=vllm`,
-`VLLM_BASE_URL=http://<host>:8080/v1`, `VLLM_MODEL_ID=google/gemma-4-E4B-it`.
-Check the [DevOps Guide](../usage_guides/DEVOPS_GUIDE.md#known-gaps-before-you-deploy)
-first — the image's vLLM pin needs raising for Gemma 4.
+`VLLM_AUTH=api_key`, `VLLM_BASE_URL=http://<host>:8080/v1`,
+`VLLM_MODEL_ID=google/gemma-4-E4B-it`. For SEP's hidden states, run a second
+container with `-e VLLM_RUNNER=embed` and set `VLLM_EMBED_BASE_URL` — see
+[Running vLLM on your own GPU box](../usage_guides/DEVOPS_GUIDE.md#running-vllm-on-your-own-gpu-box-instead).

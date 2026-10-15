@@ -26,7 +26,8 @@ uv run mypy                  # type check (paths configured in pyproject.toml)
 Every test runs on CPU without a model download, network or cloud account:
 the language model, the NLI model and the judge are replaced by small
 in-memory doubles. One smoke test needs a CUDA GPU and skips itself
-otherwise. CI runs the same commands; tests run on Python 3.12 and 3.13.
+otherwise. CI runs the same commands plus `terraform fmt` and `validate`;
+tests run on Python 3.12 and 3.13.
 
 Unit tests prove the code computes what it claims. Whether the detectors
 *work* — whether high uncertainty actually means hallucination — is a
@@ -93,8 +94,10 @@ New features follow test-first: write the failing test that defines
 | `test_semantic_entropy_probe.py` | SEP probe loading and forward pass, missing-file, missing-hidden-state and hidden-size-mismatch errors |
 | `test_escalation.py` | `SingleDetector`, `AnyAbove`, `AllAbove` decisions and validation |
 | `test_evaluator.py` | `evaluate_responses` / `ResponseEvaluator` dispatch, prerequisites, judge escalation |
-| `test_model_registry.py` | registry entries, single local/deployed default, vLLM flag rendering |
-| `test_slm_provider.py` | vLLM provider against a mocked OpenAI client, provider selection, sweep validation |
+| `test_model_registry.py` | registry entries, single local/deployed default, vLLM flags per runner (raw logprobs for generate, unnormalized last-token pooling for embed), tensor parallelism per GPU count, L4 context cap |
+| `test_slm_provider.py` | vLLM provider against a mocked OpenAI client (sampling, chat-shaped embedding request, `VLLM_AUTH` modes), HF logprob extraction (raw distribution, first EOS kept, padding dropped), provider selection, sweep validation |
+| `test_google_auth.py` | `GoogleAccessToken` reuse and refresh with fake credentials, plus a contract test against the **real** OpenAI client (fake HTTP transport) proving the token is refreshed on chat and embedding requests |
+| `test_serving_launch.py` | the container's `vllm serve` argv: default runner, Vertex port, fail-fast on missing model, unknown runner or unregistered model |
 | `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end |
 | `test_eval_criteria.py` | success-criteria scripts: AUROC gap, escalation uplift, Mann-Whitney separation, held-out SEP Pearson r, and their fail-fast cases |
 | `test_gemini_judge.py` | `GeminiJudge` request shape and verdict parsing against a fake `google-genai` client |
@@ -150,8 +153,9 @@ Today this is one smoke test that loads the local default model through
 
 | Job | Does |
 |---|---|
-| `lint` | `ruff check .` and `ruff format --check .` |
-| `typecheck` | `uv sync --locked --all-extras`, then `mypy` |
+| `lint` | `ruff check .` and `ruff format --check .`, ruff pinned to 0.17.0 |
+| `terraform` | `terraform fmt -check -recursive`, `init -backend=false`, `validate` (Terraform 1.16.6, no credentials) |
+| `typecheck` | `uv sync --locked --all-extras`, then `mypy` (`check_untyped_defs` on) |
 | `test` (3.12, 3.13) | `uv sync --locked --all-extras`, then `pytest -q` |
 
 A red `test` job that fails during install usually means `uv.lock` is stale
@@ -160,16 +164,23 @@ A red `test` job that fails during install usually means `uv.lock` is stale
 ## Manual checks before a release
 
 1. `uv run pytest -q`, `uv run ruff check .`, `uv run ruff format --check .`
-   and `uv run mypy` pass.
-2. `uv build` succeeds and the wheel contains only `hallucinations_math_lab/`
+   and `uv run mypy` pass, and `terraform validate` passes in `terraform/`.
+2. No known vulnerabilities in the locked dependencies:
+   ```bash
+   uv export --all-extras --no-hashes --no-emit-project --format requirements-txt -o reqs.txt \
+     && uvx pip-audit -r reqs.txt --no-deps --disable-pip
+   ```
+   Fix findings with `uv lock --upgrade-package <name>` (or `uv lock --upgrade`)
+   and rerun the suite.
+3. `uv build` succeeds and the wheel contains only `hallucinations_math_lab/`
    plus `LICENSE`.
-3. Both playground scripts run and print the tables shown in the README:
+4. Both playground scripts run and print the tables shown in the README:
    `examples/score_precollected_samples.py` (with and without
    `--nli deberta`) and `examples/custom_detector.py`.
-4. With a model available: `python -m demo.cli detect "Who wrote 1984?"`
+5. With a model available: `python -m demo.cli detect "Who wrote 1984?"`
    returns SE near 0, and a 10-question `python -m eval.run_benchmark --limit 10 --no-judge`
    followed by `python -m eval.compute_auroc` completes.
-5. Every command in the README and the usage guides still matches the code.
+6. Every command in the README and the usage guides still matches the code.
 
 ## Bug triage and reporting
 
@@ -190,6 +201,6 @@ Triage order:
 2. **Crashes on valid configuration** — reproduce with `.env.example`
    defaults, then add a failing test.
 3. **Model / infrastructure issues** (downloads, vLLM, Vertex) — check the
-   [DevOps Guide](DEVOPS_GUIDE.md) known gaps first.
+   [DevOps Guide caveats](DEVOPS_GUIDE.md#caveats-before-you-deploy) first.
 4. **Docs drift** — fix the doc in the same pull request as the code it
    describes.

@@ -17,11 +17,11 @@
 
 ```bash
 uv sync --all-extras && cp .env.example .env
-uv run pytest -q && uv run ruff check .
+uv run pytest -q && uv run ruff check . && uv run ruff format --check . && uv run mypy
 uv run python examples/score_precollected_samples.py
 ```
 
-If all three pass you have a working setup — no GPU, model or cloud account
+If these pass you have a working setup — no GPU, model or cloud account
 needed. The library lives in `src/hallucinations_math_lab/` and must never
 import `demo/`. New detectors implement the `Detector` protocol and are
 picked up by the benchmark and AUROC scripts automatically.
@@ -30,8 +30,16 @@ picked up by the benchmark and AUROC scripts automatically.
 
 1. Install [uv](https://docs.astral.sh/uv/) and clone the repo.
 2. `uv sync --all-extras` — creates `.venv` with every optional dependency
-   group (`demo`, `judge`, `eval`, `dev`). The test suite imports the demo
-   provider, so the `dev` extra alone is not enough.
+   group. The test suite imports the demo provider, the judge and the deploy
+   script, so the `dev` extra alone is not enough:
+
+   | Extra | For |
+   |---|---|
+   | `demo` | the vLLM / OpenAI client, Google access tokens, the demo CLI |
+   | `judge` | `GeminiJudge` (`google-genai`) |
+   | `eval` | the benchmark and scoring scripts (`datasets`, `scikit-learn`, `scipy`) |
+   | `deploy` | `serving/vertex_deploy.py` (`google-cloud-aiplatform`), run by Terraform |
+   | `dev` | `pytest`, `ruff`, `mypy` |
 3. `cp .env.example .env` — every setting is documented inline. List-valued
    settings are JSON (`ENABLED_DETECTORS=["predictive_entropy"]`).
 4. `uv run pytest -q` — about a minute on a laptop CPU.
@@ -46,25 +54,41 @@ src/hallucinations_math_lab/
   __init__.py              # public surface — everything a consumer imports
   evaluator.py             # evaluate_responses (pure scoring) + ResponseEvaluator (drives a provider)
   escalation.py            # EscalationPolicy protocol; SingleDetector, AnyAbove, AllAbove
-  constants.py             # DetectorName, DetectorCategory, AnswerSource, NLILabel
+  constants.py             # DetectorName, DetectorCategory, AnswerSource, NLILabel, VLLMAuthMode
   config.py                # Pydantic Settings, read from env / .env
-  custom_types/            # Sample, SampleSet, TokenLogprob, Cluster, DetectionResult
+  custom_types/
+    domain_types.py        # Sample, SampleSet, TokenLogprob, Cluster, DetectionResult
+    llm_schemas.py         # JudgeVerdict (the judge's structured output)
   services/
     detector_protocol.py   # Detector, DetectionContext, DetectorScore, DetectorMetadata
     predictive_entropy.py  # PE
     semantic_entropy.py    # SE + bidirectional-entailment clustering
     semantic_entropy_probe.py  # SEP + the SEPProbe linear module
-    nli.py                 # DeBERTa-MNLI wrapper (lazy-loaded)
+    nli.py                 # EntailmentScorer protocol + DeBERTa-MNLI NLIScorer (lazy-loaded)
     sampling_provider.py   # SamplingProvider protocol
-  judges/                  # Judge protocol + GeminiJudge
+  judges/                  # Judge protocol + GeminiJudge (google-genai)
 demo/
   cli.py                   # `python -m demo.cli detect|chat`
   slm_provider.py          # VLLMOpenAIProvider, HFTransformersProvider, sweep builder
-  model_registry.py        # per-model serving settings (Gemma 4 family)
-eval/                      # datasets, run_benchmark, compute_auroc, train_sep_probe
+  google_auth.py           # refreshing Google access token for VLLM_AUTH=google
+  model_registry.py        # per-model serving settings + vLLM flags per runner (Gemma 4 family)
+eval/
+  datasets/                # TriviaQA loader, adversarial prompts
+  run_benchmark.py         # questions -> JSONL of scores and answers
+  benchmark_results.py     # shared row schema, loading, correctness rule
+  compute_auroc.py         # criteria 1-2: per-detector AUROC, SE-PE gap
+  escalation_uplift.py     # criterion 3: accuracy gained by escalating
+  adversarial_separation.py  # criterion 4: Mann-Whitney U, adversarial vs correct
+  success_criteria.py      # the pass bars, as constants
+  train_sep_probe.py       # fit an SEP probe, report held-out Pearson r vs SE
 examples/                  # runnable playground scripts
+serving/
+  Dockerfile               # vllm/vllm-openai:v0.31.0-cu129 + registry + launcher
+  launch.py                # container entrypoint: registry -> `vllm serve` argv
+  model_flags.py           # registry CLI: paste-able `vllm serve`, Terraform tfvars
+  vertex_deploy.py         # upload + deploy to Vertex with the invoke route
 tests/unit/                # see the QA Guide
-serving/, terraform/       # see the DevOps Guide
+terraform/                 # see the DevOps Guide
 ```
 
 ## Why is the library separate from the demo?
@@ -113,7 +137,11 @@ touching the library.
 
 Add a `ModelEntry` to `_REGISTRY` in `demo/model_registry.py` with its vLLM
 settings (dtype, max length, quantization) and hardware (machine type,
-accelerator). Exactly one entry may be `is_local_default` and one
+accelerator type and count). `vllm_flags(runner)` turns the entry into
+`vllm serve` flags for the `generate` or `embed` runner, including
+`--tensor-parallel-size` equal to the accelerator count. Size
+`max_model_len` to what the GPU's memory can hold next to the weights, not to
+the model's maximum context, or vLLM refuses to start. Exactly one entry may be `is_local_default` and one
 `is_deployed_default`; `tests/unit/test_model_registry.py` enforces this. A
 model must be in the registry before it can appear in `VLLM_MODEL_ID` or
 `TARGET_MODEL_IDS`.
@@ -123,7 +151,9 @@ model must be in the registry before it can appear in `VLLM_MODEL_ID` or
 Any object with `answer(prompt: str) -> tuple[str, str]` (answer,
 reasoning) satisfies the `Judge` protocol. Pass it as `judge=` to
 `evaluate_responses` or `ResponseEvaluator`. `judges/gemini.py` is the
-reference; it imports the Vertex SDK lazily so the library loads without it.
+reference; it calls Gemini on Vertex AI through `google-genai`, asks for JSON
+validated against `JudgeVerdict`, and imports the SDK lazily so the library
+loads without it.
 
 ## Coding conventions
 
@@ -136,12 +166,22 @@ reference; it imports the Vertex SDK lazily so the library loads without it.
 - Log with structured context: `logger.info("...", extra={LOG_EXTRA_KEY: {...}})`.
 - One responsibility per module; name modules after their domain, no
   `utils.py`.
-- Heavy dependencies (`transformers` models, Vertex SDK) load lazily.
+- Heavy dependencies (`transformers` models, Google SDKs) load lazily.
+- Type hints everywhere; `mypy` runs in CI with `check_untyped_defs`.
+  Protocol members that implementations only expose (never assign) are
+  read-only properties, so frozen dataclasses satisfy them.
 
 ## Contribution workflow
 
 1. Write or update a failing test that captures the change.
-2. Make it pass; keep `uv run ruff check .` clean.
+2. Make it pass, then run the same gates as CI:
+   ```bash
+   uv run pytest -q
+   uv run ruff check . && uv run ruff format --check .
+   uv run mypy
+   terraform -chdir=terraform fmt -check -recursive   # if you touched terraform/
+   terraform -chdir=terraform init -backend=false && terraform -chdir=terraform validate
+   ```
 3. Update the docs the change touches and add a line under `[Unreleased]`
    in `CHANGELOG.md` (Keep a Changelog format).
 4. Open a pull request; CI must be green.

@@ -70,12 +70,18 @@ native bf16 precision — nothing is quantized.
 - `hf_transformers` (default) — downloads the model from Hugging Face and runs
   it in this process. Uses a CUDA GPU if present, otherwise CPU (slow, but it
   works for a handful of questions). Exposes hidden states, so SEP works.
-- `vllm` — calls an OpenAI-compatible vLLM server at `VLLM_BASE_URL`. SEP
-  needs a second vLLM instance started for embeddings, set in
-  `VLLM_EMBED_BASE_URL`.
+- `vllm` — calls an OpenAI-compatible vLLM server at `VLLM_BASE_URL`, either
+  one you run (`VLLM_AUTH=api_key`) or a Vertex AI endpoint
+  (`VLLM_AUTH=google`, which sends a refreshing Google access token). SEP
+  needs a second vLLM server running the embed runner, set in
+  `VLLM_EMBED_BASE_URL`; both providers feed SEP the same feature (the
+  chat-templated prompt's last-token hidden state, unnormalized), so a probe
+  trained on one works on the other.
 
 To compare models, set `TARGET_MODEL_IDS` (at least two registry ids). The
-judge (`JUDGE_MODEL_ID`, Gemini) is a managed Google API.
+judge (`JUDGE_MODEL_ID`, default `gemini-3.5-flash-lite`) is Gemini on
+Vertex AI through the `google-genai` SDK; it returns a schema-validated
+answer and reasoning at `JUDGE_TEMPERATURE` (default 0).
 
 ## What do I need before running anything?
 
@@ -87,7 +93,7 @@ cp .env.example .env
 | You want to | You also need |
 |---|---|
 | `detect`, the benchmark, SEP training with the local model | disk for the model download; a GPU strongly recommended |
-| the same against vLLM | a reachable vLLM server (`VLLM_BASE_URL`) — see [DevOps Guide](DEVOPS_GUIDE.md) |
+| the same against vLLM | a reachable vLLM server (`VLLM_BASE_URL`), or a Vertex endpoint plus `VLLM_AUTH=google` — see [DevOps Guide](DEVOPS_GUIDE.md#pointing-the-client-at-vertex) |
 | `chat` or benchmark with a judge | `GCP_PROJECT_ID` in `.env` and `gcloud auth application-default login` |
 
 Without Google credentials, escalation fails fast — there is no silent
@@ -320,6 +326,9 @@ or set `SEP_PROBE_PATH`.
 **Why do I get a connection error to `VLLM_BASE_URL`?**
 `SLM_PROVIDER=vllm` but the server is not reachable. Check with
 `curl $VLLM_BASE_URL/models`, or switch back to `SLM_PROVIDER=hf_transformers`.
+On Vertex, add `-H "Authorization: Bearer $(gcloud auth print-access-token)"`;
+a name-resolution error right after deploying usually means the dedicated
+endpoint's DNS name has not propagated yet.
 
 **Why does escalation fail with a credentials error?**
 `GCP_PROJECT_ID` is unset or `gcloud auth application-default login` has not

@@ -159,6 +159,16 @@ def test_vllm_embedding_request_matches_the_hf_hidden_state(gemma_settings_with_
     assert kwargs["options"] == {"security": {"bearer_auth": True}}
 
 
+def test_embed_endpoint_for_another_model_fails_fast(gemma_settings_with_embed):
+    """One embed endpoint serves one model; a sweep entry for a different
+    model must not read that model's hidden states."""
+    with (
+        patch("demo.slm_provider.OpenAI"),
+        pytest.raises(ValueError, match="SEP needs hidden states from the same model"),
+    ):
+        VLLMOpenAIProvider(model_id="google/gemma-4-31B-it")
+
+
 def test_google_auth_mode_passes_a_token_provider_to_both_clients(monkeypatch):
     from demo.google_auth import GoogleAccessToken
     from hallucinations_math_lab.config import get_settings

@@ -25,9 +25,11 @@ dependencies = [
 [project.optional-dependencies]
 # Reference vLLM / OpenAI-compatible sampling provider plus the demo CLI.
 demo = [
-    # 2.37+ accepts a callable api_key, used to refresh Google access tokens.
-    "openai>=2.37",
+    # Callable api_key (refreshing Google access tokens); tested on 3.x.
+    "openai>=3.0",
     "google-auth>=2.30",
+    # HFTransformersProvider loads with device_map="auto", which needs accelerate.
+    "accelerate>=1.0",
     "tenacity>=8.5",
     "typer>=0.12",
     "rich>=13.7",
@@ -52,6 +54,8 @@ all = [
 ]
 dev = [
     "pytest>=8.2",
+    # The auth contract test drives the real OpenAI client over httpx2.
+    "httpx2",
     "pytest-asyncio>=0.23",
     "ruff>=0.17",
     "mypy>=1.10",

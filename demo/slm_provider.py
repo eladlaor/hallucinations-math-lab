@@ -17,8 +17,8 @@ Two responsibilities, kept separate by SRP:
 
 Concrete implementations live in this module:
   - `VLLMOpenAIProvider` — OpenAI-compat HTTP client. Hidden states come from
-    a sibling vLLM instance launched with `--task embed`, accessed via the
-    `/v1/embeddings` endpoint when `VLLM_EMBED_BASE_URL` is configured.
+    a second vLLM server running the embed runner, accessed via
+    `/v1/embeddings` when `VLLM_EMBED_BASE_URL` is configured.
   - `HFTransformersProvider` — in-process HuggingFace `transformers` model.
     Exposes hidden states directly, so SEP needs no extra endpoint.
 """
@@ -116,6 +116,16 @@ class VLLMOpenAIProvider:
                 api_key=credential,
             )
             self._embed_model_id = settings.vllm_embed_model_id or settings.vllm_model_id
+            # There is one embed endpoint, serving one model. Pairing it with a
+            # different generation model would feed SEP another model's hidden
+            # states: a dimension error at best, silently wrong scores at worst.
+            if self._embed_model_id != self.model_id:
+                raise ValueError(
+                    f"VLLM_EMBED_BASE_URL serves {self._embed_model_id!r} but this provider "
+                    f"generates with {self.model_id!r}; SEP needs hidden states from the "
+                    "same model. Unset VLLM_EMBED_BASE_URL for this model, or sweep one "
+                    "model at a time."
+                )
         else:
             self._embed_client = None
             self._embed_model_id = ""

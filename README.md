@@ -299,8 +299,8 @@ uv run python -m demo.cli chat "Who was the first woman to walk on Mars?" # + Ge
 
 `detect` needs only the model (local by default). `chat` also calls Gemini on
 Vertex, so it needs `GCP_PROJECT_ID` and Google credentials. To serve the
-model with vLLM on a Vertex GPU endpoint instead, follow the
-[DevOps Guide](knowledge/usage_guides/DEVOPS_GUIDE.md).
+model with vLLM on your own GPU or a Vertex GPU endpoint (`VLLM_AUTH=google`)
+instead, follow the [DevOps Guide](knowledge/usage_guides/DEVOPS_GUIDE.md).
 
 ## Where does the theory live?
 

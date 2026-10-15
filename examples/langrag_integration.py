@@ -20,7 +20,8 @@ Two integration points worth flagging:
 1. Sample collection on the consumer's side. The library needs `text` + a list
    of `(token, logprob)` pairs for each sample. Every modern inference
    API exposes per-token logprobs (OpenAI: `logprobs`+`top_logprobs`; HF
-   transformers: `output_scores=True` on .generate; vLLM: same as OpenAI
+   transformers: `output_logits=True` on .generate (raw logits, before
+   temperature / top-p); vLLM: same as OpenAI
    over the openai-compat endpoint). The translation is mechanical.
 
 2. SEP is opt-in. It needs a pooled hidden state at the final prompt
@@ -105,7 +106,7 @@ def score_langrag_response(
     Detectors: PE + SE. SEP is omitted because it requires hidden-state
     access that langrag's default backend does not expose. Add a
     SemanticEntropyProbeDetector + a pooled hidden state if your backend
-    can supply one (e.g. vLLM with --task embed on a sibling port)."""
+    can supply one (e.g. a vLLM server running the embed runner)."""
     raw_choices = langrag_sample_n(prompt, n=n)
     samples = _to_sample_set(prompt, raw_choices)
     greedy = langrag_greedy(prompt)
