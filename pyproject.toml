@@ -18,7 +18,7 @@ dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "torch>=2.3",
-    "transformers>=4.44",
+    "transformers>=4.56",
     "numpy>=1.26",
 ]
 
@@ -30,9 +30,9 @@ demo = [
     "typer>=0.12",
     "rich>=13.7",
 ]
-# Vertex AI Gemini judge (escalation path).
+# Vertex AI Gemini judge (escalation path), via the Google Gen AI SDK.
 judge = [
-    "google-cloud-aiplatform>=1.71",
+    "google-genai>=1.0",
 ]
 # Eval / benchmarking harness (eval/*.py, not shipped in the wheel).
 eval = [
@@ -55,6 +55,18 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = "src"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "demo", "examples", "eval", "tests", "serving"]
+explicit_package_bases = true
+mypy_path = ["src", ".", "examples"]
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# scikit-learn and datasets ship no type information.
+module = ["sklearn", "sklearn.*", "datasets", "datasets.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

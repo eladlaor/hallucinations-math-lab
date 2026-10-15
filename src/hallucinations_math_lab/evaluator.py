@@ -163,9 +163,7 @@ def evaluate_responses(
             final_answer, judge_reasoning = judge.answer(prompt)
             final_source = AnswerSource.JUDGE_MODEL
         except Exception as e:
-            raise RuntimeError(
-                f"Judge escalation failed for prompt={prompt[:80]!r}: {e!s}"
-            ) from e
+            raise RuntimeError(f"Judge escalation failed for prompt={prompt[:80]!r}: {e!s}") from e
 
     return DetectionResult(
         prompt=prompt,
@@ -179,7 +177,9 @@ def evaluate_responses(
         final_answer=final_answer,
         final_answer_source=final_source,
         judge_reasoning=judge_reasoning,
-        escalation_policy_desc=(None if escalation_policy is None else escalation_policy.describe()),
+        escalation_policy_desc=(
+            None if escalation_policy is None else escalation_policy.describe()
+        ),
     )
 
 
@@ -247,12 +247,15 @@ class ResponseEvaluator:
             # Lazy import — demo isn't part of the library surface, so we
             # only reach into it when the caller declined to inject one.
             from demo.slm_provider import build_default_provider
+
             slm = build_default_provider()
 
         settings = get_settings()
         self._slm: SamplingProvider = slm
         self._detectors: list[Detector] = (
-            detectors if detectors is not None else _build_default_detectors(settings.enabled_detectors)
+            detectors
+            if detectors is not None
+            else _build_default_detectors(settings.enabled_detectors)
         )
         self._escalation_detector = (
             escalation_detector if escalation_detector is not None else settings.escalation_detector

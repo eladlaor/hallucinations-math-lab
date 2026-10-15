@@ -72,19 +72,26 @@ def test_single_detector_matches_legacy_behavior(score, expected):
 
 
 def test_any_above_or_semantics():
-    policy = AnyAbove(
-        {DetectorName.SEMANTIC_ENTROPY: 1.0, DetectorName.PREDICTIVE_ENTROPY: 2.0}
+    policy = AnyAbove({DetectorName.SEMANTIC_ENTROPY: 1.0, DetectorName.PREDICTIVE_ENTROPY: 2.0})
+    assert (
+        policy.should_escalate(
+            {DetectorName.SEMANTIC_ENTROPY: 0.5, DetectorName.PREDICTIVE_ENTROPY: 0.5}
+        )
+        is False
     )
-    assert policy.should_escalate(
-        {DetectorName.SEMANTIC_ENTROPY: 0.5, DetectorName.PREDICTIVE_ENTROPY: 0.5}
-    ) is False
     # only one crosses -> escalate
-    assert policy.should_escalate(
-        {DetectorName.SEMANTIC_ENTROPY: 1.5, DetectorName.PREDICTIVE_ENTROPY: 0.5}
-    ) is True
-    assert policy.should_escalate(
-        {DetectorName.SEMANTIC_ENTROPY: 0.5, DetectorName.PREDICTIVE_ENTROPY: 2.5}
-    ) is True
+    assert (
+        policy.should_escalate(
+            {DetectorName.SEMANTIC_ENTROPY: 1.5, DetectorName.PREDICTIVE_ENTROPY: 0.5}
+        )
+        is True
+    )
+    assert (
+        policy.should_escalate(
+            {DetectorName.SEMANTIC_ENTROPY: 0.5, DetectorName.PREDICTIVE_ENTROPY: 2.5}
+        )
+        is True
+    )
     assert policy.detectors_referenced == (
         DetectorName.SEMANTIC_ENTROPY,
         DetectorName.PREDICTIVE_ENTROPY,
@@ -92,17 +99,21 @@ def test_any_above_or_semantics():
 
 
 def test_all_above_and_semantics():
-    policy = AllAbove(
-        {DetectorName.SEMANTIC_ENTROPY: 1.0, DetectorName.PREDICTIVE_ENTROPY: 2.0}
-    )
+    policy = AllAbove({DetectorName.SEMANTIC_ENTROPY: 1.0, DetectorName.PREDICTIVE_ENTROPY: 2.0})
     # only one crosses -> no escalate
-    assert policy.should_escalate(
-        {DetectorName.SEMANTIC_ENTROPY: 1.5, DetectorName.PREDICTIVE_ENTROPY: 0.5}
-    ) is False
+    assert (
+        policy.should_escalate(
+            {DetectorName.SEMANTIC_ENTROPY: 1.5, DetectorName.PREDICTIVE_ENTROPY: 0.5}
+        )
+        is False
+    )
     # both cross -> escalate
-    assert policy.should_escalate(
-        {DetectorName.SEMANTIC_ENTROPY: 1.5, DetectorName.PREDICTIVE_ENTROPY: 2.5}
-    ) is True
+    assert (
+        policy.should_escalate(
+            {DetectorName.SEMANTIC_ENTROPY: 1.5, DetectorName.PREDICTIVE_ENTROPY: 2.5}
+        )
+        is True
+    )
 
 
 def test_empty_thresholds_raises():
@@ -131,9 +142,7 @@ def test_describe_strings_are_deterministic():
 def _samples() -> SampleSet:
     return SampleSet(
         prompt="q",
-        samples=[
-            Sample(text="x", token_logprobs=[TokenLogprob(token="t", logprob=-0.5)])
-        ],
+        samples=[Sample(text="x", token_logprobs=[TokenLogprob(token="t", logprob=-0.5)])],
     )
 
 
@@ -153,9 +162,7 @@ def test_evaluate_responses_policy_takes_precedence():
         requires_hidden_state=False,
         fixed_score=5.0,
     )
-    policy = AnyAbove(
-        {DetectorName.SEMANTIC_ENTROPY: 1.0, DetectorName.PREDICTIVE_ENTROPY: 1.0}
-    )
+    policy = AnyAbove({DetectorName.SEMANTIC_ENTROPY: 1.0, DetectorName.PREDICTIVE_ENTROPY: 1.0})
     result = evaluate_responses(
         prompt="q",
         samples=_samples(),

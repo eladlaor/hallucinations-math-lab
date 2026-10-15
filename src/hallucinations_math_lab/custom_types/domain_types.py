@@ -13,6 +13,7 @@ class TokenLogprob(BaseModel):
 
 class Sample(BaseModel):
     """One of N completions for a given prompt."""
+
     text: str
     token_logprobs: list[TokenLogprob] = Field(default_factory=list)
 
@@ -25,12 +26,14 @@ class Sample(BaseModel):
 
 class SampleSet(BaseModel):
     """The N samples returned for a single prompt."""
+
     prompt: str
     samples: list[Sample]
 
 
 class Cluster(BaseModel):
     """A semantic cluster — group of sample indices judged to share meaning."""
+
     member_indices: list[int]
     representative_text: str
 

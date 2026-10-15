@@ -61,7 +61,7 @@ demo/
   cli.py                   # `python -m demo.cli detect|chat`
   slm_provider.py          # VLLMOpenAIProvider, HFTransformersProvider, sweep builder
   model_registry.py        # per-model serving settings (Gemma 4 family)
-eval/                      # datasets, run_benchmark, compute_auroc, train_sep_probe, vertex_genai_eval
+eval/                      # datasets, run_benchmark, compute_auroc, train_sep_probe
 examples/                  # runnable playground scripts
 tests/unit/                # see the QA Guide
 serving/, terraform/       # see the DevOps Guide

@@ -19,12 +19,14 @@ Concrete implementations live in this module:
   - `VLLMOpenAIProvider` — OpenAI-compat HTTP client. Hidden states come from
     a sibling vLLM instance launched with `--task embed`, accessed via the
     `/v1/embeddings` endpoint when `VLLM_EMBED_BASE_URL` is configured.
-  - `HFTransformersProvider` — local HuggingFace `transformers` load. Lands
-    in Chunk 4; declared here only as a forward reference.
+  - `HFTransformersProvider` — in-process HuggingFace `transformers` model.
+    Exposes hidden states directly, so SEP needs no extra endpoint.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 import torch
 from openai import OpenAI
@@ -35,6 +37,22 @@ from hallucinations_math_lab.constants import LOG_EXTRA_KEY
 from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
 
 from demo.model_registry import list_model_ids
+
+if TYPE_CHECKING:
+    from transformers import (
+        BatchEncoding,
+        GenerationMixin,
+        PreTrainedModel,
+        PreTrainedTokenizerBase,
+    )
+
+    from transformers.generation.utils import GenerateDecoderOnlyOutput
+
+    class CausalLM(PreTrainedModel, GenerationMixin):
+        """Static type for what `AutoModelForCausalLM` returns. transformers 5
+        no longer makes every `PreTrainedModel` a `GenerationMixin`, so the
+        loader checks that at runtime before narrowing to this type."""
+
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +191,8 @@ class HFTransformersProvider:
     """Local HuggingFace `transformers` provider.
 
     Hosts the SLM in-process. Supports both generation (with per-token
-    logprobs reconstructed from `output_scores`) and pooled hidden state
+    logprobs from the raw `output_logits`, see `raw_token_logprobs`) and
+    pooled hidden state
     (separate forward pass with `output_hidden_states=True`, take the
     last-layer hidden state at the final prompt token).
 
@@ -193,49 +212,83 @@ class HFTransformersProvider:
         self._n = settings.sample_n
         self._temperature = settings.sample_temperature
         self._max_tokens = settings.max_tokens
-        self._device = (
-            "cuda" if torch.cuda.is_available() else "cpu"
-        )
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self._tokenizer = None
-        self._model = None
+        self._tokenizer: PreTrainedTokenizerBase | None = None
+        self._model: CausalLM | None = None
 
-    def _ensure_loaded(self) -> None:
-        if self._model is not None:
-            return
+    def _ensure_loaded(self) -> tuple[PreTrainedTokenizerBase, CausalLM]:
+        """Load tokenizer and model on first call; return both, never None."""
+        if self._tokenizer is not None and self._model is not None:
+            return self._tokenizer, self._model
         # Imported lazily so test suites that never instantiate this provider
         # don't pay the transformers import cost.
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationMixin
 
         from demo.model_registry import get_model_entry
 
         entry = get_model_entry(self.model_id)
-        torch_dtype = (
-            torch.bfloat16 if entry.dtype == "bfloat16"
-            else torch.float16 if entry.dtype == "float16"
+        dtype = (
+            torch.bfloat16
+            if entry.dtype == "bfloat16"
+            else torch.float16
+            if entry.dtype == "float16"
             else "auto"
         )
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_id)
-        self._model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            torch_dtype=torch_dtype,
-            device_map="auto",
-        )
-        self._model.eval()
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+            model = AutoModelForCausalLM.from_pretrained(
+                self.model_id, dtype=dtype, device_map="auto"
+            )
+            model.eval()
+        except Exception as e:
+            raise RuntimeError(f"Failed to load HF model {self.model_id!r}: {e!s}") from e
+        if not isinstance(model, GenerationMixin):
+            raise TypeError(
+                f"{self.model_id!r} loaded as {type(model).__name__}, which cannot generate."
+            )
+        causal_lm = cast("CausalLM", model)
+        self._tokenizer, self._model = tokenizer, causal_lm
+        return tokenizer, causal_lm
+
+    def _encode(
+        self, tokenizer: PreTrainedTokenizerBase, model: CausalLM, prompt: str
+    ) -> BatchEncoding:
+        """Tokenize `prompt` exactly as the vLLM path sees it.
+
+        `VLLMOpenAIProvider` calls the chat-completions endpoint, which wraps
+        the prompt in the model's chat template server-side. Applying the
+        same template here keeps both providers scoring the same input, so
+        PE / SE / SEP numbers are comparable across backends.
+        """
+        from transformers import BatchEncoding
+
+        if tokenizer.chat_template:
+            encoded = tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                add_generation_prompt=True,
+                return_tensors="pt",
+                return_dict=True,
+            )
+        else:
+            encoded = tokenizer(prompt, return_tensors="pt")
+        if not isinstance(encoded, BatchEncoding):
+            raise TypeError(f"Tokenizer returned {type(encoded).__name__}, expected BatchEncoding.")
+        return encoded.to(model.device)
 
     def sample(self, prompt: str) -> SampleSet:
-        self._ensure_loaded()
+        tokenizer, model = self._ensure_loaded()
         try:
-            inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+            inputs = self._encode(tokenizer, model, prompt)
             with torch.no_grad():
-                out = self._model.generate(
-                    **inputs,
+                out = _generate(
+                    model,
+                    inputs,
                     do_sample=True,
                     temperature=self._temperature,
                     num_return_sequences=self._n,
                     max_new_tokens=self._max_tokens,
-                    output_scores=True,
-                    return_dict_in_generate=True,
+                    output_logits=True,
                 )
         except Exception as e:
             raise RuntimeError(
@@ -244,24 +297,17 @@ class HFTransformersProvider:
             ) from e
 
         prompt_len = inputs["input_ids"].shape[1]
-        sequences = out.sequences  # [n, prompt_len + new_tokens]
-        # scores is a tuple of length new_tokens, each tensor [n, vocab].
-        # Reshape to [n, new_tokens, vocab] for vectorized logprob extraction.
-        stacked_scores = torch.stack(out.scores, dim=1)  # [n, new, vocab]
-        log_probs = torch.log_softmax(stacked_scores, dim=-1)
-        chosen_token_ids = sequences[:, prompt_len:]  # [n, new]
-        chosen_logprobs = log_probs.gather(
-            dim=-1, index=chosen_token_ids.unsqueeze(-1)
-        ).squeeze(-1)  # [n, new]
-
+        per_sample = raw_token_logprobs(
+            logits=_require_logits(out),
+            generated_ids=out.sequences[:, prompt_len:],
+            stop_token_ids=stop_token_ids(model),
+        )
         samples: list[Sample] = []
-        for i in range(sequences.shape[0]):
-            new_token_ids = chosen_token_ids[i].tolist()
-            token_logprobs: list[TokenLogprob] = []
-            for tok_id, lp in zip(new_token_ids, chosen_logprobs[i].tolist()):
-                token = self._tokenizer.decode([tok_id], skip_special_tokens=True)
-                token_logprobs.append(TokenLogprob(token=token, logprob=float(lp)))
-            text = self._tokenizer.decode(new_token_ids, skip_special_tokens=True)
+        for pairs in per_sample:
+            token_logprobs = [
+                TokenLogprob(token=_decode(tokenizer, [tok_id]), logprob=lp) for tok_id, lp in pairs
+            ]
+            text = _decode(tokenizer, [tok_id for tok_id, _ in pairs], skip_special_tokens=True)
             samples.append(Sample(text=text, token_logprobs=token_logprobs))
 
         logger.info(
@@ -277,30 +323,31 @@ class HFTransformersProvider:
         return SampleSet(prompt=prompt, samples=samples)
 
     def greedy(self, prompt: str) -> str:
-        self._ensure_loaded()
+        tokenizer, model = self._ensure_loaded()
         try:
-            inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+            inputs = self._encode(tokenizer, model, prompt)
             with torch.no_grad():
-                out = self._model.generate(
-                    **inputs,
+                out = _generate(
+                    model,
+                    inputs,
                     do_sample=False,
                     num_return_sequences=1,
                     max_new_tokens=self._max_tokens,
                 )
             prompt_len = inputs["input_ids"].shape[1]
-            new_token_ids = out[0, prompt_len:].tolist()
-            return self._tokenizer.decode(new_token_ids, skip_special_tokens=True)
+            new_token_ids = out.sequences[0, prompt_len:].tolist()
+            return _decode(tokenizer, new_token_ids, skip_special_tokens=True)
         except Exception as e:
             raise RuntimeError(
                 f"HFTransformersProvider.greedy failed for prompt={prompt[:80]!r}: {e!s}"
             ) from e
 
     def pooled_hidden_state(self, prompt: str) -> torch.Tensor | None:
-        self._ensure_loaded()
+        tokenizer, model = self._ensure_loaded()
         try:
-            inputs = self._tokenizer(prompt, return_tensors="pt").to(self._model.device)
+            inputs = self._encode(tokenizer, model, prompt)
             with torch.no_grad():
-                out = self._model(**inputs, output_hidden_states=True)
+                out = model(**inputs, output_hidden_states=True)
             # Last-layer hidden state at the final prompt token. Matches the
             # Kossen et al. SEP setup.
             last_layer = out.hidden_states[-1]  # [1, seq_len, hidden_dim]
@@ -309,6 +356,97 @@ class HFTransformersProvider:
             raise RuntimeError(
                 f"HFTransformersProvider.pooled_hidden_state failed for prompt={prompt[:80]!r}: {e!s}"
             ) from e
+
+
+def _generate(model: CausalLM, inputs: BatchEncoding, **kwargs: Any) -> GenerateDecoderOnlyOutput:
+    """`model.generate` with a dict-shaped, decoder-only output guaranteed."""
+    from transformers.generation.utils import GenerateDecoderOnlyOutput
+
+    # transformers annotates `generate`'s `self` with a private structural
+    # protocol that concrete PreTrainedModel subclasses do not satisfy for
+    # mypy; the runtime contract is checked on the return value instead.
+    out = model.generate(**inputs, return_dict_in_generate=True, **kwargs)  # type: ignore[misc]
+    if not isinstance(out, GenerateDecoderOnlyOutput):
+        raise TypeError(
+            f"generate returned {type(out).__name__}, expected GenerateDecoderOnlyOutput."
+        )
+    return out
+
+
+def _require_logits(out: GenerateDecoderOnlyOutput) -> tuple[torch.Tensor, ...]:
+    if out.logits is None:
+        raise RuntimeError("generate was asked for output_logits but returned none.")
+    return out.logits
+
+
+def _decode(
+    tokenizer: PreTrainedTokenizerBase, token_ids: list[int], skip_special_tokens: bool = False
+) -> str:
+    """`tokenizer.decode` for one sequence, narrowed to `str`."""
+    text = tokenizer.decode(token_ids, skip_special_tokens=skip_special_tokens)
+    if not isinstance(text, str):
+        raise TypeError(f"Tokenizer decode returned {type(text).__name__}, expected str.")
+    return text
+
+
+def stop_token_ids(model: PreTrainedModel) -> set[int]:
+    """Token ids that end a generated sequence: EOS (one or several) and PAD."""
+    config = model.generation_config
+    eos = config.eos_token_id
+    ids = set(eos) if isinstance(eos, list) else ({eos} if eos is not None else set())
+    if config.pad_token_id is not None:
+        ids.add(config.pad_token_id)
+    if not ids:
+        raise ValueError(
+            "Model generation_config defines neither eos_token_id nor pad_token_id; "
+            "cannot tell where a sampled sequence ends."
+        )
+    return ids
+
+
+def raw_token_logprobs(
+    logits: tuple[torch.Tensor, ...],
+    generated_ids: torch.Tensor,
+    stop_token_ids: set[int],
+) -> list[list[tuple[int, float]]]:
+    """Per-sample (token_id, logprob) pairs under the model's *raw* distribution.
+
+    Args:
+        logits: `generate(..., output_logits=True).logits` — one `[n, vocab]`
+            tensor per generated step, taken *before* temperature / top-k /
+            top-p processing. Using the processed `scores` instead would make
+            the logprobs depend on the sampling temperature, and predictive
+            entropy would measure the sampler rather than the model.
+        generated_ids: `[n, new_tokens]` ids generated after the prompt.
+        stop_token_ids: EOS / PAD ids. Each sample keeps its first stop token
+            and drops everything after it. The stop token stays because the
+            probability of ending there is part of the sequence's likelihood
+            (and vLLM's chat logprobs report it the same way). What follows
+            it is batch padding: sequences that finish early are padded to
+            the longest one, and counting that padding would distort the
+            length normalization in predictive entropy.
+
+    Returns:
+        One list per sample of `(token_id, logprob)`, ending at the first
+        stop token if the sample produced one.
+    """
+    if len(logits) != generated_ids.shape[1]:
+        raise ValueError(
+            f"Got {len(logits)} logit steps for {generated_ids.shape[1]} generated tokens; "
+            "they must match one-to-one."
+        )
+    log_probs = torch.log_softmax(torch.stack(logits, dim=1).float(), dim=-1)  # [n, new, vocab]
+    chosen = log_probs.gather(dim=-1, index=generated_ids.unsqueeze(-1)).squeeze(-1)  # [n, new]
+
+    per_sample: list[list[tuple[int, float]]] = []
+    for ids_row, lps_row in zip(generated_ids.tolist(), chosen.tolist(), strict=True):
+        pairs: list[tuple[int, float]] = []
+        for tok_id, lp in zip(ids_row, lps_row, strict=True):
+            pairs.append((tok_id, lp))
+            if tok_id in stop_token_ids:
+                break
+        per_sample.append(pairs)
+    return per_sample
 
 
 def build_default_provider(model_id: str | None = None) -> SLMProvider:
@@ -333,9 +471,7 @@ def build_default_provider(model_id: str | None = None) -> SLMProvider:
         return VLLMOpenAIProvider(model_id=model_id, base_url=base_url_override)
     if kind == "hf_transformers":
         return HFTransformersProvider(model_id=model_id)
-    raise ValueError(
-        f"Unknown SLM_PROVIDER={kind!r}. Expected one of: vllm, hf_transformers."
-    )
+    raise ValueError(f"Unknown SLM_PROVIDER={kind!r}. Expected one of: vllm, hf_transformers.")
 
 
 def build_sweep_providers() -> list[SLMProvider]:

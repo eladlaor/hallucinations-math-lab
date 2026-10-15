@@ -215,11 +215,6 @@ you whether *any* threshold can separate the two groups well.
    accepted answers (case-insensitive substring — the usual TriviaQA rule).
    The output is one AUROC per detector: the probability that a random
    hallucinated row outscores a random correct one.
-4. **Optional — Vertex evaluation.** `uv run python -m eval.vertex_genai_eval --in <results>`
-   scores groundedness and greedy-vs-final quality with Google's managed
-   evaluation service. It needs `GCP_PROJECT_ID`, Google credentials, `pandas`
-   and the `google-cloud-aiplatform[evaluation]` extra, which the `judge`
-   extra does not include.
 
 To compare models, rerun step 2 with a different `VLLM_MODEL_ID` and a
 different `--out` file.

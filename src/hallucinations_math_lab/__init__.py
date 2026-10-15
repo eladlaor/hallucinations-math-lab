@@ -17,6 +17,8 @@ Detectors implement the `Detector` protocol and live under
   - `SemanticEntropyDetector` — Farquhar et al. NLI-clustered Shannon
     entropy over N samples (strong signal, N forward passes plus
     O(N * |clusters|) NLI calls).
+    The equivalence test is pluggable via the `EntailmentScorer` protocol;
+    `NLIScorer` (DeBERTa-MNLI) is the default.
   - `SemanticEntropyProbeDetector` — Kossen et al. linear probe over a
     pooled hidden state, single forward pass.
 
@@ -43,6 +45,7 @@ from hallucinations_math_lab.services.detector_protocol import (
     DetectorPrerequisiteError,
     DetectorScore,
 )
+from hallucinations_math_lab.services.nli import EntailmentScorer, NLIScorer
 from hallucinations_math_lab.services.predictive_entropy import PredictiveEntropyDetector
 from hallucinations_math_lab.services.sampling_provider import SamplingProvider
 from hallucinations_math_lab.services.semantic_entropy import SemanticEntropyDetector
@@ -54,6 +57,7 @@ __all__ = [
     "ResponseEvaluator",
     # Protocols
     "Detector",
+    "EntailmentScorer",
     "Judge",
     "SamplingProvider",
     # Escalation policies
@@ -65,6 +69,8 @@ __all__ = [
     "PredictiveEntropyDetector",
     "SemanticEntropyDetector",
     "SemanticEntropyProbeDetector",
+    # NLI backend for Semantic Entropy clustering
+    "NLIScorer",
     # Result + context types
     "DetectionContext",
     "DetectionResult",

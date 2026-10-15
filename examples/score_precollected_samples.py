@@ -24,6 +24,8 @@ import logging
 
 from hallucinations_math_lab import (
     DetectorName,
+    EntailmentScorer,
+    NLIScorer,
     PredictiveEntropyDetector,
     Sample,
     SampleSet,
@@ -31,7 +33,6 @@ from hallucinations_math_lab import (
     TokenLogprob,
     evaluate_responses,
 )
-from hallucinations_math_lab.services.nli import NLIScorer
 
 NLI_EXACT = "exact"
 NLI_DEBERTA = "deberta"
@@ -39,8 +40,8 @@ SE_THRESHOLD_NATS = 1.0
 
 
 class ExactMatchNLI:
-    """Stand-in NLI scorer: two answers 'entail each other' iff they are the
-    same string after case/whitespace/punctuation normalization."""
+    """Stand-in `EntailmentScorer`: two answers "entail each other" iff they are
+    the same string after case/whitespace/punctuation normalization."""
 
     def bidirectional_entails(self, a: str, b: str) -> bool:
         return _normalize(a) == _normalize(b)
@@ -107,7 +108,7 @@ def main() -> None:
     parser.add_argument("--nli", choices=[NLI_EXACT, NLI_DEBERTA], default=NLI_EXACT)
     args = parser.parse_args()
 
-    scorer = ExactMatchNLI() if args.nli == NLI_EXACT else NLIScorer()
+    scorer: EntailmentScorer = ExactMatchNLI() if args.nli == NLI_EXACT else NLIScorer()
     detectors = [PredictiveEntropyDetector(), SemanticEntropyDetector(scorer=scorer)]
 
     print(f"NLI = {args.nli}   escalation: SE > {SE_THRESHOLD_NATS} nats\n")

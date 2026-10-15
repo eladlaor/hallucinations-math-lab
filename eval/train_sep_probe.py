@@ -150,9 +150,7 @@ def main() -> int:
     hidden_dim = X.shape[1]
     probe = SEPProbe(hidden_dim)
     with torch.no_grad():
-        probe.linear.weight.copy_(
-            torch.tensor(ridge.coef_, dtype=torch.float32).unsqueeze(0)
-        )
+        probe.linear.weight.copy_(torch.tensor(ridge.coef_, dtype=torch.float32).unsqueeze(0))
         probe.linear.bias.copy_(torch.tensor([float(ridge.intercept_)], dtype=torch.float32))
 
     torch.save(probe.state_dict(), output_path)

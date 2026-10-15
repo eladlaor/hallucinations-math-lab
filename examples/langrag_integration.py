@@ -64,9 +64,7 @@ def langrag_sample_n(prompt: str, n: int) -> list[dict[str, Any]]:
 
 def langrag_greedy(prompt: str) -> str:
     """Stand-in for langrag's deterministic single-sample decode."""
-    raise NotImplementedError(
-        "Replace with langrag.llm.complete(prompt, n=1, temperature=0.0)."
-    )
+    raise NotImplementedError("Replace with langrag.llm.complete(prompt, n=1, temperature=0.0).")
 
 
 # --- The translation layer ------------------------------------------------

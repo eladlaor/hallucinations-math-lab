@@ -11,7 +11,9 @@ from datasets import load_dataset
 from hallucinations_math_lab.constants import RANDOM_SEED
 
 
-def load_triviaqa_subset(n: int = 1000, seed: int = RANDOM_SEED, out: Path | None = None) -> list[dict]:
+def load_triviaqa_subset(
+    n: int = 1000, seed: int = RANDOM_SEED, out: Path | None = None
+) -> list[dict]:
     ds = load_dataset("trivia_qa", "rc.nocontext", split="validation")
     ds = ds.shuffle(seed=seed).select(range(min(n, len(ds))))
     rows = [

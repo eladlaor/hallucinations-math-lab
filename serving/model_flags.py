@@ -50,12 +50,17 @@ def main(argv: list[str]) -> int:
         print(" ".join(entry.vllm_flags()))
         return 0
     if mode == "terraform":
-        print(json.dumps({
-            "model_id": entry.model_id,
-            "endpoint_machine_type": entry.machine_type,
-            "endpoint_accelerator_type": entry.accelerator_type,
-            "endpoint_accelerator_count": entry.accelerator_count,
-        }, indent=2))
+        print(
+            json.dumps(
+                {
+                    "model_id": entry.model_id,
+                    "endpoint_machine_type": entry.machine_type,
+                    "endpoint_accelerator_type": entry.accelerator_type,
+                    "endpoint_accelerator_count": entry.accelerator_count,
+                },
+                indent=2,
+            )
+        )
         return 0
 
     print(f"Unknown mode {mode!r}; expected 'vllm' or 'terraform'.", file=sys.stderr)

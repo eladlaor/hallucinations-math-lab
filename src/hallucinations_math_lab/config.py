@@ -48,9 +48,7 @@ class Settings(BaseSettings):
     # against each other (SE / predictive-entropy / judge pipeline run once
     # per id). Must contain at least 2 ids, and every id must exist in
     # services.model_registry. Default = all four Gemma 4 SKUs.
-    target_model_ids: list[str] = Field(
-        default_factory=lambda: list(_DEFAULT_TARGET_MODEL_IDS)
-    )
+    target_model_ids: list[str] = Field(default_factory=lambda: list(_DEFAULT_TARGET_MODEL_IDS))
     # Optional per-model base_url override. Keys must be a subset of
     # target_model_ids. Missing keys fall back to vllm_base_url. Lets the
     # operator run the same harness against:
@@ -65,8 +63,9 @@ class Settings(BaseSettings):
     gcp_region: str = Field(default="us-central1")
 
     # Judge models
-    judge_model_id: str = Field(default="gemini-2.5-flash")
-    eval_judge_model_id: str = Field(default="gemini-2.5-pro")
+    judge_model_id: str = Field(default="gemini-3.5-flash-lite")
+    # 0.0 keeps the judge's verdict as reproducible as the API allows.
+    judge_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
 
     # NLI for SE clustering
     nli_model_id: str = Field(default="microsoft/deberta-large-mnli")
@@ -100,9 +99,7 @@ class Settings(BaseSettings):
                 f"sweep; got {len(value)}: {value!r}."
             )
         if len(set(value)) != len(value):
-            raise ValueError(
-                f"target_model_ids must be unique; got duplicates in {value!r}."
-            )
+            raise ValueError(f"target_model_ids must be unique; got duplicates in {value!r}.")
         # Registry membership is checked by demo.slm_provider.build_sweep_providers:
         # the library must not import the demo package, which is not shipped in
         # the wheel.

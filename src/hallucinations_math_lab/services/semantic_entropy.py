@@ -25,7 +25,7 @@ from hallucinations_math_lab.services.detector_protocol import (
     DetectorPrerequisiteError,
     DetectorScore,
 )
-from hallucinations_math_lab.services.nli import NLIScorer, get_nli_scorer
+from hallucinations_math_lab.services.nli import EntailmentScorer, get_nli_scorer
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class SemanticEntropyResult:
 
 def cluster_by_bidirectional_entailment(
     answers: list[str],
-    scorer: NLIScorer | None = None,
+    scorer: EntailmentScorer | None = None,
 ) -> list[Cluster]:
     """Greedy single-pass clustering by bidirectional NLI entailment.
 
@@ -73,7 +73,9 @@ def cluster_by_bidirectional_entailment(
     return clusters
 
 
-def compute_semantic_entropy(sample_set: SampleSet, scorer: NLIScorer | None = None) -> SemanticEntropyResult:
+def compute_semantic_entropy(
+    sample_set: SampleSet, scorer: EntailmentScorer | None = None
+) -> SemanticEntropyResult:
     """Compute SE for a sample set. Raises if sample set is empty."""
     if not sample_set.samples:
         raise ValueError(
@@ -118,7 +120,7 @@ class SemanticEntropyDetector(Detector):
         category=DetectorCategory.UNCERTAINTY,
     )
 
-    def __init__(self, scorer: NLIScorer | None = None) -> None:
+    def __init__(self, scorer: EntailmentScorer | None = None) -> None:
         self._scorer = scorer
 
     def score(self, ctx: DetectionContext) -> DetectorScore:

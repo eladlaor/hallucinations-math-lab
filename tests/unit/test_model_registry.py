@@ -87,8 +87,7 @@ def test_every_gemma_4_entry_runs_bf16_native(model_id):
     entry = get_model_entry(model_id)
     if entry.quantization is None:
         assert entry.dtype == "bfloat16", (
-            f"{model_id} is unquantized but dtype={entry.dtype!r}; Gemma 4 "
-            "is natively bf16."
+            f"{model_id} is unquantized but dtype={entry.dtype!r}; Gemma 4 is natively bf16."
         )
 
 

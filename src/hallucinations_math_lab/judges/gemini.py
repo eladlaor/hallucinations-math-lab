@@ -1,72 +1,106 @@
-"""Gemini judge via Vertex AI Generative SDK. Lazy-imported so this module
-loads without GCP credentials in the environment — the dependency on
-google-cloud-aiplatform is only paid when GeminiJudge is actually
-constructed and invoked."""
+"""Gemini judge on Vertex AI via the Google Gen AI SDK (`google-genai`).
+
+The SDK is imported lazily, so this module loads without the `judge` extra
+or GCP credentials; both are needed only when `GeminiJudge` first answers.
+"""
+
+from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.custom_types.llm_schemas import JudgeVerdict
+
+if TYPE_CHECKING:
+    from google.genai import Client
 
 logger = logging.getLogger(__name__)
 
+JUDGE_INSTRUCTION = (
+    "You are a careful expert. Answer the question concisely and accurately. "
+    "If you do not know the answer, say so explicitly rather than guessing."
+)
+
 
 class GeminiJudge:
-    """Vertex AI Gemini wrapper implementing the `Judge` protocol.
+    """Vertex AI Gemini implementation of the `Judge` protocol.
 
-    Reference implementation only — consumers running outside the demo's
-    Vertex deployment are encouraged to supply their own Judge impl
-    (any class with `.answer(prompt) -> (str, str)`)."""
+    The verdict comes back as JSON validated against `JudgeVerdict`, so the
+    answer and its reasoning never depend on parsing free text.
 
-    def __init__(self, model_id: str | None = None) -> None:
-        self._model_id = model_id or get_settings().judge_model_id
-        self._model = None  # lazy
+    Reference implementation only: any object with
+    `.answer(prompt) -> (answer, reasoning)` can serve as the judge.
+    """
 
-    def _ensure_loaded(self) -> None:
-        if self._model is not None:
-            return
+    def __init__(self, model_id: str | None = None, client: Client | None = None) -> None:
+        """
+        Args:
+            model_id: Gemini model id; defaults to `JUDGE_MODEL_ID` from settings.
+            client: A pre-built `google.genai.Client`. When omitted, one is
+                created on first use for Vertex AI with `GCP_PROJECT_ID` /
+                `GCP_REGION` and Application Default Credentials.
+        """
         settings = get_settings()
-        try:
-            import vertexai
-            from vertexai.generative_models import GenerativeModel
+        self._model_id = model_id or settings.judge_model_id
+        self._temperature = settings.judge_temperature
+        self._client = client
 
-            if not settings.gcp_project_id:
-                raise RuntimeError("GCP_PROJECT_ID is empty; cannot init Vertex AI.")
-            vertexai.init(project=settings.gcp_project_id, location=settings.gcp_region)
-            self._model = GenerativeModel(self._model_id)
-            logger.info(
-                "Initialized Vertex Gemini judge.",
-                extra={
-                    LOG_EXTRA_KEY: {
-                        "model_id": self._model_id,
-                        "project": settings.gcp_project_id,
-                        "region": settings.gcp_region,
-                    }
-                },
+    def _ensure_client(self) -> Client:
+        if self._client is not None:
+            return self._client
+        settings = get_settings()
+        if not settings.gcp_project_id:
+            raise RuntimeError("GCP_PROJECT_ID is empty; cannot create a Vertex AI client.")
+        try:
+            from google import genai
+
+            self._client = genai.Client(
+                vertexai=True, project=settings.gcp_project_id, location=settings.gcp_region
             )
         except Exception as e:
             raise RuntimeError(
-                f"Failed to init Gemini judge model={self._model_id!r}: {e!s}"
+                f"Failed to create Vertex AI client for judge model={self._model_id!r}: {e!s}"
             ) from e
+        logger.info(
+            "Initialized Vertex Gemini judge.",
+            extra={
+                LOG_EXTRA_KEY: {
+                    "model_id": self._model_id,
+                    "project": settings.gcp_project_id,
+                    "region": settings.gcp_region,
+                }
+            },
+        )
+        return self._client
 
     def answer(self, prompt: str) -> tuple[str, str]:
-        """Return (judge_answer, judge_reasoning). Reasoning is best-effort."""
-        self._ensure_loaded()
-        framed = (
-            "You are a careful expert. Answer the following question concisely and "
-            "accurately. If you do not know, say so explicitly. Then on a new line, "
-            "after the marker 'REASONING:', briefly justify your answer.\n\n"
-            f"Question: {prompt}\n\nAnswer:"
-        )
+        """Return `(answer, reasoning)` for `prompt`."""
+        from google.genai import types
+
+        client = self._ensure_client()
         try:
-            resp = self._model.generate_content(framed)  # type: ignore[union-attr]
-            text = (resp.text or "").strip()
+            resp = client.models.generate_content(
+                model=self._model_id,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=JUDGE_INSTRUCTION,
+                    temperature=self._temperature,
+                    response_mime_type="application/json",
+                    response_schema=JudgeVerdict,
+                ),
+            )
         except Exception as e:
             raise RuntimeError(
-                f"Gemini judge generation failed for prompt={prompt[:80]!r}: {e!s}"
+                f"Gemini judge generation failed for model={self._model_id!r} "
+                f"prompt={prompt[:80]!r}: {e!s}"
             ) from e
 
-        if "REASONING:" in text:
-            answer, _, reasoning = text.partition("REASONING:")
-            return answer.strip(), reasoning.strip()
-        return text, ""
+        verdict = resp.parsed
+        if not isinstance(verdict, JudgeVerdict):
+            raise RuntimeError(
+                f"Gemini judge returned no valid JudgeVerdict for model={self._model_id!r} "
+                f"prompt={prompt[:80]!r}; raw text={(resp.text or '')[:200]!r}"
+            )
+        return verdict.answer.strip(), verdict.reasoning.strip()

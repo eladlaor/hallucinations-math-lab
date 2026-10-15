@@ -10,7 +10,7 @@ ESCALATION_DETECTOR, SE_THRESHOLD); the SLM comes from SLM_PROVIDER /
 VLLM_MODEL_ID. Every row records all detector scores under `detector_scores`,
 so adding a detector needs no change here or in compute_auroc.py.
 
-Downstream: compute_auroc.py, vertex_genai_eval.py.
+Downstream: compute_auroc.py.
 """
 
 from __future__ import annotations

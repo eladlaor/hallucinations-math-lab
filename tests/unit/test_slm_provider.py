@@ -10,8 +10,13 @@ Contract pinned here:
     and returns a float32 tensor.
   - `sample` extracts text + token logprobs from chat.completions response.
   - `build_default_provider` selects the right class from config.slm_provider.
+  - `raw_token_logprobs` (the HF provider's logprob math) uses the raw
+    distribution, cuts each sample at its first EOS/PAD, and is model-free so
+    it runs on CPU.
 """
 
+import math
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +27,62 @@ from demo.slm_provider import (
     VLLMOpenAIProvider,
     build_default_provider,
     build_sweep_providers,
+    raw_token_logprobs,
+    stop_token_ids,
 )
+
+EOS_ID = 0
+VOCAB = 4
+
+
+def _step(rows: list[list[float]]) -> torch.Tensor:
+    """One generation step's logits, shape [n, vocab]."""
+    return torch.tensor(rows, dtype=torch.float32)
+
+
+def test_raw_token_logprobs_matches_log_softmax_of_raw_logits():
+    logits = (_step([[0.0, 2.0, 1.0, 0.5]]), _step([[0.0, 0.1, 0.2, 3.0]]))
+    generated = torch.tensor([[1, 3]])
+
+    [pairs] = raw_token_logprobs(logits, generated, stop_token_ids={EOS_ID})
+
+    expected = [
+        (1, torch.log_softmax(logits[0][0], dim=-1)[1].item()),
+        (3, torch.log_softmax(logits[1][0], dim=-1)[3].item()),
+    ]
+    assert [tok for tok, _ in pairs] == [tok for tok, _ in expected]
+    for (_, got), (_, want) in zip(pairs, expected, strict=True):
+        assert math.isclose(got, want, rel_tol=1e-6)
+
+
+def test_raw_token_logprobs_keeps_first_stop_token_and_drops_padding():
+    """Sample 0 ends early and is padded with EOS. Its own EOS is part of the
+    sequence likelihood; the padding after it must not count."""
+    logits = tuple(_step([[1.0] * VOCAB, [1.0] * VOCAB]) for _ in range(4))
+    generated = torch.tensor([[2, EOS_ID, EOS_ID, EOS_ID], [1, 2, 3, 3]])
+
+    short, full = raw_token_logprobs(logits, generated, stop_token_ids={EOS_ID})
+
+    assert [tok for tok, _ in short] == [2, EOS_ID]
+    assert [tok for tok, _ in full] == [1, 2, 3, 3]
+
+
+def test_raw_token_logprobs_rejects_step_count_mismatch():
+    with pytest.raises(ValueError, match="must match one-to-one"):
+        raw_token_logprobs((_step([[1.0] * VOCAB]),), torch.tensor([[1, 2]]), {EOS_ID})
+
+
+def test_stop_token_ids_collects_eos_list_and_pad():
+    model = SimpleNamespace(
+        generation_config=SimpleNamespace(eos_token_id=[1, 106], pad_token_id=0)
+    )
+    assert stop_token_ids(model) == {0, 1, 106}
+
+
+def test_stop_token_ids_fails_fast_without_eos_or_pad():
+    model = SimpleNamespace(generation_config=SimpleNamespace(eos_token_id=None, pad_token_id=None))
+    with pytest.raises(ValueError, match="neither eos_token_id nor pad_token_id"):
+        stop_token_ids(model)
 
 
 @pytest.fixture
@@ -142,9 +202,7 @@ def test_build_sweep_providers_rejects_unregistered_model(monkeypatch):
 
     get_settings.cache_clear()
     monkeypatch.setenv("SLM_PROVIDER", "vllm")
-    monkeypatch.setenv(
-        "TARGET_MODEL_IDS", '["google/gemma-4-E4B-it", "acme/not-a-real-model"]'
-    )
+    monkeypatch.setenv("TARGET_MODEL_IDS", '["google/gemma-4-E4B-it", "acme/not-a-real-model"]')
     try:
         with pytest.raises(ValueError, match="not in the model registry"):
             build_sweep_providers()

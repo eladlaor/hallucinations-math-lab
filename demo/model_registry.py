@@ -52,11 +52,11 @@ class ProviderKind(StrEnum):
 class ModelEntry:
     model_id: str
     quantization: str | None  # vLLM --quantization flag value; None = unquantized
-    dtype: str                # vLLM --dtype flag value (float16, bfloat16, auto, ...)
-    max_model_len: int        # vLLM --max-model-len flag value
-    accelerator_type: str     # Vertex accelerator type (NVIDIA_L4, NVIDIA_A100_80GB, ...)
-    accelerator_count: int    # how many of them
-    machine_type: str         # GCE machine type that pairs with the accelerator
+    dtype: str  # vLLM --dtype flag value (float16, bfloat16, auto, ...)
+    max_model_len: int  # vLLM --max-model-len flag value
+    accelerator_type: str  # Vertex accelerator type (NVIDIA_L4, NVIDIA_A100_80GB, ...)
+    accelerator_count: int  # how many of them
+    machine_type: str  # GCE machine type that pairs with the accelerator
     default_provider: ProviderKind
     is_deployed_default: bool = False
     is_local_default: bool = False
@@ -65,9 +65,12 @@ class ModelEntry:
     def vllm_flags(self) -> list[str]:
         """Materialize the vLLM CLI flag list for this entry."""
         flags = [
-            "--model", self.model_id,
-            "--dtype", self.dtype,
-            "--max-model-len", str(self.max_model_len),
+            "--model",
+            self.model_id,
+            "--dtype",
+            self.dtype,
+            "--max-model-len",
+            str(self.max_model_len),
         ]
         if self.quantization:
             flags += ["--quantization", self.quantization]
