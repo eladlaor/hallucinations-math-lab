@@ -26,8 +26,8 @@ becomes **"where on the frontier do we want to operate?"** rather than
 
 ## Motivation
 
-- A single-number "best detector" framing is engineering-naive and weak in an
-  FDE-panel conversation. Customers operate under cost and latency budgets.
+- A single-number "best detector" framing is engineering-naive: real
+  deployments operate under cost and latency budgets.
 - An LLM-judge baseline gives a meaningful reference ceiling for the SE
   thesis. Without it, the "why not just ask a bigger model?" question is
   unanswered.

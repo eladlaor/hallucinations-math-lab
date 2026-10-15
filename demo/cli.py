@@ -1,4 +1,4 @@
-"""Taste CLI — reference demo of the response-evaluator library.
+"""hallucinations-math-lab demo CLI — reference demo of the response-evaluator library.
 
 Subcommands:
 - chat   : single-shot Q&A with the full detector + judge pipeline.
@@ -20,7 +20,7 @@ from hallucinations_math_lab.judges import GeminiJudge
 
 app = typer.Typer(
     add_completion=False,
-    help="Taste — response evaluators for LLM-native projects.",
+    help="hallucinations-math-lab — response evaluators for LLM-native projects.",
 )
 console = Console()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")

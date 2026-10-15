@@ -15,7 +15,7 @@ same default:
     cost story in CLAUDE.md (~$0.70/hr) depends on staying single-L4.
 
   - `is_local_default = True` on one entry. That's what single-model
-    commands (`seh chat`) pick up when no .env override is present, for
+    commands (`python -m demo.cli chat`) pick up when no .env override is present, for
     local development. Today: Gemma-4-E2B via HF transformers — small
     enough for laptop dev.
 

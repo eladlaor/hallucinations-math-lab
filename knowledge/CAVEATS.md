@@ -1,23 +1,30 @@
 # Caveats: Theory vs. Production
 
-> No-assumed-knowledge explanations of where Semantic Entropy / Predictive Entropy /
-> SEP theory meets real-world production constraints. Written for talk-prep depth —
-> each caveat explains the concept from scratch, then states the failure, then gives
-> a one-sentence stage-ready version.
-
 ## Table of contents
 
-- [1. NLI is doing unverified philosophical labor](#1-nli-is-doing-unverified-philosophical-labor)
-- [2. The entailment threshold and clustering are order-dependent](#2-the-entailment-threshold-and-clustering-are-order-dependent)
-- [3. N is small and entropy resolution is coarse](#3-n-is-small-and-entropy-resolution-is-coarse)
-- [4. Cost is not "a bit more" — it's a different regime](#4-cost-is-not-a-bit-more--its-a-different-regime)
-- [5. Domain shift breaks everything silently](#5-domain-shift-breaks-everything-silently)
-- [6. SEP inherits SE's mistakes AND adds a generalization gap](#6-sep-inherits-ses-mistakes-and-adds-a-generalization-gap)
-- [7. "Hallucination" itself is being operationalized narrowly](#7-hallucination-itself-is-being-operationalized-narrowly)
+- [Summary](#summary)
+- [1. Can I trust NLI to decide whether two answers mean the same thing?](#1-can-i-trust-nli-to-decide-whether-two-answers-mean-the-same-thing)
+- [2. Does the order of the samples change the clusters?](#2-does-the-order-of-the-samples-change-the-clusters)
+- [3. Are 10 samples enough?](#3-are-10-samples-enough)
+- [4. How much more does SE cost than a single answer?](#4-how-much-more-does-se-cost-than-a-single-answer)
+- [5. What happens when my questions are not short factual ones?](#5-what-happens-when-my-questions-are-not-short-factual-ones)
+- [6. Does SEP fix SE's weaknesses?](#6-does-sep-fix-ses-weaknesses)
+- [7. What exactly counts as a "hallucination" here?](#7-what-exactly-counts-as-a-hallucination-here)
+
+## Summary
+
+Where the clean theory of Predictive Entropy, Semantic Entropy and SEP meets
+real use. Each section answers one question in a sentence, explains the
+concept from scratch, then shows the failure. Read it before trusting a
+benchmark number: SE depends on an NLI model (1), on sample order (2) and
+count (3), costs real compute (4), holds only for short factual answers (5),
+and measures self-consistency rather than truth (7); SEP inherits all of it (6).
 
 ---
 
-## 1. NLI is doing unverified philosophical labor
+## 1. Can I trust NLI to decide whether two answers mean the same thing?
+
+**Short answer:** Only partly: SE measures what a separate NLI model *thinks* about meaning, and that model can be wrong in ways the score never shows.
 
 **What is NLI, first.** NLI = Natural Language Inference. It's a specific, narrow ML task: you give a model two sentences — a "premise" and a "hypothesis" — and it tells you if the hypothesis is *entailed* (must be true if the premise is true), *contradicted*, or *neutral* (unrelated / can't tell). Example: premise "A dog is running in the park," hypothesis "An animal is outside" → entailment. That's the whole task. Models are trained on datasets of exactly these triples (sentence, sentence, label).
 
@@ -27,11 +34,13 @@
 
 **The concrete failure this causes:** the NLI model can be wrong, biased, or just poorly calibrated on the specific kind of text you're feeding it — and your Semantic Entropy score inherits every one of those errors silently. You have no way to see it happening; you just get a number out, and you have to trust that the number reflects real semantic (dis)agreement.
 
-**One sentence to say on stage:** "SE doesn't measure meaning directly — it measures what a separate NLI model *thinks* about meaning, and that model can be wrong in ways you can't see."
+**In one sentence:** "SE doesn't measure meaning directly — it measures what a separate NLI model *thinks* about meaning, and that model can be wrong in ways you can't see."
 
 ---
 
-## 2. The entailment threshold and clustering are order-dependent
+## 2. Does the order of the samples change the clusters?
+
+**Short answer:** It can: the clustering compares each new answer only against the first member of each group, so the same answers in a different order may group differently.
 
 **What "clustering" means here.** You have 10 generated answers. You want to sort them into groups ("clusters") where everything in a group means the same thing. The ideal way to do this would be to compare *every* answer to *every other* answer (that's 10×10 = 100 comparisons, technically ~45 unique pairs) and build clusters from the full picture.
 
@@ -41,11 +50,13 @@
 
 **Why this matters:** you'd expect a measurement like "how much do these 10 answers disagree" to only depend on *what* the answers say, not on the arbitrary order the LLM happened to emit them in. But with this algorithm, order can matter. That's a hidden source of noise in the score that has nothing to do with the model's actual uncertainty.
 
-**One sentence to say on stage:** "The clustering is a cheap approximation — it only checks new answers against the first answer in each group, so in principle, the exact same 10 answers in a different order could cluster slightly differently."
+**In one sentence:** "The clustering is a cheap approximation — it only checks new answers against the first answer in each group, so in principle, the exact same 10 answers in a different order could cluster slightly differently."
 
 ---
 
-## 3. N is small and entropy resolution is coarse
+## 3. Are 10 samples enough?
+
+**Short answer:** For common disagreements yes, for rare ones no: an error the model makes 1 time in 20 is easily missed in 10 draws.
 
 **What "N" is.** N is the number of times you sample the LLM for the same question — in this repo, N=10.
 
@@ -53,11 +64,13 @@
 
 **Why that's a problem.** Imagine the *true* underlying uncertainty of the model is small but real — say, 1 time in 20 it would give a wrong, different answer. With only N=10 samples, you have a real chance of *never seeing that divergent answer at all* in your 10 draws (it only shows up 1 in 20 times on average) — so your 10 samples might all land in the same cluster, giving you an entropy of 0, meaning "totally confident," when the model actually does have a rare failure mode. To catch rarer disagreements reliably, you'd need more samples — but each additional sample means one more full LLM generation, which costs more time and money.
 
-**One sentence to say on stage:** "With only 10 samples, rare hallucinations — the kind that show up 1 in 20 or 1 in 50 times — can simply be missed by chance, and getting better at catching them costs more generations, which costs more money and latency."
+**In one sentence:** "With only 10 samples, rare hallucinations — the kind that show up 1 in 20 or 1 in 50 times — can simply be missed by chance, and getting better at catching them costs more generations, which costs more money and latency."
 
 ---
 
-## 4. Cost is not "a bit more" — it's a different regime
+## 4. How much more does SE cost than a single answer?
+
+**Short answer:** About ten times the compute, but not ten times the wait, because the ten answers come back as one batched request.
 
 **The comparison being made.** Predictive Entropy is "free" because it's computed from numbers (token probabilities) the model already produces as a side effect of generating one single answer — no extra work. Semantic Entropy requires generating **10 separate full answers** to the same question, plus running the NLI model multiple times to compare them.
 
@@ -78,11 +91,13 @@ Two caveats that eat into the favorable latency number:
 
 **Do NOT "fix" this by gating SE behind Predictive Entropy.** It is the obvious move and it is broken: PE's blind spot *is* the confident lie, so a PE gate never escalates precisely the cases SE exists to catch. See `src/hallucinations_math_lab/escalation.py`, whose module docstring makes this a hard rule (PE may be an `AnyAbove` OR-trigger, never an `AllAbove` gate). The sound cheap-first path is **SEP**, which approximates SE itself rather than substituting a different question.
 
-**One sentence to say on stage:** "Semantic Entropy is roughly ten times the compute — but not ten times the wait, because the ten answers come back as one batch. Cost and latency are different axes."
+**In one sentence:** "Semantic Entropy is roughly ten times the compute — but not ten times the wait, because the ten answers come back as one batch. Cost and latency are different axes."
 
 ---
 
-## 5. Domain shift breaks everything silently
+## 5. What happens when my questions are not short factual ones?
+
+**Short answer:** SE quietly stops meaning anything: on summaries, essays or code "same meaning" has no clean answer, and nothing errors to tell you.
 
 **What "domain" means here.** The type/genre of question and answer. Semantic Entropy was tested and validated on short factual questions with a single correct answer (like TriviaQA: "Who wrote 1984?" → "George Orwell"). That's one domain.
 
@@ -92,23 +107,27 @@ Two caveats that eat into the favorable latency number:
 
 **Why "silently" matters:** the code will still run. It will still spit out a number. Nothing errors or warns you. It just quietly produces a meaningless entropy score dressed up as a real one, and if you don't already know the method's validated scope, you'd have no way to tell.
 
-**One sentence to say on stage:** "This was proven on short factual QA — the moment you point it at open-ended generation like summaries or code, the underlying question 'do these mean the same thing' stops having a clean answer, and the method degrades quietly, with no error message telling you it broke."
+**In one sentence:** "This was proven on short factual QA — the moment you point it at open-ended generation like summaries or code, the underlying question 'do these mean the same thing' stops having a clean answer, and the method degrades quietly, with no error message telling you it broke."
 
 ---
 
-## 6. SEP inherits SE's mistakes AND adds a generalization gap
+## 6. Does SEP fix SE's weaknesses?
+
+**Short answer:** No: SEP learns to imitate SE, so it inherits SE's errors, and it only works on the one model it was trained on.
 
 **What SEP is, first.** Semantic Entropy Probe. Instead of generating 10 answers and clustering them every time (slow, expensive), you train a much simpler model once, offline: a single linear layer that looks at the LLM's internal state right after reading the *question* (before generating any answer), and tries to predict what the Semantic Entropy *would have been* if you'd done the full expensive process. Once trained, using it at inference time is just one fast matrix multiplication — cheap, like Predictive Entropy.
 
 **Why it "inherits SE's mistakes."** To train this probe, you need training examples of (question, correct SE score) pairs — and the "correct SE score" for each training example was itself computed using the full, expensive, NLI-based Semantic Entropy process from caveat #1. So if that process is sometimes wrong or noisy (per caveats 1–3), the probe is trained to imitate those exact wrong/noisy numbers. It can't be more accurate than its own training labels — it's learning to mimic SE, flaws included, not learning some purer ground truth.
 
-**What "generalization gap" means.** "Generalization" = does something that works on the data you tested it on also work on new, different data it hasn't seen. The probe is trained on the internal numerical representations ("hidden states") of one specific model — say, Gemma 2 9B. Those internal representations are specific to that model's architecture and training — a different model (even a same-family model of a different size) organizes its internal "thoughts" differently. So a probe trained on Gemma 2 9B's hidden states is essentially useless if you swap in a different model — you'd have to retrain it from scratch.
+**What "generalization gap" means.** "Generalization" = does something that works on the data you tested it on also work on new, different data it hasn't seen. The probe is trained on the internal numerical representations ("hidden states") of one specific model — say, Gemma 4 E4B. Those internal representations are specific to that model's architecture and training — a different model (even a same-family model of a different size) organizes its internal "thoughts" differently. So a probe trained on Gemma 4 E4B's hidden states is essentially useless if you swap in a different model — you'd have to retrain it from scratch.
 
-**One sentence to say on stage:** "SEP is a cheap shortcut that learns to imitate full Semantic Entropy — so it can't be more correct than SE's own flaws, and it's glued to the specific model it was trained on; swap models and you have to retrain it."
+**In one sentence:** "SEP is a cheap shortcut that learns to imitate full Semantic Entropy — so it can't be more correct than SE's own flaws, and it's glued to the specific model it was trained on; swap models and you have to retrain it."
 
 ---
 
-## 7. "Hallucination" itself is being operationalized narrowly
+## 7. What exactly counts as a "hallucination" here?
+
+**Short answer:** A greedy answer that contains none of the accepted answers — and SE detects *inconsistency*, so a model that is wrong the same way every time passes as confident.
 
 **What "operationalized" means.** Turning a fuzzy, informal concept ("did the model hallucinate?") into something a program can actually check with code — a concrete, checkable rule.
 
@@ -120,4 +139,4 @@ Two caveats that eat into the favorable latency number:
 
 **Why this is the sharpest caveat of all:** Semantic Entropy is fundamentally a *self-consistency* detector, not a *truth* detector. It only catches hallucinations that manifest as the model being inconsistent with itself. A model that is wrong the same way every single time will sail through SE completely undetected, scoring as if it were perfectly reliable.
 
-**One sentence to say on stage:** "Semantic Entropy catches the model not knowing — when it's inconsistent across tries. It cannot catch the model confidently knowing something false — when it's wrong the same way every time — because that looks identical, mathematically, to being right every time."
+**In one sentence:** "Semantic Entropy catches the model not knowing — when it's inconsistent across tries. It cannot catch the model confidently knowing something false — when it's wrong the same way every time — because that looks identical, mathematically, to being right every time."

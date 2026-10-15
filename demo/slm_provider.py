@@ -34,6 +34,8 @@ from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY
 from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
 
+from demo.model_registry import list_model_ids
+
 logger = logging.getLogger(__name__)
 
 
@@ -313,7 +315,7 @@ def build_default_provider(model_id: str | None = None) -> SLMProvider:
     """Construct the SLMProvider selected by config.slm_provider.
 
     When `model_id` is None the active model from config.vllm_model_id is
-    used (single-model commands like `seh chat`). When provided, the same
+    used (single-model commands like `python -m demo.cli chat`). When provided, the same
     config.slm_provider kind is built but bound to the requested model id —
     this is the entry point the evaluation sweep uses to iterate over
     config.target_model_ids.
@@ -344,4 +346,11 @@ def build_sweep_providers() -> list[SLMProvider]:
     across the target SLMs.
     """
     settings = get_settings()
+    known = set(list_model_ids())
+    unknown = [mid for mid in settings.target_model_ids if mid not in known]
+    if unknown:
+        raise ValueError(
+            f"TARGET_MODEL_IDS contains ids not in the model registry: {unknown!r}. "
+            f"Known: {sorted(known)!r}. Add an entry in demo/model_registry.py first."
+        )
     return [build_default_provider(model_id=mid) for mid in settings.target_model_ids]

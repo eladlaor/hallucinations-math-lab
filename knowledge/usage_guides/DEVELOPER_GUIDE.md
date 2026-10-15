@@ -3,65 +3,145 @@
 ## Table of Contents
 
 - [Summary](#summary)
-- [Local Setup](#local-setup)
-- [Running the SE pipeline locally](#running-the-se-pipeline-locally)
-- [Layout](#layout)
+- [Local setup](#local-setup)
+- [How is the code organized?](#how-is-the-code-organized)
+- [Why is the library separate from the demo?](#why-is-the-library-separate-from-the-demo)
+- [How does one evaluation flow through the code?](#how-does-one-evaluation-flow-through-the-code)
+- [How do I add a detector?](#how-do-i-add-a-detector)
+- [How do I add a model to the registry?](#how-do-i-add-a-model-to-the-registry)
+- [How do I plug in a different judge?](#how-do-i-plug-in-a-different-judge)
 - [Coding conventions](#coding-conventions)
+- [Contribution workflow](#contribution-workflow)
 
 ## Summary
 
-Get from zero to a passing `pytest` and a `seh detect` call against a local vLLM
-server in 10 minutes. End-to-end (with Vertex) is in `DEVOPS_GUIDE.md`.
-
-## Local Setup
-
 ```bash
-uv sync --extra dev
-cp .env.example .env
-# edit .env: set GCP_PROJECT_ID (for judge), or leave blank to skip the judge step
-uv run pytest tests/unit -v
+uv sync --all-extras && cp .env.example .env
+uv run pytest -q && uv run ruff check .
+uv run python examples/score_precollected_samples.py
 ```
 
-## Running the SE pipeline locally
+If all three pass you have a working setup — no GPU, model or cloud account
+needed. The library lives in `src/hallucinations_math_lab/` and must never
+import `demo/`. New detectors implement the `Detector` protocol and are
+picked up by the benchmark and AUROC scripts automatically.
 
-1. **Bring up vLLM** (separate machine with an L4 / RunPod / etc; not the dev laptop):
-   ```bash
-   docker build -t vllm-gemma2 serving/
-   docker run --gpus all -p 8080:8080 vllm-gemma2
-   ```
-2. **Point the client at it** — set `VLLM_BASE_URL=http://<host>:8080/v1` in `.env`.
-3. **Detect**:
-   ```bash
-   uv run seh detect "Who wrote 1984?"
-   uv run seh chat "Who was the first woman to walk on Mars?"
-   ```
+## Local setup
 
-## Layout
+1. Install [uv](https://docs.astral.sh/uv/) and clone the repo.
+2. `uv sync --all-extras` — creates `.venv` with every optional dependency
+   group (`demo`, `judge`, `eval`, `dev`). The test suite imports the demo
+   provider, so the `dev` extra alone is not enough.
+3. `cp .env.example .env` — every setting is documented inline. List-valued
+   settings are JSON (`ENABLED_DETECTORS=["predictive_entropy"]`).
+4. `uv run pytest -q` — about a minute on a laptop CPU.
+
+Python 3.12 or 3.13. Use `uv add` / `uv lock` to change dependencies, never
+`pip`; CI installs with `--locked`.
+
+## How is the code organized?
 
 ```
-src/seh_handler/
-  constants.py             # frozen enums + literals
-  config.py                # Pydantic Settings
-  custom_types/            # api_schemas.py, domain_types.py
+src/hallucinations_math_lab/
+  __init__.py              # public surface — everything a consumer imports
+  evaluator.py             # evaluate_responses (pure scoring) + ResponseEvaluator (drives a provider)
+  escalation.py            # EscalationPolicy protocol; SingleDetector, AnyAbove, AllAbove
+  constants.py             # DetectorName, DetectorCategory, AnswerSource, NLILabel
+  config.py                # Pydantic Settings, read from env / .env
+  custom_types/            # Sample, SampleSet, TokenLogprob, Cluster, DetectionResult
   services/
-    vllm_client.py         # OpenAI-compat vLLM client (n=10, logprobs)
-    predictive_entropy.py  # token-logprob baseline
-    semantic_entropy.py    # NLI clustering + SE
-    nli.py                 # DeBERTa-MNLI wrapper
-    judge.py               # Vertex Gemini judge
-  agents/
-    detector_agent.py
-    judge_agent.py
-  main.py                  # Typer CLI
-serving/                   # vLLM Dockerfile + Vertex deploy script
-eval/                      # benchmark scripts, datasets
-tests/unit/                # entropy + clustering math tests
+    detector_protocol.py   # Detector, DetectionContext, DetectorScore, DetectorMetadata
+    predictive_entropy.py  # PE
+    semantic_entropy.py    # SE + bidirectional-entailment clustering
+    semantic_entropy_probe.py  # SEP + the SEPProbe linear module
+    nli.py                 # DeBERTa-MNLI wrapper (lazy-loaded)
+    sampling_provider.py   # SamplingProvider protocol
+  judges/                  # Judge protocol + GeminiJudge
+demo/
+  cli.py                   # `python -m demo.cli detect|chat`
+  slm_provider.py          # VLLMOpenAIProvider, HFTransformersProvider, sweep builder
+  model_registry.py        # per-model serving settings (Gemma 4 family)
+eval/                      # datasets, run_benchmark, compute_auroc, train_sep_probe, vertex_genai_eval
+examples/                  # runnable playground scripts
+tests/unit/                # see the QA Guide
+serving/, terraform/       # see the DevOps Guide
 ```
+
+## Why is the library separate from the demo?
+
+So that someone who already has an LLM stack can `pip install` the scorers
+without pulling in vLLM clients, Gemma settings or Google Cloud. The wheel
+ships only `src/hallucinations_math_lab/`; `demo/`, `eval/` and `examples/`
+exist only in the repository.
+
+The rule that keeps this true: **nothing under `src/` imports `demo`** at
+module import time. The single exception is `ResponseEvaluator` built with
+no provider, which lazily falls back to `demo.slm_provider` — that path only
+makes sense inside the repo.
+
+## How does one evaluation flow through the code?
+
+1. `ResponseEvaluator.evaluate(prompt)` asks the provider for N samples (if
+   any detector `requires_samples`), a greedy answer, and a pooled hidden
+   state (if any detector `requires_hidden_state`).
+2. It calls `evaluate_responses(...)`, which validates that every detector's
+   inputs are present (fail fast), builds one `DetectionContext`, and calls
+   each detector's `score(ctx)`.
+3. The escalation policy reads the score dictionary; if it fires and a judge
+   is set, `judge.answer(prompt)` replaces the final answer.
+4. Everything lands in a `DetectionResult`.
+
+## How do I add a detector?
+
+1. Add an id to `DetectorName` in `constants.py`.
+2. Create `services/<your_detector>.py` with a class that has `name`,
+   `metadata` (signal, assumption, failure modes, category),
+   `requires_samples`, `requires_hidden_state`, and
+   `score(ctx) -> DetectorScore`. Higher score must mean "more likely
+   hallucinating" — invert confidence-style signals. Fill `cost_usd` and
+   `latency_ms` honestly; they feed the planned cost/accuracy comparison.
+3. Register it in `_build_default_detectors` in `evaluator.py` so it can be
+   turned on with `ENABLED_DETECTORS`.
+4. Export it from `__init__.py` if consumers should import it.
+5. Write the unit test first (see `tests/unit/test_semantic_entropy.py`):
+   known inputs → known score, plus the missing-prerequisite error.
+
+`examples/custom_detector.py` is a working sketch of steps 2–3 without
+touching the library.
+
+## How do I add a model to the registry?
+
+Add a `ModelEntry` to `_REGISTRY` in `demo/model_registry.py` with its vLLM
+settings (dtype, max length, quantization) and hardware (machine type,
+accelerator). Exactly one entry may be `is_local_default` and one
+`is_deployed_default`; `tests/unit/test_model_registry.py` enforces this. A
+model must be in the registry before it can appear in `VLLM_MODEL_ID` or
+`TARGET_MODEL_IDS`.
+
+## How do I plug in a different judge?
+
+Any object with `answer(prompt: str) -> tuple[str, str]` (answer,
+reasoning) satisfies the `Judge` protocol. Pass it as `judge=` to
+`evaluate_responses` or `ResponseEvaluator`. `judges/gemini.py` is the
+reference; it imports the Vertex SDK lazily so the library loads without it.
 
 ## Coding conventions
 
-- Python 3.12, `uv` for deps, src layout.
-- Constants in `constants.py` (use `StrEnum` for closed string sets).
-- All configurable values in `config.py` (Pydantic Settings, env-driven).
-- Fail-fast on unexpected errors; log with `extra={"ctx": {...}}`.
-- One responsibility per module; no "utils.py".
+- `src/` layout, `uv` for everything, Python 3.12+ idioms.
+- Immutable values and enums in `constants.py` (`StrEnum` for closed string
+  sets); anything configurable in `config.py`. No inline magic strings in
+  logic.
+- Fail fast: validate inputs at the boundary, raise with context (ids,
+  parameters, the function's intent), never swallow an exception.
+- Log with structured context: `logger.info("...", extra={LOG_EXTRA_KEY: {...}})`.
+- One responsibility per module; name modules after their domain, no
+  `utils.py`.
+- Heavy dependencies (`transformers` models, Vertex SDK) load lazily.
+
+## Contribution workflow
+
+1. Write or update a failing test that captures the change.
+2. Make it pass; keep `uv run ruff check .` clean.
+3. Update the docs the change touches and add a line under `[Unreleased]`
+   in `CHANGELOG.md` (Keep a Changelog format).
+4. Open a pull request; CI must be green.

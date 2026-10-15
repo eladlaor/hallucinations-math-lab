@@ -1,15 +1,23 @@
 # Glossary
 
-> Terms used in `taste`, explained for talk-prep depth: etymology, pronunciation,
-> analogy, technical definition, contrast, real-world use, and production caveats.
-
 ## Table of contents
 
-- [Bidirectional entailment](#bidirectional-entailment)
+- [Summary](#summary)
+- [What is bidirectional entailment?](#what-is-bidirectional-entailment)
+
+## Summary
+
+Terms that the docs and code lean on, each explained in full: origin,
+pronunciation, an analogy, the technical definition, how it differs from
+look-alike concepts, where it is used here, and how it breaks in practice.
 
 ---
 
-## Bidirectional entailment
+## What is bidirectional entailment?
+
+Two texts bidirectionally entail each other when each one, taken as true,
+forces the other to be true — the test this repo uses for "these two answers
+mean the same thing".
 
 **1. Etymology.**
 "Entailment" comes from the logical/legal sense of "entail" — Old French *en-* +
@@ -45,13 +53,13 @@ i.e., the NLI classifier says A→B is entailment *and*, run in the reverse
 direction, B→A is also entailment. This is used as an operational proxy for
 "A and B express the same meaning" (semantic equivalence), because true semantic
 equivalence isn't directly computable — bidirectional entailment is the nearest
-checkable substitute. In `taste`, this is how `cluster_by_bidirectional_entailment`
+checkable substitute. In this repo, this is how `cluster_by_bidirectional_entailment`
 (`src/hallucinations_math_lab/services/semantic_entropy.py:39`) decides whether a new sampled answer
 joins an existing cluster or starts a new one, which is the input to the Semantic
 Entropy calculation.
 
 **5. Contrast with similar concept.**
-- **Unidirectional entailment** — A→B holds but B→A doesn't tested. Useful for
+- **Unidirectional entailment** — A→B holds but B→A is not tested. Useful for
   "is B a valid conclusion from A" (e.g., summarization faithfulness checks), but
   *not* sufficient for clustering by meaning: "Paris is the capital of France"
   entails "Paris is a city," but the reverse doesn't hold — they aren't the same
@@ -73,7 +81,7 @@ Semantic Entropy's core mechanism: sample N answers from an LLM at temperature
 into clusters, even if worded completely differently ("Orwell wrote it,"
 "George Orwell is the author," "1984 was written by Orwell"). The Shannon
 entropy of the resulting cluster-size distribution becomes the hallucination
-signal — this is exactly the "second ear" in the Reversim talk outline.
+signal.
 
 **7. Caveat when applying it in production.**
 Bidirectional entailment is only as reliable as the underlying NLI model, which
@@ -82,7 +90,7 @@ domain-specific QA answers. In production this means:
 - **Degrades on long-form text** — entailment judgments become noisy past a
   few sentences, so clustering quality drops exactly where you'd most want a
   reliable signal (longer, more complex answers).
-- **Order-sensitive in practice** — `taste`'s clustering is greedy (each new
+- **Order-sensitive in practice** — the repo's clustering is greedy (each new
   sample is compared only against existing cluster *representatives*, not
   full pairwise, for O(N·k) instead of O(N²) cost), so the final partition can
   depend on sample order, not just content.

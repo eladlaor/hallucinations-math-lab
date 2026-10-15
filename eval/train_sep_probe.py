@@ -11,11 +11,11 @@ model id under `data/probes/<slug>.pt`.
 Why local training, not a released probe checkpoint:
   - The probe is specific to the SLM that produced the training hidden
     states. A checkpoint released against Llama-3.1-70B is not transferable
-    to Gemma-2-9B-AWQ, and vice versa.
+    to Gemma-4-E4B, and vice versa.
   - Training keeps the project self-contained and reproducible per backbone.
 
 Usage:
-    uv run python eval/train_sep_probe.py \\
+    uv run python -m eval.train_sep_probe \\
         --calibration-set data/calibration/trivia_qa_500.jsonl \\
         --output-path data/probes/auto
 

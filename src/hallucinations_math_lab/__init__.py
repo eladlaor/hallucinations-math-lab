@@ -1,4 +1,4 @@
-"""Taste — response evaluators for LLM-native projects.
+"""hallucinations-math-lab — response evaluators for LLM-native projects.
 
 Two public entry points:
 

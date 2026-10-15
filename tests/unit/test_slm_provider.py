@@ -21,6 +21,7 @@ from demo.slm_provider import (
     HFTransformersProvider,
     VLLMOpenAIProvider,
     build_default_provider,
+    build_sweep_providers,
 )
 
 
@@ -132,6 +133,21 @@ def test_build_default_provider_rejects_unknown_kind(monkeypatch):
     try:
         with pytest.raises(ValueError, match="Unknown SLM_PROVIDER"):
             build_default_provider()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_build_sweep_providers_rejects_unregistered_model(monkeypatch):
+    from hallucinations_math_lab.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("SLM_PROVIDER", "vllm")
+    monkeypatch.setenv(
+        "TARGET_MODEL_IDS", '["google/gemma-4-E4B-it", "acme/not-a-real-model"]'
+    )
+    try:
+        with pytest.raises(ValueError, match="not in the model registry"):
+            build_sweep_providers()
     finally:
         get_settings.cache_clear()
 

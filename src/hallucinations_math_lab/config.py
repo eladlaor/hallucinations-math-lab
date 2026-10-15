@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # a per-model override in target_model_base_urls uses this URL.
     vllm_base_url: str = Field(default="http://localhost:8000/v1")
     vllm_api_key: str = Field(default="local-dummy")
-    # The "active" model for single-model commands (e.g., `seh chat`).
+    # The "active" model for single-model commands (e.g., `python -m demo.cli chat`).
     # Must appear in the model registry. Distinct from target_model_ids,
     # which is the evaluation sweep.
     vllm_model_id: str = Field(default="google/gemma-4-E2B-it")
@@ -103,16 +103,9 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"target_model_ids must be unique; got duplicates in {value!r}."
             )
-        from demo.model_registry import list_model_ids
-
-        known = set(list_model_ids())
-        unknown = [mid for mid in value if mid not in known]
-        if unknown:
-            raise ValueError(
-                f"target_model_ids contains ids not in the model registry: "
-                f"{unknown!r}. Known: {sorted(known)!r}. Add an entry in "
-                f"services/model_registry.py before using a new SLM."
-            )
+        # Registry membership is checked by demo.slm_provider.build_sweep_providers:
+        # the library must not import the demo package, which is not shipped in
+        # the wheel.
         return value
 
     @model_validator(mode="after")

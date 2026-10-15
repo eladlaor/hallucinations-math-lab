@@ -1,39 +1,46 @@
 # Vertex AI Deploy Notes
 
 ## TOC
+
 - [Summary](#summary)
-- [Why Vertex Prediction (not Model Garden)](#why-vertex-prediction-not-model-garden)
-- [Custom container contract](#custom-container-contract)
-- [Cold-start mitigation](#cold-start-mitigation)
+- [Why a custom container on Vertex Prediction, not Model Garden?](#why-a-custom-container-on-vertex-prediction-not-model-garden)
+- [What does Vertex require of the container?](#what-does-vertex-require-of-the-container)
+- [How long does a cold start take?](#how-long-does-a-cold-start-take)
 
 ## Summary
 
-We use a **custom-container deployment on Vertex AI Prediction** because Vertex AI
-Model Garden's managed Gemma endpoints **do not expose token-level logprobs**,
-which the Semantic Entropy detector requires.
+The small model is served as a **custom vLLM container on Vertex AI
+Prediction** because Vertex Model Garden's managed open-model endpoints do
+not return token-level logprobs, and Predictive Entropy needs them. The
+step-by-step deploy runbook is in the
+[DevOps Guide](../usage_guides/DEVOPS_GUIDE.md); this page explains the
+choices.
 
-## Why Vertex Prediction (not Model Garden)
+## Why a custom container on Vertex Prediction, not Model Garden?
+
+Because it is the cheapest managed option that still returns per-token
+logprobs.
 
 | Option | Logprobs | Effort | Notes |
 |---|---|---|---|
-| Model Garden one-click Gemma | **No** | Lowest | Logprobs feature is only on the Gemini API, not on open-model endpoints |
-| GKE + vLLM | Yes | High | Official Google tutorial; idiomatic GKE story |
-| **Vertex AI Prediction custom container** | **Yes** | Medium | What we chose |
-| GCE VM + vLLM | Yes | Lowest | Cheapest, but not a "Vertex" story |
+| Model Garden one-click Gemma | **No** | lowest | logprobs are only on the Gemini API, not on open-model endpoints |
+| GKE + vLLM | yes | high | Google's documented path; you run the cluster |
+| **Vertex Prediction custom container** | **yes** | medium | what this repo uses |
+| Plain VM + vLLM | yes | low | cheapest, but nothing managed |
 
-## Custom container contract
+## What does Vertex require of the container?
 
-Vertex AI Prediction expects the container to:
-- Listen on `$AIP_HTTP_PORT` (default 8080).
-- Respond 200 on `GET $AIP_HEALTH_ROUTE` (default `/health`).
-- Serve predictions at `$AIP_PREDICT_ROUTE`.
+Three things, all satisfied by vLLM's OpenAI-compatible server once the
+Dockerfile binds it to the right port:
 
-vLLM's OpenAI-compatible server satisfies all three out of the box on port 8000;
-the Dockerfile rebinds to 8080 and points `AIP_PREDICT_ROUTE` at
-`/v1/chat/completions`.
+- listen on `$AIP_HTTP_PORT` (default 8080);
+- return 200 on `GET $AIP_HEALTH_ROUTE` (default `/health`);
+- serve predictions at `$AIP_PREDICT_ROUTE` — the Dockerfile points it at
+  `/v1/chat/completions`.
 
-## Cold-start mitigation
+## How long does a cold start take?
 
-A Gemma 2 9B AWQ-INT4 image pulls + warms in ~5 minutes on L4. For interactive
-demos set `--min-replica-count=1` (already done in the Terraform
-`null_resource.deploy_model` in `terraform/vertex.tf`).
+Expect several minutes for Vertex to pull the image, download the model
+weights and warm vLLM; the full deploy step takes 10–20 minutes. The
+Terraform deploy sets a minimum of one replica so the endpoint stays warm
+while it is up — which is also why it must be torn down after a run.

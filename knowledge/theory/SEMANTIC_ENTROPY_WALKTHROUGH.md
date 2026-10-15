@@ -8,17 +8,17 @@
 
 - [Summary](#summary)
 - [Notation cheat-sheet](#notation-cheat-sheet)
-- [Step 0 — Shannon entropy, the one primitive](#step-0--shannon-entropy-the-one-primitive)
-- [Step 1 — The baseline: predictive entropy](#step-1--the-baseline-predictive-entropy)
-- [Step 2 — Sample N answers](#step-2--sample-n-answers)
-- [Step 3 — Bidirectional entailment: "do these mean the same thing?"](#step-3--bidirectional-entailment-do-these-mean-the-same-thing)
-- [Step 4 — Cluster the samples by meaning](#step-4--cluster-the-samples-by-meaning)
-- [Step 5 — Entropy over clusters = Semantic Entropy](#step-5--entropy-over-clusters--semantic-entropy)
-- [Step 6 — From a number to a verdict](#step-6--from-a-number-to-a-verdict)
-- [Worked end-to-end examples](#worked-end-to-end-examples)
-- [Why SE beats predictive entropy](#why-se-beats-predictive-entropy)
-- [Where it breaks](#where-it-breaks)
-- [Run it yourself](#run-it-yourself)
+- [Step 0 — What is Shannon entropy, the one formula everything builds on?](#step-0--what-is-shannon-entropy-the-one-formula-everything-builds-on)
+- [Step 1 — What does the baseline, predictive entropy, measure?](#step-1--what-does-the-baseline-predictive-entropy-measure)
+- [Step 2 — Why sample N answers instead of one?](#step-2--why-sample-n-answers-instead-of-one)
+- [Step 3 — How do we decide that two answers "mean the same thing"?](#step-3--how-do-we-decide-that-two-answers-mean-the-same-thing)
+- [Step 4 — How are the samples grouped by meaning?](#step-4--how-are-the-samples-grouped-by-meaning)
+- [Step 5 — How do the clusters become a Semantic Entropy number?](#step-5--how-do-the-clusters-become-a-semantic-entropy-number)
+- [Step 6 — How does a number become a verdict?](#step-6--how-does-a-number-become-a-verdict)
+- [What do real cases look like end to end?](#what-do-real-cases-look-like-end-to-end)
+- [Why does SE beat predictive entropy?](#why-does-se-beat-predictive-entropy)
+- [Where does it break?](#where-does-it-break)
+- [How do I run it myself?](#how-do-i-run-it-myself)
 
 ---
 
@@ -72,7 +72,7 @@ Every symbol used below, said aloud the way an engineer says it.
 
 ---
 
-## Step 0 — Shannon entropy, the one primitive
+## Step 0 — What is Shannon entropy, the one formula everything builds on?
 
 Everything here is one formula applied to different things. Learn it once.
 
@@ -118,7 +118,7 @@ to compare any entropy value against.
 
 ---
 
-## Step 1 — The baseline: predictive entropy
+## Step 1 — What does the baseline, predictive entropy, measure?
 
 This is the cheap detector SE is measured against — and the one SE has to beat.
 
@@ -190,7 +190,9 @@ never gate SE via `AllAbove` — only ever add to it via `AnyAbove`.
 
 ---
 
-## Step 2 — Sample N answers
+## Step 2 — Why sample N answers instead of one?
+
+Because one answer cannot show disagreement: only several independent samples at temperature > 0 reveal whether the model keeps saying the same thing.
 
 ### Math
 
@@ -224,7 +226,9 @@ samples is invisible at N=10) at linear generation cost.
 
 ---
 
-## Step 3 — Bidirectional entailment: "do these mean the same thing?"
+## Step 3 — How do we decide that two answers "mean the same thing"?
+
+We ask an NLI model whether each answer entails the other; if both directions hold, they are treated as the same meaning.
 
 ### Math
 
@@ -289,7 +293,9 @@ DeBERTa.
 
 ---
 
-## Step 4 — Cluster the samples by meaning
+## Step 4 — How are the samples grouped by meaning?
+
+Greedily: each answer joins the first existing cluster whose representative it bidirectionally entails, or starts a new cluster.
 
 ### Math
 
@@ -376,7 +382,9 @@ roughly N/K in NLI calls.
 
 ---
 
-## Step 5 — Entropy over clusters = Semantic Entropy
+## Step 5 — How do the clusters become a Semantic Entropy number?
+
+Treat each cluster's share of the N samples as a probability and take the Shannon entropy of that distribution — that number, in nats, is SE.
 
 ### Math
 
@@ -437,7 +445,7 @@ model produced ten different claims. It is generating from noise.
 
 ---
 
-## Step 6 — From a number to a verdict
+## Step 6 — How does a number become a verdict?
 
 SE is a continuous score, not a boolean. The verdict is a threshold comparison.
 
@@ -492,7 +500,7 @@ escalated without re-reading config.
 
 ---
 
-## Worked end-to-end examples
+## What do real cases look like end to end?
 
 Same question, three model states. N = 10 throughout.
 
@@ -568,7 +576,7 @@ K is worth logging alongside SE for this reason.
 
 ---
 
-## Why SE beats predictive entropy
+## Why does SE beat predictive entropy?
 
 The two detectors disagree precisely where it matters:
 
@@ -590,7 +598,7 @@ exists as the third detector — it trains a probe on the model's hidden states 
 
 ---
 
-## Where it breaks
+## Where does it break?
 
 Taken from `SemanticEntropyDetector.metadata.failure_modes`:
 
@@ -614,13 +622,22 @@ See `knowledge/CAVEATS.md` for the project-level version of these.
 
 ---
 
-## Run it yourself
+## How do I run it myself?
 
 The unit tests use a fake NLI scorer, so no GPU or model download is needed to watch
 the math work:
 
 ```bash
 uv run pytest tests/unit/test_semantic_entropy.py -v
+```
+
+To watch string matching and a real NLI model cluster the *same* samples
+differently — the paraphrase failure from Step 3 — run both modes of the
+playground script:
+
+```bash
+uv run python examples/score_precollected_samples.py
+uv run python examples/score_precollected_samples.py --nli deberta
 ```
 
 To compute the reference table above by hand:

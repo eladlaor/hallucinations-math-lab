@@ -1,36 +1,52 @@
 # Local Development
 
 ## TOC
+
 - [Summary](#summary)
 - [Without a GPU](#without-a-gpu)
+- [With a local model](#with-a-local-model)
 - [With a GPU on a remote box](#with-a-gpu-on-a-remote-box)
 
 ## Summary
 
-You don't need a local GPU to develop on this repo. The SE math, NLI clustering,
-and unit tests all run on CPU. To exercise the end-to-end path you need vLLM
-running somewhere reachable.
+You do not need a GPU to develop here: the math, the clustering, the
+examples and the whole test suite run on CPU. A GPU only matters when you
+want a real small model to generate answers, either in-process
+(`SLM_PROVIDER=hf_transformers`) or through a vLLM server
+(`SLM_PROVIDER=vllm`).
 
 ## Without a GPU
 
 ```bash
-uv sync --extra dev
-uv run pytest tests/unit -v
+uv sync --all-extras
+cp .env.example .env
+uv run pytest -q
+uv run python examples/score_precollected_samples.py              # string-equality NLI, instant
+uv run python examples/score_precollected_samples.py --nli deberta # real NLI on CPU, ~1.6 GB download once
 ```
 
-That validates the entropy math and clustering logic with a fake NLI scorer.
-For NLI on real text against `deberta-large-mnli`, CPU works (slow): you can do
-short manual smokes by writing a small script that calls `NLIScorer().classify`.
+## With a local model
+
+The default `.env` loads `google/gemma-4-E2B-it` in-process through
+`transformers` (on CUDA if available, otherwise CPU):
+
+```bash
+uv run python -m demo.cli detect "Who wrote 1984?"
+```
+
+The first call downloads the model. On CPU expect a slow first answer; use
+`SAMPLE_N` and `MAX_TOKENS` in `.env` to keep experiments small.
 
 ## With a GPU on a remote box
 
-Option A — RunPod L4 (cheapest, ad-hoc):
+On any machine with an NVIDIA GPU and the NVIDIA container runtime:
+
 ```bash
-# in the orchestrator repo, use the gpu-training-run skill to provision an L4
-# then on the pod:
-docker run --gpus all -p 8080:8080 vllm-gemma2
+docker build -t vllm-gemma -f serving/Dockerfile .
+docker run --gpus all -p 8080:8080 -e MODEL_ID=google/gemma-4-E4B-it vllm-gemma
 ```
 
-Option B — local CUDA workstation: same `docker run` command.
-
-In either case point `VLLM_BASE_URL` at the host and run `seh detect ...`.
+Then point your local `.env` at it: `SLM_PROVIDER=vllm`,
+`VLLM_BASE_URL=http://<host>:8080/v1`, `VLLM_MODEL_ID=google/gemma-4-E4B-it`.
+Check the [DevOps Guide](../usage_guides/DEVOPS_GUIDE.md#known-gaps-before-you-deploy)
+first — the image's vLLM pin needs raising for Gemma 4.

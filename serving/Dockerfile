@@ -1,7 +1,7 @@
 # vLLM serving image. The model is selected via $MODEL_ID at run time and the
 # vLLM launch flags are resolved from the project's model registry, so a single
-# image can serve any registered SLM. CUDA 12.4, vLLM pinned >=0.5.4 for the
-# Gemma-2 attention soft-cap fix.
+# image can serve any registered SLM. CUDA 12.4. NOTE: the vLLM pin below predates
+# Gemma 4 support; raise it before building (see the DevOps Guide known gaps).
 
 FROM nvcr.io/nvidia/cuda:12.4.1-runtime-ubuntu22.04
 

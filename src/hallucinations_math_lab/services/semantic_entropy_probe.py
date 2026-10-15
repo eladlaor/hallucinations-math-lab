@@ -87,7 +87,7 @@ class SemanticEntropyProbeDetector(Detector):
         if not probe_path.is_file():
             raise FileNotFoundError(
                 f"SEP probe file not found at {probe_path!s}. Train it first with "
-                "`uv run python eval/train_sep_probe.py`."
+                "`uv run python -m eval.train_sep_probe`."
             )
         self._probe_path = probe_path
         state = torch.load(probe_path, map_location="cpu", weights_only=True)

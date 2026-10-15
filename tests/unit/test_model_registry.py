@@ -66,7 +66,7 @@ def test_deployed_default_is_single_l4_gemma_4():
 
 
 def test_local_default_fits_on_a_laptop():
-    """The local default is the one `seh chat` uses for dev. Must be one of
+    """The local default is the one `python -m demo.cli chat` uses for dev. Must be one of
     the small Gemma 4 SKUs (E2B or E4B) so it actually runs on developer
     hardware."""
     entry = get_local_default()

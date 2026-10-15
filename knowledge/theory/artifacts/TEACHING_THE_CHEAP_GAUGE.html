@@ -414,7 +414,7 @@
 <div class="wrap">
 
 <header class="mast">
-  <p class="eyebrow">taste · detector notes</p>
+  <p class="eyebrow">hallucinations-math-lab · detector notes</p>
   <h1>Teaching the Cheap Gauge</h1>
   <p class="standfirst">Semantic Entropy works by asking the model ten times. A probe learns to guess its answer from one. This is the walk from one to the other — and specifically, what those <em>(hidden state → SE value)</em> pairs actually are.</p>
 </header>
@@ -477,7 +477,7 @@
       <div class="math">SE = −Σ p(C_k) · log p(C_k)          0 ≤ SE ≤ log N</div>
     </div>
   </div>
-  <p class="src">src/taste/services/semantic_entropy.py · src/taste/services/nli.py</p>
+  <p class="src">src/hallucinations_math_lab/services/semantic_entropy.py · src/hallucinations_math_lab/services/nli.py</p>
 
   <div class="unit">
     <h3>A note on the unit: what is a "nat"?</h3>
@@ -693,7 +693,7 @@ torch.save(probe.state_dict(), output_path)</code></pre>
   </div>
 
   <p>Because the probe was fit against SE in nats, its output lands on <strong>the same scale as SE</strong>. The threshold carries over unchanged — SEP drops into the escalation comparator wherever SE sat, with no recalibration of <code>se_threshold</code>. That is a deliberate implementation choice: a regressor, not a classifier.</p>
-  <p class="src">src/taste/services/semantic_entropy_probe.py</p>
+  <p class="src">src/hallucinations_math_lab/services/semantic_entropy_probe.py</p>
 </section>
 
 <section>
