@@ -1,29 +1,38 @@
 """Success-criteria scoring scripts, on tiny hand-built benchmark rows.
 
 Contract pinned here:
-  - compute_auroc reports SE AUROC and the SE−PE gap against their targets.
-  - escalation_uplift reports greedy vs final accuracy and fails fast when no
-    row was escalated or the judge never answered.
-  - adversarial_separation runs a one-sided Mann-Whitney U and fails fast on a
-    missing detector score.
-  - train_sep_probe's held-out Pearson r tracks a learnable signal and rejects
-    splits too small to correlate.
+  - AUROC (rank formula) matches sklearn; bootstrap CIs are deterministic and
+    count degenerate resamples; McNemar's exact p matches the binomial test.
+  - compute_auroc reports per-detector AUROC with CIs; the SE−PE criterion
+    needs both the point gap and a CI that excludes zero.
+  - escalation_uplift needs both the uplift bar and McNemar significance,
+    reports answer lengths, and fails fast without escalations or a judge.
+  - adversarial_separation needs both p < 0.01 and the AUC effect size, and
+    fails fast on a missing detector score.
+  - Results files must be one run, and compared runs must match.
+  - train_sep_probe's cross-validated Pearson r tracks a learnable signal.
+  - TriviaQA slices are bounds-checked; probe provenance rejects overlap.
 """
 
 import numpy as np
 import pytest
+from sklearn.metrics import roc_auc_score
 
 from eval.adversarial_separation import separation_report
-from eval.benchmark_results import is_correct
+from eval.benchmark_results import is_correct, run_config
 from eval.compute_auroc import auroc_report
+from eval.datasets.load_triviaqa import slice_bounds
 from eval.escalation_uplift import uplift_report
-from eval.train_sep_probe import holdout_pearson_r
+from eval.inference_stats import auroc, mcnemar_exact_p, paired_bootstrap
+from eval.sep_probe_provenance import assert_disjoint, write_training_ids
+from eval.train_sep_probe import cross_validated_pearson_r
 from hallucinations_math_lab.constants import AnswerSource, DetectorName
 
 SE = str(DetectorName.SEMANTIC_ENTROPY)
 PE = str(DetectorName.PREDICTIVE_ENTROPY)
 SLM = str(AnswerSource.SMALL_MODEL_GREEDY)
 JUDGE = str(AnswerSource.JUDGE_MODEL)
+RUN = {"model_id": "google/gemma-4-E4B-it", "sample_n": 10, "sample_temperature": 1.0}
 
 
 def _row(
@@ -34,9 +43,11 @@ def _row(
     escalated: bool = False,
     source: str = SLM,
     aliases: list[str] | None = None,
+    run: dict | None = None,
 ) -> dict:
     return {
         "ground_truth_aliases": ["Paris"] if aliases is None else aliases,
+        **(RUN if run is None else run),
         "greedy_answer": greedy,
         "final_answer": greedy if final is None else final,
         "final_answer_source": source,
@@ -45,38 +56,128 @@ def _row(
     }
 
 
+# --- statistics primitives -------------------------------------------------
+
+
 def test_is_correct_is_case_insensitive_substring():
     assert is_correct("It is PARIS, France.", ["Paris"])
     assert not is_correct("", ["Paris"])
     assert not is_correct("Lyon", ["Paris"])
 
 
+def test_rank_auroc_matches_sklearn_including_ties():
+    rng = np.random.default_rng(0)
+    labels = rng.integers(0, 2, size=200)
+    scores = rng.integers(0, 5, size=200).astype(float)  # many ties
+    assert auroc(labels, scores) == pytest.approx(roc_auc_score(labels, scores))
+
+
+def test_auroc_is_undefined_for_one_class():
+    assert auroc(np.ones(5, dtype=int), np.arange(5.0)) is None
+
+
+def test_bootstrap_is_deterministic_and_counts_degenerate_draws():
+    labels = np.array([0, 0, 0, 1])  # a resample often draws no positive
+    scores = np.array([0.1, 0.2, 0.3, 0.9])
+
+    def stat(idx: np.ndarray) -> float | None:
+        return auroc(labels[idx], scores[idx])
+
+    first, second = paired_bootstrap(4, stat), paired_bootstrap(4, stat)
+    assert first == second
+    assert first.n_degenerate > 0
+    assert first.n_resamples + first.n_degenerate == 2000
+
+
+def test_mcnemar_uses_only_discordant_pairs():
+    before = np.array([True] * 50 + [False] * 10)
+    after = np.array([True] * 50 + [True] * 10)  # 10 fixes, 0 regressions
+    assert mcnemar_exact_p(before, after) == pytest.approx(2 * 0.5**10)
+    assert mcnemar_exact_p(before, before) == 1.0
+
+
+# --- criterion 1 and 2 -----------------------------------------------------
+
+
 def test_auroc_report_checks_se_target_and_gap():
+    rows = [_row("Paris", se=0.1 * i, pe=0.5) for i in range(20)]
+    rows += [_row("Lyon", se=5.0 + 0.1 * i, pe=0.5) for i in range(20)]
+    report = auroc_report(rows, source="fixture")
+
+    assert report["run_config"] == RUN
+    assert report["detectors"][SE]["auroc"] == 1.0
+    assert report["detectors"][PE]["auroc"] == 0.5
+    gap = report["criteria"]["se_minus_pe_auroc"]
+    assert gap["value"] == 0.5
+    assert gap["ci"]["low"] > 0
+    assert gap["met"] is True
+    assert report["criteria"]["se_auroc"]["met"] is True
+
+
+def test_gap_criterion_fails_when_ci_includes_zero():
+    """A gap that clears the bar on four rows is noise, not evidence."""
     rows = [
         _row("Paris", se=0.1, pe=0.5),
         _row("Paris", se=0.2, pe=0.9),
         _row("Lyon", se=1.5, pe=0.6),
         _row("Nice", se=1.8, pe=0.4),
     ]
-    report = auroc_report(rows, source="fixture")
+    gap = auroc_report(rows, source="fixture")["criteria"]["se_minus_pe_auroc"]
+    assert gap["value"] >= 0.05
+    assert gap["ci"]["low"] <= 0
+    assert gap["met"] is False
 
-    assert report["auroc"] == {SE: 1.0, PE: 0.25}
-    assert report["criteria"]["se_auroc"]["met"] is True
-    assert report["criteria"]["se_minus_pe_auroc"] == {"value": 0.75, "target": 0.05, "met": True}
+
+# --- criterion 3 -----------------------------------------------------------
 
 
-def test_uplift_report_measures_judge_gain():
-    rows = [
-        _row("Paris", se=0.1, pe=0.1),
-        _row("Lyon", se=2.0, pe=1.0, final="Paris", escalated=True, source=JUDGE),
-        _row("Nice", se=2.0, pe=1.0, final="Nice", escalated=True, source=JUDGE),
-        _row("Lyon", se=0.3, pe=0.3),
+def _uplift_rows(n_fixed: int, n_broken: int, n_unchanged: int) -> list[dict]:
+    fixed = [
+        _row("Lyon", se=2.0, pe=1.0, final="Paris", escalated=True, source=JUDGE)
+        for _ in range(n_fixed)
     ]
-    report = uplift_report(rows, source="fixture")
+    broken = [
+        _row("Paris", se=2.0, pe=1.0, final="Lyon", escalated=True, source=JUDGE)
+        for _ in range(n_broken)
+    ]
+    same = [_row("Paris", se=0.1, pe=0.1) for _ in range(n_unchanged)]
+    return fixed + broken + same
 
-    assert report["greedy_accuracy_pct"] == 25.0
-    assert report["final_accuracy_pct"] == 50.0
-    assert report["criteria"]["escalation_uplift_pp"] == {"value": 25.0, "target": 5.0, "met": True}
+
+def test_uplift_report_measures_a_significant_gain():
+    report = uplift_report(_uplift_rows(n_fixed=12, n_broken=1, n_unchanged=87), "fixture")
+
+    criterion = report["criteria"]["escalation_uplift_pp"]
+    assert report["greedy_accuracy_pct"] == 88.0
+    assert report["final_accuracy_pct"] == 99.0
+    assert criterion["value"] == 11.0
+    assert criterion["mcnemar_p_value"] < 0.05
+    assert criterion["ci"]["low"] > 0
+    assert criterion["met"] is True
+    assert report["n_fixed_by_escalation"] == 12
+    assert report["n_broken_by_escalation"] == 1
+
+
+def test_uplift_above_the_bar_but_not_significant_is_not_met():
+    report = uplift_report(_uplift_rows(n_fixed=2, n_broken=0, n_unchanged=8), "fixture")
+
+    criterion = report["criteria"]["escalation_uplift_pp"]
+    assert criterion["value"] == 20.0
+    assert criterion["mcnemar_p_value"] >= 0.05
+    assert criterion["met"] is False
+
+
+def test_uplift_report_flags_much_longer_final_answers():
+    verbose = _row(
+        "Lyon",
+        se=2.0,
+        pe=1.0,
+        final="It could be Paris or maybe Lyon",
+        escalated=True,
+        source=JUDGE,
+    )
+    report = uplift_report([verbose] * 4, source="fixture")
+    assert report["mean_answer_words"]["length_warning"] is True
 
 
 def test_uplift_report_fails_fast_without_escalations():
@@ -90,6 +191,9 @@ def test_uplift_report_fails_fast_when_judge_never_answered():
         uplift_report(rows, source="fixture")
 
 
+# --- criterion 4 -----------------------------------------------------------
+
+
 def test_separation_report_detects_higher_adversarial_scores():
     adversarial = [_row("x", se=se, pe=0.0, aliases=[]) for se in (1.6, 1.8, 2.0, 2.1, 2.3)]
     reference = [_row("Paris", se=se, pe=0.0) for se in (0.0, 0.1, 0.2, 0.3, 0.4)]
@@ -97,9 +201,25 @@ def test_separation_report_detects_higher_adversarial_scores():
 
     report = separation_report(adversarial, reference, detector=SE)
 
+    criterion = report["criteria"]["adversarial_separation"]
     assert report["n_adversarial"] == 5
     assert report["n_correct_reference"] == 5
-    assert report["criteria"]["adversarial_p_value"]["met"] is True
+    assert criterion["effect_size_auc"] == 1.0
+    assert criterion["met"] is True
+
+
+def test_significant_but_small_separation_is_not_met():
+    """Many rows make a weak shift significant; the effect size catches it."""
+    rng = np.random.default_rng(0)
+    adversarial = [_row("x", se=float(v), pe=0.0, aliases=[]) for v in rng.normal(0.3, 1, 2000)]
+    reference = [_row("Paris", se=float(v), pe=0.0) for v in rng.normal(0.0, 1, 2000)]
+
+    criterion = separation_report(adversarial, reference, detector=SE)["criteria"][
+        "adversarial_separation"
+    ]
+    assert criterion["p_value"] < 0.01
+    assert criterion["effect_size_auc"] < 0.75
+    assert criterion["met"] is False
 
 
 def test_separation_report_fails_fast_on_missing_detector():
@@ -108,15 +228,63 @@ def test_separation_report_fails_fast_on_missing_detector():
         separation_report(rows, rows, detector=str(DetectorName.SEMANTIC_ENTROPY_PROBE))
 
 
-def test_holdout_pearson_r_tracks_a_linear_signal():
+def test_separation_report_refuses_runs_from_different_models():
+    adversarial = [_row("x", se=2.0, pe=0.0, aliases=[], run={**RUN, "model_id": "other"})]
+    reference = [_row("Paris", se=0.1, pe=0.0)]
+    with pytest.raises(RuntimeError, match="not comparable"):
+        separation_report(adversarial, reference, detector=SE)
+
+
+# --- run comparability -----------------------------------------------------
+
+
+def test_run_config_rejects_mixed_rows():
+    rows = [
+        _row("Paris", se=0.1, pe=0.1),
+        _row("Paris", se=0.1, pe=0.1, run={**RUN, "sample_n": 5}),
+    ]
+    with pytest.raises(RuntimeError, match="One results file must hold one run"):
+        run_config(rows, "fixture")
+
+
+def test_run_config_rejects_rows_from_before_it_was_recorded():
+    row = _row("Paris", se=0.1, pe=0.1)
+    del row["model_id"]
+    with pytest.raises(RuntimeError, match="Re-run eval.run_benchmark"):
+        run_config([row], "fixture")
+
+
+# --- SEP probe: cross-validation and provenance ----------------------------
+
+
+def test_cross_validated_pearson_r_tracks_a_linear_signal():
     rng = np.random.default_rng(0)
     X = rng.normal(size=(60, 4))
     y = X @ np.array([1.0, -0.5, 0.0, 2.0]) + rng.normal(scale=0.05, size=60)
 
-    assert holdout_pearson_r(X, y, ridge_alpha=0.1, holdout_fraction=0.25, seed=0) > 0.95
+    mean_r, std_r = cross_validated_pearson_r(X, y, ridge_alpha=0.1, n_folds=5, seed=0)
+    assert mean_r > 0.95
+    assert std_r < 0.05
 
 
-def test_holdout_pearson_r_rejects_tiny_split():
-    X, y = np.zeros((5, 2)), np.arange(5.0)
-    with pytest.raises(ValueError, match="need at least 3"):
-        holdout_pearson_r(X, y, ridge_alpha=1.0, holdout_fraction=0.2, seed=0)
+def test_cross_validated_pearson_r_rejects_tiny_folds():
+    X, y = np.zeros((10, 2)), np.arange(10.0)
+    with pytest.raises(ValueError, match="fewer than 3 held-out rows"):
+        cross_validated_pearson_r(X, y, ridge_alpha=1.0, n_folds=5, seed=0)
+
+
+def test_slice_bounds_are_checked():
+    assert slice_bounds(500, 1000, 17944) == range(500, 1500)
+    with pytest.raises(ValueError, match="exceeds"):
+        slice_bounds(17000, 1000, 17944)
+    with pytest.raises(ValueError, match="offset >= 0 and n > 0"):
+        slice_bounds(-1, 10, 100)
+
+
+def test_provenance_rejects_overlap_and_accepts_disjoint_ids(tmp_path):
+    probe = tmp_path / "probe.pt"
+    write_training_ids(probe, ["q1", "q2"], "m", tmp_path / "calib.jsonl")
+
+    assert_disjoint(probe, ["q3", "q4"])
+    with pytest.raises(RuntimeError, match="1 benchmark questions were used"):
+        assert_disjoint(probe, ["q2", "q3"])

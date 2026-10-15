@@ -281,6 +281,16 @@ class ResponseEvaluator:
                         f"enabled detector list {enabled_names!s}."
                     )
 
+    @property
+    def slm(self) -> SamplingProvider:
+        """The sampling provider this evaluator drives (read-only)."""
+        return self._slm
+
+    @property
+    def detectors(self) -> tuple[Detector, ...]:
+        """The detectors this evaluator runs, in order (read-only)."""
+        return tuple(self._detectors)
+
     def evaluate(self, prompt: str) -> DetectionResult:
         try:
             need_samples = any(d.requires_samples for d in self._detectors)

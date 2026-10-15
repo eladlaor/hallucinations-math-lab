@@ -4,6 +4,12 @@
 
 - [Summary](#summary)
 - [What does success look like for the detectors?](#what-does-success-look-like-for-the-detectors)
+  - [Why AUROC and not accuracy at a threshold?](#why-auroc-and-not-accuracy-at-a-threshold)
+  - [Why do the comparative criteria need a significance test as well as a bar?](#why-do-the-comparative-criteria-need-a-significance-test-as-well-as-a-bar)
+  - [Why does criterion 4 need an effect size and not just p < 0.01?](#why-does-criterion-4-need-an-effect-size-and-not-just-p--001)
+  - [What keeps two runs from being compared by mistake?](#what-keeps-two-runs-from-being-compared-by-mistake)
+  - [What keeps the SEP probe from being scored on its own training data?](#what-keeps-the-sep-probe-from-being-scored-on-its-own-training-data)
+  - [Why might the escalation uplift be overstated?](#why-might-the-escalation-uplift-be-overstated)
 - [Test strategy](#test-strategy)
 - [What does each test file cover?](#what-does-each-test-file-cover)
 - [Running the suites](#running-the-suites)
@@ -36,18 +42,20 @@ research question answered by the criteria below, on real models.
 ## What does success look like for the detectors?
 
 Four measurable targets, each checked by a script over
-`eval/run_benchmark.py` output. Each script prints its value, the target and
-whether it was met. The pass bars live in `eval/success_criteria.py`.
+`eval/run_benchmark.py` output. Each script prints its value with a 95%
+interval, the target, and whether it was met. The pass bars live in
+`eval/success_criteria.py`.
 
-| # | Criterion | Target | Measured by |
+| # | Criterion | Met when | Measured by |
 |---|---|---|---|
-| 1 | SE separates hallucinated from correct TriviaQA answers | SE AUROC ≥ 0.75 on TriviaQA-1000 | `python -m eval.compute_auroc --in <triviaqa results>` |
-| 2 | Clustering by meaning beats token-level uncertainty | SE AUROC − PE AUROC ≥ 0.05 | same command, `criteria.se_minus_pe_auroc` |
-| 3 | Escalating to the judge pays off | final accuracy − greedy accuracy ≥ 5 percentage points | `python -m eval.escalation_uplift --in <triviaqa results>` (benchmark run with the judge) |
-| 4 | SE flags adversarial prompts | adversarial SE > SE on correctly answered TriviaQA, one-sided Mann-Whitney U, p < 0.01 | `python -m eval.adversarial_separation --adversarial <adversarial results> --reference <triviaqa results>` |
+| 1 | SE separates hallucinated from correct TriviaQA answers | SE AUROC ≥ 0.75 on TriviaQA-1000 (bootstrap 95% CI reported alongside) | `python -m eval.compute_auroc --in <triviaqa results>` |
+| 2 | Clustering by meaning beats token-level uncertainty | SE AUROC − PE AUROC ≥ 0.05 **and** the paired-bootstrap 95% CI of the gap excludes 0 | same command, `criteria.se_minus_pe_auroc` |
+| 3 | Escalating to the judge pays off | final − greedy accuracy ≥ 5 percentage points **and** McNemar's exact test p < 0.05 | `python -m eval.escalation_uplift --in <triviaqa results>` (benchmark run with the judge) |
+| 4 | SE flags adversarial prompts | one-sided Mann-Whitney U p < 0.01 **and** effect size AUC ≥ 0.75 | `python -m eval.adversarial_separation --adversarial <adversarial results> --reference <triviaqa results>` |
 
 A fifth number is a diagnostic rather than a pass bar: how closely the
-Semantic Entropy Probe tracks SE on held-out prompts (Pearson r), logged by
+Semantic Entropy Probe tracks SE on prompts it never saw, as a 5-fold
+cross-validated Pearson r (mean ± std), logged by
 `python -m eval.train_sep_probe` before it saves the probe.
 
 **Status: not yet measured on real hardware.** The scripts are unit-tested
@@ -55,16 +63,67 @@ on hand-built rows; no GPU benchmark run has been recorded. Run
 [the benchmark](USER_GUIDE.md#how-do-i-run-a-benchmark) to produce the
 numbers.
 
-**Why AUROC and not accuracy at a threshold?** AUROC scores the *ranking*
-across every possible threshold, so it measures the detector itself; the
-threshold is a separate, deployment-specific choice (see the
-[User Guide](USER_GUIDE.md#how-do-i-tune-the-threshold)).
+### Why AUROC and not accuracy at a threshold?
 
-**Why Mann-Whitney for criterion 4?** It compares ranks, so it assumes
-nothing about the score distribution. Entropies are bounded, skewed, and
-often tied at 0, which rules out a t-test. Note that the committed
-adversarial set has 7 prompts, so p < 0.01 needs nearly perfect separation;
-add prompts to `eval/datasets/adversarial.jsonl` for a more sensitive test.
+AUROC scores the *ranking* across every possible threshold, so it measures
+the detector itself; the threshold is a separate, deployment-specific choice
+(see the [User Guide](USER_GUIDE.md#how-do-i-tune-the-threshold)).
+
+### Why do the comparative criteria need a significance test as well as a bar?
+
+Because a point estimate that clears a bar can be sampling noise. On a few
+hundred rows, an AUROC moves by several hundredths between resamples, about
+the size of criterion 2's 0.05 margin. So criterion 2 also needs the 95% CI
+of the SE − PE gap to exclude zero. The interval comes from a *paired*
+bootstrap: both AUROCs are recomputed on the same resampled rows, which keeps
+their correlation (the same questions are hard for both detectors) and gives
+a much tighter interval for the difference than two separate intervals would.
+Criterion 3 compares two accuracies on the same questions, so it uses
+McNemar's exact test, which looks only at the questions where escalation
+changed correctness (fixed vs broken), plus a paired bootstrap CI.
+
+### Why does criterion 4 need an effect size and not just p < 0.01?
+
+A p-value measures how sure we are that there is *some* difference, which
+grows with sample size; it does not measure how *large* the difference is.
+With a thousand reference rows, two heavily overlapping score distributions
+still reach p < 0.01. The effect size AUC = U / (n_adversarial × n_reference)
+is the probability that a random adversarial prompt outscores a random
+correctly answered one. The bar of 0.75 matches criterion 1 and sits above
+Vargha and Delaney's 0.71 threshold for a "large" effect. The Mann-Whitney
+test compares ranks, so it assumes nothing about the score distribution.
+Entropies are bounded, skewed, and often tied at 0, which rules out a
+t-test. The committed adversarial set has only 7 prompts, so p < 0.01 needs
+nearly perfect separation; add prompts to
+`eval/datasets/adversarial.jsonl` for a more sensitive test.
+
+### What keeps two runs from being compared by mistake?
+
+Every benchmark row records `model_id`, `sample_n` and `sample_temperature`.
+`compute_auroc` and `escalation_uplift` refuse a results file whose rows
+disagree on them, and `adversarial_separation` refuses two runs that differ.
+Rows written before these fields existed are refused too; re-run the
+benchmark.
+
+### What keeps the SEP probe from being scored on its own training data?
+
+Two things. `load_triviaqa --offset` builds non-overlapping slices of one
+fixed shuffle, so the calibration and benchmark sets can be disjoint by
+construction. And `train_sep_probe` writes `<probe>.train_ids.json` next to
+the probe; `run_benchmark` refuses to start if any benchmark question id is
+in it, or if a probe in use has no such file. A probe evaluated on the
+questions it was fit to would report an optimistic AUROC.
+
+### Why might the escalation uplift be overstated?
+
+Correctness is a case-insensitive substring match against the accepted
+answers, the usual TriviaQA convention. That favours longer answers: "It
+could be Paris or Lyon" contains more candidates than "Lyon". If the judge
+answers more verbosely than the small model, part of the uplift is
+verbosity. `escalation_uplift` reports the mean answer length on both sides
+and sets `length_warning` (and logs a warning) when the final answers are
+more than 1.5 times longer. Treat a met criterion 3 with a length warning as
+unconfirmed until the answers are checked by hand or by a stricter matcher.
 
 ## Test strategy
 
@@ -98,8 +157,8 @@ New features follow test-first: write the failing test that defines
 | `test_slm_provider.py` | vLLM provider against a mocked OpenAI client (sampling, chat-shaped embedding request, `VLLM_AUTH` modes), HF logprob extraction (raw distribution, first EOS kept, padding dropped), provider selection, sweep validation |
 | `test_google_auth.py` | `GoogleAccessToken` reuse and refresh with fake credentials, plus a contract test against the **real** OpenAI client (fake HTTP transport) proving the token is refreshed on chat and embedding requests |
 | `test_serving_launch.py` | the container's `vllm serve` argv: default runner, Vertex port, fail-fast on missing model, unknown runner or unregistered model |
-| `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end |
-| `test_eval_criteria.py` | success-criteria scripts: AUROC gap, escalation uplift, Mann-Whitney separation, held-out SEP Pearson r, and their fail-fast cases |
+| `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end; run config recorded per row; SEP probe leakage guard (overlap and missing provenance refused) |
+| `test_eval_criteria.py` | statistics primitives (rank AUROC vs sklearn, deterministic bootstrap, exact McNemar); each criterion met only with its significance or effect-size condition; run comparability; cross-validated SEP Pearson r; slice bounds; probe provenance |
 | `test_gemini_judge.py` | `GeminiJudge` request shape and verdict parsing against a fake `google-genai` client |
 
 ## Running the suites

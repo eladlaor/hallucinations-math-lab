@@ -108,6 +108,12 @@ class SemanticEntropyProbeDetector(Detector):
             },
         )
 
+    @property
+    def probe_path(self) -> Path:
+        """Where the probe weights were loaded from (its training-data
+        provenance sidecar sits next to it; see eval/sep_probe_provenance.py)."""
+        return self._probe_path
+
     def score(self, ctx: DetectionContext) -> DetectorScore:
         if ctx.pooled_hidden_state is None:
             raise DetectorPrerequisiteError(

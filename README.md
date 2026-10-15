@@ -262,8 +262,9 @@ than a random correct one (0.5 = coin flip, 1.0 = perfect).
 ```bash
 cp .env.example .env    # defaults: local Gemma 4 E2B via transformers, PE + SE
 
-# 1. Question set (fixed seed)
-uv run python -m eval.datasets.load_triviaqa --n 200 --out eval/datasets/triviaqa_200.jsonl
+# 1. Question set: a fixed-seed slice, after the first 500 (kept for SEP probe training)
+uv run python -m eval.datasets.load_triviaqa --offset 500 --n 200 \
+    --out eval/datasets/triviaqa_200.jsonl
 
 # 2. Run the detectors (needs a model: GPU or Apple Silicon recommended; see the User Guide)
 uv run python -m eval.run_benchmark --in eval/datasets/triviaqa_200.jsonl \
@@ -274,14 +275,16 @@ uv run python -m eval.compute_auroc --in eval/results/triviaqa_200.jsonl
 ```
 
 ```
-{ "n_rows": <scorable questions>, "n_hallucinations": <wrong greedy answers>,
-  "auroc": { "predictive_entropy": <0..1>, "semantic_entropy": <0..1> },
+{ "run_config": { "model_id": ..., "sample_n": ..., "sample_temperature": ... },
+  "n_rows": <scorable questions>, "n_hallucinations": <wrong greedy answers>,
+  "detectors": { "semantic_entropy": { "auroc": <0..1>, "ci": { "low": ..., "high": ... } }, ... },
   "criteria": { "se_auroc": {...}, "se_minus_pe_auroc": {...} } }
 ```
 
 The numbers are yours to find — that is the experiment. The project's own
-targets (SE AUROC ≥ 0.75, SE beating PE by ≥ 0.05, a ≥ 5-point accuracy gain
-from escalation, and SE separating adversarial prompts) and the script that
+targets (SE AUROC ≥ 0.75, SE beating PE by ≥ 0.05 with a CI that excludes
+zero, a significant ≥ 5-point accuracy gain from escalation, and SE
+separating adversarial prompts with a large effect size) and the script that
 checks each one are in the
 [QA Guide](knowledge/usage_guides/QA_GUIDE.md#what-does-success-look-like-for-the-detectors);
 none has been measured on real hardware yet. The whole loop is covered by

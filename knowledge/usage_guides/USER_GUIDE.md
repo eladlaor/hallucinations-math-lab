@@ -81,7 +81,9 @@ native bf16 precision — nothing is quantized.
 To compare models, set `TARGET_MODEL_IDS` (at least two registry ids). The
 judge (`JUDGE_MODEL_ID`, default `gemini-3.5-flash-lite`) is Gemini on
 Vertex AI through the `google-genai` SDK; it returns a schema-validated
-answer and reasoning at `JUDGE_TEMPERATURE` (default 0).
+reasoning and answer (reasoning first, so the answer is conditioned on it).
+Gemini 3.5 on Vertex ignores temperature, so the judge sends no sampling
+parameters; `JUDGE_THINKING_LEVEL` (default `LOW`) sets its reasoning depth.
 
 ## What do I need before running anything?
 
@@ -195,9 +197,13 @@ you whether *any* threshold can separate the two groups well.
 ## How do I run a benchmark?
 
 1. **Build a question set.** The loader shuffles TriviaQA's validation split
-   with a fixed seed and keeps the first `n` questions:
+   once with a fixed seed and takes a slice of `--n` questions starting at
+   `--offset`. Slices that do not overlap share no questions. Start the
+   benchmark after the questions you will use to train a SEP probe (see
+   below), so the two can never mix:
    ```bash
-   uv run python -m eval.datasets.load_triviaqa --n 200 --out eval/datasets/triviaqa_200.jsonl
+   uv run python -m eval.datasets.load_triviaqa --offset 500 --n 200 \
+       --out eval/datasets/triviaqa_200.jsonl
    ```
    [`eval/datasets/adversarial.jsonl`](../../eval/datasets/adversarial.jsonl)
    holds a few false-premise and unknowable questions. They have no answer
@@ -211,27 +217,34 @@ you whether *any* threshold can separate the two groups well.
    ```
    Each output row carries the question, answer key, greedy and final
    answers, `detector_scores` (every enabled detector), `escalated`, the
-   cluster count and the raw samples. Rows are written as they finish; the
-   run stops on the first error, keeping the rows already written.
+   cluster count, the raw samples, and the run's `model_id`, `sample_n` and
+   `sample_temperature`. Rows are written as they finish; the run stops on
+   the first error, keeping the rows already written. With a SEP probe
+   enabled, the run refuses to start if any question was in the probe's
+   training set.
 3. **Score it.**
    ```bash
    uv run python -m eval.compute_auroc --in eval/results/triviaqa_200.jsonl
    ```
    A row counts as hallucinated when the greedy answer contains none of the
    accepted answers (case-insensitive substring — the usual TriviaQA rule).
-   The output is one AUROC per detector: the probability that a random
-   hallucinated row outscores a random correct one. With SE and PE both
-   enabled it also reports SE's margin over PE, each against its target.
+   The output is one AUROC per detector with a bootstrap 95% CI: the
+   probability that a random hallucinated row outscores a random correct
+   one. With SE and PE both enabled it also reports SE's margin over PE with
+   a paired-bootstrap CI, each against its target.
 4. **Measure what escalation buys.** Needs a run *with* the judge (drop
    `--no-judge` in step 2):
    ```bash
    uv run python -m eval.escalation_uplift --in eval/results/triviaqa_200.jsonl
    ```
-   Prints greedy accuracy, final accuracy and the uplift in percentage
-   points. It refuses runs where nothing was escalated or the judge never
+   Prints greedy accuracy, final accuracy, the uplift in percentage points
+   with a 95% CI and McNemar's p-value, how many answers escalation fixed
+   and broke, and the mean answer length on both sides (with a warning when
+   the judge's answers are much longer, since substring matching rewards
+   length). It refuses runs where nothing was escalated or the judge never
    answered, since the uplift there is zero by construction.
 5. **Check the adversarial set.** Run step 2 on `eval/datasets/adversarial.jsonl`
-   too, then:
+   too, with the same model and settings, then:
    ```bash
    uv run python -m eval.adversarial_separation \
        --adversarial eval/results/adversarial.jsonl \
@@ -239,9 +252,13 @@ you whether *any* threshold can separate the two groups well.
    ```
    A one-sided Mann-Whitney U test of whether SE (or `--detector <name>`) is
    higher on the adversarial prompts than on correctly answered TriviaQA
-   questions.
+   questions, plus the effect size: the probability that a random
+   adversarial prompt outscores a random correct one.
 
-The targets each step is checked against are listed in the
+The scoring scripts refuse to mix rows from different runs, and
+`adversarial_separation` refuses two runs made with different models or
+sampling settings. The targets each step is checked against, and why each
+needs more than a point estimate, are in the
 [QA Guide](QA_GUIDE.md#what-does-success-look-like-for-the-detectors).
 To compare models, rerun step 2 with a different `VLLM_MODEL_ID` and a
 different `--out` file.
@@ -252,33 +269,33 @@ A probe is trained per model: for each calibration question it computes SE
 (the label) and grabs the model's hidden state at the last prompt token (the
 input), then fits a ridge regression.
 
-1. **Make a calibration set that does not overlap your benchmark.** Because
-   the loader always uses the same seed, a smaller set is a prefix of a larger
-   one — so take a large set and split it:
+1. **Make a calibration set that does not overlap your benchmark.** Take the
+   slice *before* the benchmark's `--offset`:
    ```bash
-   uv run python -m eval.datasets.load_triviaqa --n 700 --out eval/datasets/triviaqa_700.jsonl
-   mkdir -p data/calibration
-   head -n 500 eval/datasets/triviaqa_700.jsonl \
-     | uv run python -c "import json,sys; [print(json.dumps({'prompt': json.loads(l)['question']})) for l in sys.stdin]" \
-     > data/calibration/trivia_qa_500.jsonl
-   tail -n 200 eval/datasets/triviaqa_700.jsonl > eval/datasets/triviaqa_holdout_200.jsonl
+   uv run python -m eval.datasets.load_triviaqa --offset 0 --n 500 \
+       --out data/calibration/triviaqa_calibration_500.jsonl
    ```
-   The trainer reads a `prompt` field per line, hence the conversion.
+   The trainer reads the loader's `id` and `question` fields directly.
 2. **Train.** Needs a provider that exposes hidden states (the default
    `hf_transformers` does):
    ```bash
    uv run python -m eval.train_sep_probe \
-       --calibration-set data/calibration/trivia_qa_500.jsonl --output-path auto
+       --calibration-set data/calibration/triviaqa_calibration_500.jsonl --output-path auto
    ```
    `auto` writes `data/probes/<model-id-slug>.pt`, which is where the evaluator
-   looks unless `SEP_PROBE_PATH` says otherwise. Before saving, it logs the
-   probe's Pearson r against SE on a held-out 20% of the calibration rows
-   (`--holdout-fraction`): how well the one-pass probe stands in for the
-   ten-sample SE on questions it never saw.
-3. **Enable it** in `.env` and benchmark on the held-out set:
+   looks unless `SEP_PROBE_PATH` says otherwise. Next to it, it writes
+   `<model-id-slug>.train_ids.json`, the ids of the questions it was trained
+   on. Before saving, it logs the probe's 5-fold cross-validated Pearson r
+   against SE (mean ± std, `--cv-folds`): how well the one-pass probe stands
+   in for the ten-sample SE on questions it never saw.
+3. **Enable it** in `.env` and benchmark on the disjoint slice from
+   [How do I run a benchmark?](#how-do-i-run-a-benchmark):
    ```
    ENABLED_DETECTORS=["predictive_entropy","semantic_entropy_probe","semantic_entropy"]
    ```
+   `run_benchmark` checks the benchmark questions against the probe's
+   `.train_ids.json` and refuses to start on any overlap, or if the file is
+   missing.
 
 A probe trained on one model is meaningless on another — retrain whenever
 `VLLM_MODEL_ID` changes.

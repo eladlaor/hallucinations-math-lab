@@ -10,7 +10,15 @@ ESCALATION_DETECTOR, SE_THRESHOLD); the SLM comes from SLM_PROVIDER /
 VLLM_MODEL_ID. Every row records all detector scores under `detector_scores`,
 so adding a detector needs no change here or in compute_auroc.py.
 
-Downstream: compute_auroc.py.
+Every row also records the run's `model_id`, `sample_n` and
+`sample_temperature`; the scoring scripts refuse to mix rows from different
+runs or to compare runs that differ in them.
+
+When a Semantic Entropy Probe is among the detectors, the run fails before
+scoring anything if a question was in the probe's training set (see
+eval/sep_probe_provenance.py).
+
+Downstream: compute_auroc.py, escalation_uplift.py, adversarial_separation.py.
 """
 
 from __future__ import annotations
@@ -19,11 +27,45 @@ import argparse
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
+from eval.benchmark_results import (
+    ID_FIELD,
+    MODEL_ID_FIELD,
+    SAMPLE_N_FIELD,
+    SAMPLE_TEMPERATURE_FIELD,
+    RunConfig,
+)
+from eval.sep_probe_provenance import assert_disjoint
 from hallucinations_math_lab import ResponseEvaluator
+from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
 
 logger = logging.getLogger(__name__)
+
+
+def _read_questions(in_path: Path, limit: int | None) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with in_path.open() as f:
+        for line_no, line in enumerate(f, start=1):
+            if limit is not None and len(rows) >= limit:
+                break
+            if not line.strip():
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"{in_path}:{line_no} is not valid JSON: {e}") from e
+    return rows
+
+
+def guard_probe_leakage(evaluator: ResponseEvaluator, questions: list[dict[str, Any]]) -> None:
+    """Fail fast if any SEP probe in use was trained on one of these questions."""
+    ids = [str(q[ID_FIELD]) for q in questions if q.get(ID_FIELD) is not None]
+    for detector in evaluator.detectors:
+        if isinstance(detector, SemanticEntropyProbeDetector):
+            assert_disjoint(detector.probe_path, ids)
 
 
 def run(
@@ -42,14 +84,20 @@ def run(
 
             judge_impl = GeminiJudge()
         evaluator = ResponseEvaluator(judge=judge_impl)
+
+    questions = _read_questions(in_path, limit)
+    guard_probe_leakage(evaluator, questions)
+    settings = get_settings()
+    run_config: RunConfig = {
+        MODEL_ID_FIELD: evaluator.slm.model_id,
+        SAMPLE_N_FIELD: settings.sample_n,
+        SAMPLE_TEMPERATURE_FIELD: settings.sample_temperature,
+    }
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     n_written = 0
-    with in_path.open() as f_in, out_path.open("w") as f_out:
-        for i, line in enumerate(f_in):
-            if limit is not None and i >= limit:
-                break
-            row = json.loads(line)
+    with out_path.open("w") as f_out:
+        for i, row in enumerate(questions):
             prompt = row["question"]
             try:
                 result = evaluator.evaluate(prompt)
@@ -59,7 +107,7 @@ def run(
                     extra={
                         LOG_EXTRA_KEY: {
                             "row_index": i,
-                            "row_id": row.get("id"),
+                            "row_id": row.get(ID_FIELD),
                             "rows_written": n_written,
                             "out_path": str(out_path),
                             "error": str(e),
@@ -71,12 +119,13 @@ def run(
             f_out.write(
                 json.dumps(
                     {
-                        "id": row.get("id"),
+                        ID_FIELD: row.get(ID_FIELD),
                         "category": row.get("category"),
                         "question": prompt,
                         "ground_truth": row.get("ground_truth_value")
                         or row.get("expected_behavior"),
                         "ground_truth_aliases": row.get("ground_truth_aliases", []),
+                        **run_config,
                         "greedy_answer": result.greedy_answer,
                         "final_answer": result.final_answer,
                         "final_answer_source": str(result.final_answer_source),

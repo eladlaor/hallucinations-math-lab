@@ -20,6 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `eval/compute_auroc.py` now reports the SE AUROC and SE-PE gap,
   `eval/escalation_uplift.py`, `eval/adversarial_separation.py`, and a
   held-out SEP-vs-SE Pearson r in `eval/train_sep_probe.py`.
+- Statistical inference for the success criteria (`eval/inference_stats.py`):
+  bootstrap 95% CIs for every AUROC, a paired-bootstrap CI for the SE-PE gap,
+  McNemar's exact test and a paired CI for the escalation uplift, and the AUC
+  effect size for adversarial separation.
+- `load_triviaqa --offset` for disjoint dataset slices; `train_sep_probe`
+  writes a `<probe>.train_ids.json` sidecar and `run_benchmark` refuses to
+  score a probe on its own training questions, or a probe without a sidecar.
+- `ResponseEvaluator.slm` and `.detectors` read-only properties;
+  `SemanticEntropyProbeDetector.probe_path`.
 - `VLLM_AUTH=google`: the vLLM client sends a refreshing Google access token,
   so it can call a Vertex AI endpoint directly (`demo/google_auth.py`).
 - `EntailmentScorer` protocol: Semantic Entropy accepts any equivalence
@@ -28,7 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (upload with the invoke route, deploy, undeploy); `deploy` extra.
 - Terraform outputs `vllm_base_url` / `vllm_embed_base_url`, ready to use as
   OpenAI base URLs; optional embed-runner endpoint (`with_embed_endpoint`).
-- `JUDGE_TEMPERATURE` setting (default 0).
+- `JUDGE_THINKING_LEVEL` setting (default `LOW`). The judge sends no sampling
+  parameters, which Gemini 3.5 on Vertex ignores, and its schema puts
+  `reasoning` before `answer`.
 - GitHub Actions CI with four jobs: ruff lint and format check (ruff pinned),
   Terraform fmt/validate, mypy, and the test suite on Python 3.12 and 3.13.
 - `MIT` `LICENSE` file.
@@ -56,6 +67,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - vLLM generation reports raw logprobs (`--logprobs-mode raw_logprobs`);
   embeddings are last-token, unnormalized, over the chat-templated prompt,
   matching `HFTransformersProvider` so SEP probes transfer between providers.
+- **Breaking:** success criteria 2-4 now also need significance or effect
+  size: the SE-PE gap's CI must exclude zero, the escalation uplift must pass
+  McNemar's test (p < 0.05), and adversarial separation needs an AUC effect
+  size of at least 0.75 besides p < 0.01.
+- **Breaking:** `compute_auroc` reports `detectors.<name>.{auroc, ci}` instead
+  of a flat `auroc` map, and the SE-PE gap is computed from unrounded AUROCs.
+- **Breaking:** benchmark rows record `model_id`, `sample_n` and
+  `sample_temperature`; the scoring scripts refuse files that mix runs, rows
+  written without these fields, and adversarial/reference runs that differ.
+- **Breaking:** `train_sep_probe` reads `load_triviaqa` output (`id`,
+  `question`) instead of a `prompt` field, and reports a 5-fold
+  cross-validated Pearson r (`--cv-folds`) instead of one held-out split
+  (`--holdout-fraction` removed).
+- `escalation_uplift` reports how many answers escalation fixed and broke and
+  the mean answer length on both sides, warning when final answers are much
+  longer (substring matching rewards length).
 - `EscalationPolicy.detectors_referenced` and `SamplingProvider.model_id` are
   read-only protocol members, so frozen dataclasses satisfy them.
 - Public API carved into response-shaped (`evaluate_responses`) and
@@ -103,6 +130,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so `NLIScorer`, `GeminiJudge` and `ResponseEvaluator` failed outside the repo.
 - `.env.example` set `ENABLED_DETECTORS` as a comma-separated list, which
   failed settings parsing at startup; it is now a JSON list.
+- `HFTransformersProvider` loaded with `device_map="auto"` without the
+  `accelerate` package it requires; `accelerate` is now a `demo` dependency.
+- A sweep could pair a generation model with an embed endpoint serving a
+  different model, feeding SEP the wrong hidden states; this now fails fast.
+- A failed Vertex deploy left the uploaded model orphaned; it is now deleted.
+- Applying Terraform from a different checkout path forced a redeploy.
 - Removed unused `torch.nn` import in `eval/train_sep_probe.py`.
 
 ### Security

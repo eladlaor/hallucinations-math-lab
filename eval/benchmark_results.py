@@ -18,8 +18,19 @@ FINAL_ANSWER_FIELD: Final[str] = "final_answer"
 FINAL_ANSWER_SOURCE_FIELD: Final[str] = "final_answer_source"
 DETECTOR_SCORES_FIELD: Final[str] = "detector_scores"
 ESCALATED_FIELD: Final[str] = "escalated"
+ID_FIELD: Final[str] = "id"
+# What produced the scores. Two runs are comparable only if these match.
+MODEL_ID_FIELD: Final[str] = "model_id"
+SAMPLE_N_FIELD: Final[str] = "sample_n"
+SAMPLE_TEMPERATURE_FIELD: Final[str] = "sample_temperature"
+RUN_CONFIG_FIELDS: Final[tuple[str, ...]] = (
+    MODEL_ID_FIELD,
+    SAMPLE_N_FIELD,
+    SAMPLE_TEMPERATURE_FIELD,
+)
 
 BenchmarkRow = dict[str, Any]
+RunConfig = dict[str, Any]
 
 
 def load_rows(path: Path) -> list[BenchmarkRow]:
@@ -36,6 +47,42 @@ def load_rows(path: Path) -> list[BenchmarkRow]:
     if not rows:
         raise RuntimeError(f"{path} contains no benchmark rows.")
     return rows
+
+
+def run_config(rows: list[BenchmarkRow], source: str) -> RunConfig:
+    """The model and sampling settings behind a run; fails fast if rows disagree.
+
+    Mixing rows from different models or sampling settings would make every
+    statistic computed over them meaningless, so a file must be one run.
+    """
+    config: RunConfig | None = None
+    for row_no, row in enumerate(rows, start=1):
+        missing = [field for field in RUN_CONFIG_FIELDS if field not in row]
+        if missing:
+            raise RuntimeError(
+                f"{source} row {row_no} lacks {missing}; it was written before runs recorded "
+                "their model and sampling settings. Re-run eval.run_benchmark."
+            )
+        row_config = {field: row[field] for field in RUN_CONFIG_FIELDS}
+        if config is None:
+            config = row_config
+        elif row_config != config:
+            raise RuntimeError(
+                f"{source} row {row_no} was produced with {row_config}, but earlier rows with "
+                f"{config}. One results file must hold one run."
+            )
+    if config is None:
+        raise RuntimeError(f"{source} contains no benchmark rows.")
+    return config
+
+
+def assert_same_run_config(first: RunConfig, second: RunConfig, what: str) -> None:
+    """Fail fast when two runs being compared used different models or sampling."""
+    if first != second:
+        raise RuntimeError(
+            f"{what}: the runs are not comparable — {first} vs {second}. Benchmark both "
+            "question sets with the same model and sampling settings."
+        )
 
 
 def is_labeled(row: BenchmarkRow) -> bool:
