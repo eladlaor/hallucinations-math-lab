@@ -268,13 +268,18 @@ uv run python -m eval.compute_auroc --in eval/results/triviaqa_200.jsonl
 
 ```
 { "n_rows": <scorable questions>, "n_hallucinations": <wrong greedy answers>,
-  "auroc": { "predictive_entropy": <0..1>, "semantic_entropy": <0..1> } }
+  "auroc": { "predictive_entropy": <0..1>, "semantic_entropy": <0..1> },
+  "criteria": { "se_auroc": {...}, "se_minus_pe_auroc": {...} } }
 ```
 
-The numbers are yours to find — that is the experiment. The whole loop is
-covered by `tests/unit/test_benchmark_pipeline.py` with a fake model, so you
-can change it with confidence. Details, the SEP training step and the Vertex
-evaluation pass are in the
+The numbers are yours to find — that is the experiment. The project's own
+targets (SE AUROC ≥ 0.75, SE beating PE by ≥ 0.05, a ≥ 5-point accuracy gain
+from escalation, and SE separating adversarial prompts) and the script that
+checks each one are in the
+[QA Guide](knowledge/usage_guides/QA_GUIDE.md#what-does-success-look-like-for-the-detectors);
+none has been measured on real hardware yet. The whole loop is covered by
+unit tests with a fake model, so you can change it with confidence. Details
+and the SEP training step are in the
 [User Guide](knowledge/usage_guides/USER_GUIDE.md#how-do-i-run-a-benchmark).
 
 ## How do I run the live demo against a real model?
@@ -312,7 +317,7 @@ src/hallucinations_math_lab/   # the library — imports nothing from demo/
   judges/                      # Judge protocol + GeminiJudge
 demo/                          # CLI, SLM providers (vLLM, transformers), model registry
 examples/                      # runnable playground scripts
-eval/                          # datasets, benchmark, AUROC, SEP probe training, Vertex eval
+eval/                          # datasets, benchmark, success-criteria scoring, SEP probe training
 tests/unit/                    # math, dispatch, escalation, providers, benchmark loop
 serving/, terraform/           # vLLM container and GCP infrastructure
 knowledge/                     # guides, theory, caveats, plans

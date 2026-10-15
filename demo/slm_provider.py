@@ -30,17 +30,20 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 import torch
 from openai import OpenAI
+from openai.types import CreateEmbeddingResponse
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, VLLMAuthMode
 from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
 
-from demo.model_registry import list_model_ids
+from demo.google_auth import GoogleAccessToken
+from demo.model_registry import ProviderKind, list_model_ids
 
 if TYPE_CHECKING:
     from transformers import (
         BatchEncoding,
+        GenerationConfig,
         GenerationMixin,
         PreTrainedModel,
         PreTrainedTokenizerBase,
@@ -66,7 +69,8 @@ class SLMProvider(Protocol):
     specific: a provider that cannot expose hidden states returns `None`
     from `pooled_hidden_state`, and SEP gracefully reports `n/a`."""
 
-    model_id: str
+    @property
+    def model_id(self) -> str: ...
 
     def sample(self, prompt: str) -> SampleSet: ...
     def greedy(self, prompt: str) -> str: ...
@@ -78,11 +82,13 @@ class VLLMOpenAIProvider:
 
     Two endpoints are addressed:
       - The generation endpoint at `VLLM_BASE_URL` (chat/completions).
-      - Optionally, a sibling embed endpoint at `VLLM_EMBED_BASE_URL`. When
-        set, that endpoint is a separate vLLM process launched with
-        `--task embed` and is hit via `/v1/embeddings` to return a pooled
-        hidden state per prompt. When unset, `pooled_hidden_state` returns
-        `None`."""
+      - Optionally, an embed endpoint at `VLLM_EMBED_BASE_URL`: a second vLLM
+        server running the `embed` runner, hit via `/v1/embeddings` to return
+        a pooled hidden state per prompt. When unset, `pooled_hidden_state`
+        returns `None`.
+
+    Both authenticate per `VLLM_AUTH`: a static key for a server you run, or
+    a refreshing Google access token for a Vertex AI endpoint."""
 
     def __init__(
         self,
@@ -90,9 +96,14 @@ class VLLMOpenAIProvider:
         base_url: str | None = None,
     ) -> None:
         settings = get_settings()
+        credential: str | GoogleAccessToken = (
+            GoogleAccessToken()
+            if settings.vllm_auth is VLLMAuthMode.GOOGLE
+            else settings.vllm_api_key
+        )
         self._generation = OpenAI(
             base_url=base_url or settings.vllm_base_url,
-            api_key=settings.vllm_api_key,
+            api_key=credential,
         )
         self.model_id: str = model_id or settings.vllm_model_id
         self._n = settings.sample_n
@@ -104,14 +115,14 @@ class VLLMOpenAIProvider:
         if settings.vllm_embed_base_url:
             self._embed_client = OpenAI(
                 base_url=settings.vllm_embed_base_url,
-                api_key=settings.vllm_api_key,
+                api_key=credential,
             )
             self._embed_model_id = settings.vllm_embed_model_id or settings.vllm_model_id
         else:
             self._embed_client = None
             self._embed_model_id = ""
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10), reraise=True)
     def sample(self, prompt: str) -> SampleSet:
         try:
             resp = self._generation.chat.completions.create(
@@ -168,10 +179,22 @@ class VLLMOpenAIProvider:
     def pooled_hidden_state(self, prompt: str) -> torch.Tensor | None:
         if self._embed_client is None:
             return None
+        # Embed the prompt exactly as generation sees it: chat template plus
+        # the generation prompt, pooled at its last token, unnormalized. This
+        # matches HFTransformersProvider.pooled_hidden_state, so a SEP probe
+        # trained on either provider reads the same feature.
+        body = {
+            "model": self._embed_model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "add_generation_prompt": True,
+            "use_activation": False,
+        }
         try:
-            resp = self._embed_client.embeddings.create(
-                model=self._embed_model_id,
-                input=prompt,
+            resp = self._embed_client.post(
+                "/embeddings",
+                body=body,
+                cast_to=CreateEmbeddingResponse,
+                options={"security": {"bearer_auth": True}},
             )
         except Exception as e:
             raise RuntimeError(
@@ -300,7 +323,7 @@ class HFTransformersProvider:
         per_sample = raw_token_logprobs(
             logits=_require_logits(out),
             generated_ids=out.sequences[:, prompt_len:],
-            stop_token_ids=stop_token_ids(model),
+            stop_token_ids=stop_token_ids(model.generation_config),
         )
         samples: list[Sample] = []
         for pairs in per_sample:
@@ -389,9 +412,8 @@ def _decode(
     return text
 
 
-def stop_token_ids(model: PreTrainedModel) -> set[int]:
+def stop_token_ids(config: GenerationConfig) -> set[int]:
     """Token ids that end a generated sequence: EOS (one or several) and PAD."""
-    config = model.generation_config
     eos = config.eos_token_id
     ids = set(eos) if isinstance(eos, list) else ({eos} if eos is not None else set())
     if config.pad_token_id is not None:
@@ -464,14 +486,16 @@ def build_default_provider(model_id: str | None = None) -> SLMProvider:
     """
     settings = get_settings()
     kind = settings.slm_provider
-    if kind == "vllm":
+    if kind == ProviderKind.VLLM:
         base_url_override: str | None = None
         if model_id is not None:
             base_url_override = settings.target_model_base_urls.get(model_id)
         return VLLMOpenAIProvider(model_id=model_id, base_url=base_url_override)
-    if kind == "hf_transformers":
+    if kind == ProviderKind.HF_TRANSFORMERS:
         return HFTransformersProvider(model_id=model_id)
-    raise ValueError(f"Unknown SLM_PROVIDER={kind!r}. Expected one of: vllm, hf_transformers.")
+    raise ValueError(
+        f"Unknown SLM_PROVIDER={kind!r}. Expected one of: {[str(k) for k in ProviderKind]}."
+    )
 
 
 def build_sweep_providers() -> list[SLMProvider]:

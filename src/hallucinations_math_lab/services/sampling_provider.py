@@ -35,7 +35,8 @@ class SamplingProvider(Protocol):
     expose hidden states. SEP-style detectors gracefully degrade in
     that case (the orchestrator skips them and reports `n/a`)."""
 
-    model_id: str
+    @property
+    def model_id(self) -> str: ...
 
     def sample(self, prompt: str) -> SampleSet: ...
     def greedy(self, prompt: str) -> str: ...

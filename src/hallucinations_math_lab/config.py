@@ -5,7 +5,7 @@ from functools import lru_cache
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from hallucinations_math_lab.constants import DetectorName
+from hallucinations_math_lab.constants import DetectorName, VLLMAuthMode
 
 
 _DEFAULT_TARGET_MODEL_IDS: list[str] = [
@@ -33,14 +33,20 @@ class Settings(BaseSettings):
     # Acts as the *fallback* base URL: any model in target_model_ids without
     # a per-model override in target_model_base_urls uses this URL.
     vllm_base_url: str = Field(default="http://localhost:8000/v1")
+    # How requests to vLLM authenticate. `api_key` sends VLLM_API_KEY as a
+    # static bearer token (a local or self-hosted server). `google` sends a
+    # short-lived Google access token from Application Default Credentials,
+    # refreshed before it expires (a Vertex AI endpoint).
+    vllm_auth: VLLMAuthMode = Field(default=VLLMAuthMode.API_KEY)
     vllm_api_key: str = Field(default="local-dummy")
     # The "active" model for single-model commands (e.g., `python -m demo.cli chat`).
     # Must appear in the model registry. Distinct from target_model_ids,
     # which is the evaluation sweep.
     vllm_model_id: str = Field(default="google/gemma-4-E2B-it")
-    # Optional sibling vLLM instance launched with --task embed. When set,
-    # VLLMOpenAIProvider hits /v1/embeddings on this URL to obtain a pooled
-    # hidden state for SEP. Unset = SEP disabled at the vLLM provider.
+    # Optional second vLLM server running the `embed` runner (see
+    # serving/Dockerfile). When set, VLLMOpenAIProvider hits /v1/embeddings
+    # on this URL to obtain a pooled hidden state for SEP. Unset = SEP
+    # disabled at the vLLM provider. Authenticates the same way as above.
     vllm_embed_base_url: str = Field(default="")
     vllm_embed_model_id: str = Field(default="")
 

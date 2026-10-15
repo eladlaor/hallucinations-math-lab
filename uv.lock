@@ -540,14 +540,17 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "datasets" },
+    { name = "google-auth" },
     { name = "google-genai" },
     { name = "openai" },
     { name = "rich" },
     { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "tenacity" },
     { name = "typer" },
 ]
 demo = [
+    { name = "google-auth" },
     { name = "openai" },
     { name = "rich" },
     { name = "tenacity" },
@@ -562,6 +565,7 @@ dev = [
 eval = [
     { name = "datasets" },
     { name = "scikit-learn" },
+    { name = "scipy" },
 ]
 judge = [
     { name = "google-genai" },
@@ -570,11 +574,12 @@ judge = [
 [package.metadata]
 requires-dist = [
     { name = "datasets", marker = "extra == 'eval'", specifier = ">=2.20" },
+    { name = "google-auth", marker = "extra == 'demo'", specifier = ">=2.30" },
     { name = "google-genai", marker = "extra == 'judge'", specifier = ">=1.0" },
     { name = "hallucinations-math-lab", extras = ["demo", "judge", "eval"], marker = "extra == 'all'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "numpy", specifier = ">=1.26" },
-    { name = "openai", marker = "extra == 'demo'", specifier = ">=1.40" },
+    { name = "openai", marker = "extra == 'demo'", specifier = ">=2.37" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "pydantic-settings", specifier = ">=2.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2" },
@@ -582,6 +587,7 @@ requires-dist = [
     { name = "rich", marker = "extra == 'demo'", specifier = ">=13.7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
     { name = "scikit-learn", marker = "extra == 'eval'", specifier = ">=1.5" },
+    { name = "scipy", marker = "extra == 'eval'", specifier = ">=1.13" },
     { name = "tenacity", marker = "extra == 'demo'", specifier = ">=8.5" },
     { name = "torch", specifier = ">=2.3" },
     { name = "transformers", specifier = ">=4.56" },

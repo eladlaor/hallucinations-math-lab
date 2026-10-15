@@ -3,6 +3,7 @@
 ## Table of Contents
 
 - [Summary](#summary)
+- [What does success look like for the detectors?](#what-does-success-look-like-for-the-detectors)
 - [Test strategy](#test-strategy)
 - [What does each test file cover?](#what-does-each-test-file-cover)
 - [Running the suites](#running-the-suites)
@@ -16,14 +17,53 @@
 
 ```bash
 uv sync --all-extras
-uv run pytest -q          # unit suite, CPU only, ~1 minute
-uv run ruff check .       # lint
+uv run pytest -q             # unit suite, CPU only, ~1 minute
+uv run ruff check .          # lint
+uv run ruff format --check . # formatting
+uv run mypy                  # type check (paths configured in pyproject.toml)
 ```
 
 Every test runs on CPU without a model download, network or cloud account:
 the language model, the NLI model and the judge are replaced by small
 in-memory doubles. One smoke test needs a CUDA GPU and skips itself
-otherwise. CI runs the same commands on Python 3.12 and 3.13.
+otherwise. CI runs the same commands; tests run on Python 3.12 and 3.13.
+
+Unit tests prove the code computes what it claims. Whether the detectors
+*work* — whether high uncertainty actually means hallucination — is a
+research question answered by the criteria below, on real models.
+
+## What does success look like for the detectors?
+
+Four measurable targets, each checked by a script over
+`eval/run_benchmark.py` output. Each script prints its value, the target and
+whether it was met. The pass bars live in `eval/success_criteria.py`.
+
+| # | Criterion | Target | Measured by |
+|---|---|---|---|
+| 1 | SE separates hallucinated from correct TriviaQA answers | SE AUROC ≥ 0.75 on TriviaQA-1000 | `python -m eval.compute_auroc --in <triviaqa results>` |
+| 2 | Clustering by meaning beats token-level uncertainty | SE AUROC − PE AUROC ≥ 0.05 | same command, `criteria.se_minus_pe_auroc` |
+| 3 | Escalating to the judge pays off | final accuracy − greedy accuracy ≥ 5 percentage points | `python -m eval.escalation_uplift --in <triviaqa results>` (benchmark run with the judge) |
+| 4 | SE flags adversarial prompts | adversarial SE > SE on correctly answered TriviaQA, one-sided Mann-Whitney U, p < 0.01 | `python -m eval.adversarial_separation --adversarial <adversarial results> --reference <triviaqa results>` |
+
+A fifth number is a diagnostic rather than a pass bar: how closely the
+Semantic Entropy Probe tracks SE on held-out prompts (Pearson r), logged by
+`python -m eval.train_sep_probe` before it saves the probe.
+
+**Status: not yet measured on real hardware.** The scripts are unit-tested
+on hand-built rows; no GPU benchmark run has been recorded. Run
+[the benchmark](USER_GUIDE.md#how-do-i-run-a-benchmark) to produce the
+numbers.
+
+**Why AUROC and not accuracy at a threshold?** AUROC scores the *ranking*
+across every possible threshold, so it measures the detector itself; the
+threshold is a separate, deployment-specific choice (see the
+[User Guide](USER_GUIDE.md#how-do-i-tune-the-threshold)).
+
+**Why Mann-Whitney for criterion 4?** It compares ranks, so it assumes
+nothing about the score distribution. Entropies are bounded, skewed, and
+often tied at 0, which rules out a t-test. Note that the committed
+adversarial set has 7 prompts, so p < 0.01 needs nearly perfect separation;
+add prompts to `eval/datasets/adversarial.jsonl` for a more sensitive test.
 
 ## Test strategy
 
@@ -56,6 +96,8 @@ New features follow test-first: write the failing test that defines
 | `test_model_registry.py` | registry entries, single local/deployed default, vLLM flag rendering |
 | `test_slm_provider.py` | vLLM provider against a mocked OpenAI client, provider selection, sweep validation |
 | `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end |
+| `test_eval_criteria.py` | success-criteria scripts: AUROC gap, escalation uplift, Mann-Whitney separation, held-out SEP Pearson r, and their fail-fast cases |
+| `test_gemini_judge.py` | `GeminiJudge` request shape and verdict parsing against a fake `google-genai` client |
 
 ## Running the suites
 
@@ -108,7 +150,8 @@ Today this is one smoke test that loads the local default model through
 
 | Job | Does |
 |---|---|
-| `lint` | `ruff check .` |
+| `lint` | `ruff check .` and `ruff format --check .` |
+| `typecheck` | `uv sync --locked --all-extras`, then `mypy` |
 | `test` (3.12, 3.13) | `uv sync --locked --all-extras`, then `pytest -q` |
 
 A red `test` job that fails during install usually means `uv.lock` is stale
@@ -116,7 +159,8 @@ A red `test` job that fails during install usually means `uv.lock` is stale
 
 ## Manual checks before a release
 
-1. `uv run pytest -q` and `uv run ruff check .` pass.
+1. `uv run pytest -q`, `uv run ruff check .`, `uv run ruff format --check .`
+   and `uv run mypy` pass.
 2. `uv build` succeeds and the wheel contains only `hallucinations_math_lab/`
    plus `LICENSE`.
 3. Both playground scripts run and print the tables shown in the README:

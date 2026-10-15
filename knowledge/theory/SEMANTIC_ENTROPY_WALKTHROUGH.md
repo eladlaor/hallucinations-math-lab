@@ -488,7 +488,9 @@ competing meanings, or two meanings with a meaningful minority". You pick it by
 sweeping thresholds on a labeled dev set and choosing the point on the ROC curve
 that matches your tolerance for false alarms versus missed hallucinations.
 
-This is also why the project's success criteria are stated as **AUROC** (≥ 0.75 on
+This is also why the project's
+[success criteria](../usage_guides/QA_GUIDE.md#what-does-success-look-like-for-the-detectors)
+are stated as **AUROC** (≥ 0.75 on
 TriviaQA-1000, and ≥ 0.05 above predictive entropy) rather than as accuracy at one
 threshold. AUROC measures whether SE *ranks* hallucinations above correct answers
 across every possible threshold — a property of the detector. Accuracy at τ=1.0

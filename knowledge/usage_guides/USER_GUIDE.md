@@ -214,8 +214,29 @@ you whether *any* threshold can separate the two groups well.
    A row counts as hallucinated when the greedy answer contains none of the
    accepted answers (case-insensitive substring — the usual TriviaQA rule).
    The output is one AUROC per detector: the probability that a random
-   hallucinated row outscores a random correct one.
+   hallucinated row outscores a random correct one. With SE and PE both
+   enabled it also reports SE's margin over PE, each against its target.
+4. **Measure what escalation buys.** Needs a run *with* the judge (drop
+   `--no-judge` in step 2):
+   ```bash
+   uv run python -m eval.escalation_uplift --in eval/results/triviaqa_200.jsonl
+   ```
+   Prints greedy accuracy, final accuracy and the uplift in percentage
+   points. It refuses runs where nothing was escalated or the judge never
+   answered, since the uplift there is zero by construction.
+5. **Check the adversarial set.** Run step 2 on `eval/datasets/adversarial.jsonl`
+   too, then:
+   ```bash
+   uv run python -m eval.adversarial_separation \
+       --adversarial eval/results/adversarial.jsonl \
+       --reference eval/results/triviaqa_200.jsonl
+   ```
+   A one-sided Mann-Whitney U test of whether SE (or `--detector <name>`) is
+   higher on the adversarial prompts than on correctly answered TriviaQA
+   questions.
 
+The targets each step is checked against are listed in the
+[QA Guide](QA_GUIDE.md#what-does-success-look-like-for-the-detectors).
 To compare models, rerun step 2 with a different `VLLM_MODEL_ID` and a
 different `--out` file.
 
@@ -244,7 +265,10 @@ input), then fits a ridge regression.
        --calibration-set data/calibration/trivia_qa_500.jsonl --output-path auto
    ```
    `auto` writes `data/probes/<model-id-slug>.pt`, which is where the evaluator
-   looks unless `SEP_PROBE_PATH` says otherwise.
+   looks unless `SEP_PROBE_PATH` says otherwise. Before saving, it logs the
+   probe's Pearson r against SE on a held-out 20% of the calibration rows
+   (`--holdout-fraction`): how well the one-pass probe stands in for the
+   ten-sample SE on questions it never saw.
 3. **Enable it** in `.env` and benchmark on the held-out set:
    ```
    ENABLED_DETECTORS=["predictive_entropy","semantic_entropy_probe","semantic_entropy"]

@@ -137,8 +137,10 @@ at least one strict). Report:
 
 ## Success criteria (TDD)
 
-Preserve existing TDD criteria from CLAUDE.md (SE AUROC >= 0.75, SE - PE >=
-0.05, etc.). Add:
+Preserve the project's existing
+[success criteria](../usage_guides/QA_GUIDE.md#what-does-success-look-like-for-the-detectors)
+(SE AUROC >= 0.75, SE - PE >= 0.05, escalation uplift >= 5pp, adversarial
+separation p < 0.01). Add:
 
 1. All detectors report `cost_usd` and `latency_ms` populated and > 0
    (except PE cost which may be ~0).

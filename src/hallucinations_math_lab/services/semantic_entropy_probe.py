@@ -26,8 +26,9 @@ Why a regressor over a classifier:
   - SE is itself a continuous score that the orchestrator's threshold
     comparator already understands.
   - A regressor's output sits on the same scale as the SE label, so
-    SEP-vs-SE correlation (the validation target in CLAUDE.md's
-    acceptance criteria) reads naturally as Pearson r.
+    SEP-vs-SE agreement reads naturally as Pearson r — the held-out
+    diagnostic `eval/train_sep_probe.py` logs (see the QA Guide's success
+    criteria).
 """
 
 import logging

@@ -16,11 +16,11 @@ Contract pinned here:
 """
 
 import math
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
+from transformers import GenerationConfig
 
 from demo.slm_provider import (
     HFTransformersProvider,
@@ -73,16 +73,14 @@ def test_raw_token_logprobs_rejects_step_count_mismatch():
 
 
 def test_stop_token_ids_collects_eos_list_and_pad():
-    model = SimpleNamespace(
-        generation_config=SimpleNamespace(eos_token_id=[1, 106], pad_token_id=0)
-    )
-    assert stop_token_ids(model) == {0, 1, 106}
+    config = GenerationConfig(eos_token_id=[1, 106], pad_token_id=0)
+    assert stop_token_ids(config) == {0, 1, 106}
 
 
 def test_stop_token_ids_fails_fast_without_eos_or_pad():
-    model = SimpleNamespace(generation_config=SimpleNamespace(eos_token_id=None, pad_token_id=None))
+    config = GenerationConfig(eos_token_id=None, pad_token_id=None)
     with pytest.raises(ValueError, match="neither eos_token_id nor pad_token_id"):
-        stop_token_ids(model)
+        stop_token_ids(config)
 
 
 @pytest.fixture
@@ -130,7 +128,7 @@ def test_vllm_provider_returns_tensor_when_embed_endpoint_configured(
         # is returned by the second call.
         generation_client = MagicMock()
         embed_client = MagicMock()
-        embed_client.embeddings.create.return_value = fake_resp
+        embed_client.post.return_value = fake_resp
         openai_cls.side_effect = [generation_client, embed_client]
 
         provider = VLLMOpenAIProvider()
@@ -139,7 +137,58 @@ def test_vllm_provider_returns_tensor_when_embed_endpoint_configured(
     assert isinstance(result, torch.Tensor)
     assert result.dtype == torch.float32
     assert result.tolist() == [pytest.approx(x) for x in [0.1, 0.2, 0.3, 0.4]]
-    embed_client.embeddings.create.assert_called_once()
+    embed_client.post.assert_called_once()
+
+
+def test_vllm_embedding_request_matches_the_hf_hidden_state(gemma_settings_with_embed):
+    """Chat template + generation prompt, unnormalized: the same feature
+    HFTransformersProvider.pooled_hidden_state returns, so SEP probes transfer."""
+    with patch("demo.slm_provider.OpenAI") as openai_cls:
+        embed_client = MagicMock()
+        embed_client.post.return_value = MagicMock(data=[MagicMock(embedding=[1.0])])
+        openai_cls.side_effect = [MagicMock(), embed_client]
+        VLLMOpenAIProvider().pooled_hidden_state("Who wrote Hamlet?")
+
+    path = embed_client.post.call_args.args[0]
+    kwargs = embed_client.post.call_args.kwargs
+    assert path == "/embeddings"
+    assert kwargs["body"]["messages"] == [{"role": "user", "content": "Who wrote Hamlet?"}]
+    assert kwargs["body"]["add_generation_prompt"] is True
+    assert kwargs["body"]["use_activation"] is False
+    # Without this the client would skip refreshing a Google access token.
+    assert kwargs["options"] == {"security": {"bearer_auth": True}}
+
+
+def test_google_auth_mode_passes_a_token_provider_to_both_clients(monkeypatch):
+    from demo.google_auth import GoogleAccessToken
+    from hallucinations_math_lab.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("SLM_PROVIDER", "vllm")
+    monkeypatch.setenv("VLLM_AUTH", "google")
+    monkeypatch.setenv("VLLM_EMBED_BASE_URL", "https://embed.example/v1")
+    try:
+        with patch("demo.slm_provider.OpenAI") as openai_cls:
+            VLLMOpenAIProvider()
+        keys = [call.kwargs["api_key"] for call in openai_cls.call_args_list]
+    finally:
+        get_settings.cache_clear()
+
+    assert len(keys) == 2
+    assert all(isinstance(key, GoogleAccessToken) for key in keys)
+
+
+def test_api_key_auth_mode_sends_the_static_key(gemma_settings, monkeypatch):
+    from hallucinations_math_lab.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("VLLM_API_KEY", "secret-for-test")
+    try:
+        with patch("demo.slm_provider.OpenAI") as openai_cls:
+            VLLMOpenAIProvider()
+    finally:
+        get_settings.cache_clear()
+    assert openai_cls.call_args.kwargs["api_key"] == "secret-for-test"
 
 
 def test_vllm_provider_sample_extracts_text_and_logprobs(gemma_settings):

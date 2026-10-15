@@ -8,6 +8,12 @@ After iterating the set, fit a linear regression of SE on hidden states and
 save the resulting `nn.Linear` weights as a torch state-dict, keyed by SLM
 model id under `data/probes/<slug>.pt`.
 
+Before the final fit, a held-out split reports how well the probe tracks SE
+on prompts it never saw (Pearson r between predicted and true SE). The saved
+probe is then refit on every row. An in-sample r would be meaningless here:
+with hidden_dim in the thousands and a few hundred rows, a linear model can
+fit the training labels almost perfectly.
+
 Why local training, not a released probe checkpoint:
   - The probe is specific to the SLM that produced the training hidden
     states. A checkpoint released against Llama-3.1-70B is not transferable
@@ -40,13 +46,42 @@ import torch
 from sklearn.linear_model import Ridge
 
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, RANDOM_SEED
 from hallucinations_math_lab.services.semantic_entropy import compute_semantic_entropy
 from hallucinations_math_lab.services.semantic_entropy_probe import SEPProbe
 from demo.slm_provider import build_default_provider
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("train_sep_probe")
+
+DEFAULT_HOLDOUT_FRACTION = 0.2
+# Pearson r needs at least 3 points to be more than a line through 2 points.
+MIN_HOLDOUT_ROWS = 3
+
+
+def holdout_pearson_r(
+    X: np.ndarray, y: np.ndarray, ridge_alpha: float, holdout_fraction: float, seed: int
+) -> float:
+    """Fit on a random (1 - holdout_fraction) of rows; return Pearson r between
+    the probe's predictions and true SE on the held-out rows."""
+    if not 0.0 < holdout_fraction < 1.0:
+        raise ValueError(f"holdout_fraction must be in (0, 1), got {holdout_fraction}.")
+    n_holdout = int(round(len(y) * holdout_fraction))
+    n_train = len(y) - n_holdout
+    if n_holdout < MIN_HOLDOUT_ROWS or n_train < MIN_HOLDOUT_ROWS:
+        raise ValueError(
+            f"{len(y)} rows with holdout_fraction={holdout_fraction} leaves {n_train} train / "
+            f"{n_holdout} held-out rows; need at least {MIN_HOLDOUT_ROWS} of each."
+        )
+    order = np.random.default_rng(seed).permutation(len(y))
+    holdout, train = order[:n_holdout], order[n_holdout:]
+    ridge = Ridge(alpha=ridge_alpha).fit(X[train], y[train])
+    predicted = ridge.predict(X[holdout])
+    if np.std(y[holdout]) == 0 or np.std(predicted) == 0:
+        raise ValueError(
+            "Held-out SE labels or predictions are constant, so Pearson r is undefined. "
+            "Use a calibration set with a spread of easy and hard questions."
+        )
+    return float(np.corrcoef(predicted, y[holdout])[0, 1])
 
 
 def _slugify(model_id: str) -> str:
@@ -82,6 +117,12 @@ def main() -> int:
         help="Path to write probe state-dict; 'auto' = data/probes/<slug>.pt",
     )
     parser.add_argument("--ridge-alpha", type=float, default=1.0)
+    parser.add_argument(
+        "--holdout-fraction",
+        type=float,
+        default=DEFAULT_HOLDOUT_FRACTION,
+        help="Share of rows held out to report SEP-vs-SE Pearson r before the final fit.",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -113,8 +154,9 @@ def main() -> int:
         if pooled is None:
             raise RuntimeError(
                 f"SLM provider returned no pooled hidden state for prompt={prompt[:80]!r}. "
-                "Training a SEP probe requires hidden-state access; for vLLM, set "
-                "VLLM_EMBED_BASE_URL to a sibling --task embed instance."
+                "Training a SEP probe requires hidden-state access: use SLM_PROVIDER="
+                "hf_transformers, or for vLLM set VLLM_EMBED_BASE_URL to an embedding "
+                "server (see the DevOps Guide)."
             )
         hidden_states.append(pooled.detach().to(dtype=torch.float32).numpy())
         se_labels.append(se_result.semantic_entropy)
@@ -134,6 +176,17 @@ def main() -> int:
 
     X = np.stack(hidden_states)
     y = np.asarray(se_labels, dtype=np.float64)
+    r = holdout_pearson_r(X, y, args.ridge_alpha, args.holdout_fraction, seed=RANDOM_SEED)
+    logger.info(
+        "Held-out SEP-vs-SE agreement.",
+        extra={
+            LOG_EXTRA_KEY: {
+                "pearson_r": round(r, 4),
+                "holdout_fraction": args.holdout_fraction,
+                "n_examples": X.shape[0],
+            }
+        },
+    )
     logger.info(
         "Fitting linear probe.",
         extra={
@@ -168,4 +221,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     sys.exit(main())

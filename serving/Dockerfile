@@ -1,63 +1,36 @@
-# vLLM serving image. The model is selected via $MODEL_ID at run time and the
-# vLLM launch flags are resolved from the project's model registry, so a single
-# image can serve any registered SLM. CUDA 12.4. NOTE: the vLLM pin below predates
-# Gemma 4 support; raise it before building (see the DevOps Guide known gaps).
+# vLLM serving image for the Gemma 4 registry entries.
+#
+# One image, one model, one runner per container:
+#   MODEL_ID     which registered model to serve (demo/model_registry.py)
+#   VLLM_RUNNER  `generate` (chat completions with raw logprobs, for PE / SE)
+#                or `embed` (pooled last-token hidden state, for SEP)
+# serving/launch.py turns those into a `vllm serve` argv from the registry.
+#
+# Base: the official vLLM image. v0.19.0 was the first release with Gemma 4
+# support; v0.31.0 carries the later Gemma 4 fixes. The cu129 build is used
+# because the default tag targets CUDA 13, whose minimum NVIDIA driver is
+# newer than what Vertex documents for its GPU nodes.
+FROM vllm/vllm-openai:v0.31.0-cu129
 
-FROM nvcr.io/nvidia/cuda:12.4.1-runtime-ubuntu22.04
-
-ENV DEBIAN_FRONTEND=noninteractive \
+# Vertex mounts the host NVIDIA libraries under /usr/local/nvidia
+# (per Google's vLLM-on-Vertex guide).
+ENV HF_HOME=/models \
     PYTHONUNBUFFERED=1 \
-    HF_HOME=/models \
-    VLLM_NO_USAGE_STATS=1
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip git curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN python3 -m pip install --upgrade pip \
-    && python3 -m pip install --no-cache-dir \
-        "vllm>=0.5.4,<0.7" autoawq pydantic pydantic-settings
-
-# Copy the model registry (lives in demo/, not the library) plus the shim.
-# Build context is the repo root so demo/* resolves; the registry stays the
-# single source of truth and the image picks up new model entries on rebuild.
-COPY demo/__init__.py /opt/taste/demo/__init__.py
-COPY demo/model_registry.py /opt/taste/demo/model_registry.py
-COPY serving/model_flags.py /opt/taste/model_flags.py
-
-# Vertex AI Prediction custom container contract: serve on $AIP_HTTP_PORT and
-# respond to GET $AIP_HEALTH_ROUTE. vLLM's OpenAI server exposes /health.
-# MODEL_ID defaults to the registry's is_deployed_default (Gemma 4 E4B). To
-# serve a different registered SLM, override MODEL_ID at deploy time. The
-# Gemma 4 E2B/E4B SKUs run unquantized in bf16 on a single L4 (24 GB) and
-# keep the project's ~$0.70/hr cost story honest.
-# VLLM_EMBED_PORT, when set, launches a sibling vLLM process with --task embed
-# on that port; the SEP detector consumes it via /v1/embeddings.
-ENV AIP_HTTP_PORT=8080 \
-    AIP_HEALTH_ROUTE=/health \
-    AIP_PREDICT_ROUTE=/v1/chat/completions \
+    VLLM_NO_USAGE_STATS=1 \
+    LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/nvidia/lib64" \
+    PYTHONPATH=/opt/app \
+    AIP_HTTP_PORT=8080 \
     MODEL_ID=google/gemma-4-E4B-it \
-    VLLM_EMBED_PORT="" \
-    PYTHONPATH=/opt/taste
+    VLLM_RUNNER=generate
+
+# Only the registry and the launcher are needed; the library is not.
+COPY demo/__init__.py /opt/app/demo/__init__.py
+COPY demo/model_registry.py /opt/app/demo/model_registry.py
+COPY serving/launch.py /opt/app/serving/launch.py
 
 EXPOSE 8080
 
-# Resolve registry-driven flags once, then exec vLLM. When VLLM_EMBED_PORT is
-# set, also start a sibling embed-task vLLM in the background and wait on both.
-CMD ["sh", "-c", "\
-        set -e; \
-        VLLM_FLAGS=\"$(python3 /opt/taste/model_flags.py \"$MODEL_ID\" vllm)\"; \
-        if [ -n \"$VLLM_EMBED_PORT\" ]; then \
-            echo \"Starting embed-task vLLM on port $VLLM_EMBED_PORT\"; \
-            python3 -m vllm.entrypoints.openai.api_server \
-                $VLLM_FLAGS \
-                --task embed \
-                --host 0.0.0.0 \
-                --port \"$VLLM_EMBED_PORT\" \
-                --gpu-memory-utilization 0.30 & \
-        fi; \
-        exec python3 -m vllm.entrypoints.openai.api_server \
-            $VLLM_FLAGS \
-            --host 0.0.0.0 \
-            --port \"${AIP_HTTP_PORT}\" \
-            --gpu-memory-utilization 0.60"]
+# vLLM's OpenAI server answers GET /health, which Vertex uses as the health
+# route. Requests reach the server unchanged through Vertex's invoke route
+# (see knowledge/usage_guides/DEVOPS_GUIDE.md).
+ENTRYPOINT ["python3", "/opt/app/serving/launch.py"]

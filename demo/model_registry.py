@@ -1,7 +1,8 @@
 """Model registry — single source of truth for SLM-specific serving and provider config.
 
 Each entry pins everything that varies per SLM:
-  - vLLM launch flags: quantization, dtype, max_model_len.
+  - vLLM launch flags: quantization, dtype, max_model_len, tensor
+    parallelism, and the per-runner flags (generate vs embed).
   - Deployment hints: required GPU SKU, accelerator count, recommended
     `accelerator_type` value for Vertex (NVIDIA_L4 / NVIDIA_A100 / etc).
   - Default provider for the SLMProvider abstraction (vllm vs hf_transformers).
@@ -12,7 +13,7 @@ same default:
 
   - `is_deployed_default = True` on one entry. That's what the Vertex
     deployment uses if nothing overrides it. Today: Gemma-4-E4B on L4 — the
-    cost story in CLAUDE.md (~$0.70/hr) depends on staying single-L4.
+    cost figures in the DevOps Guide (~$0.70/hr) depend on staying single-L4.
 
   - `is_local_default = True` on one entry. That's what single-model
     commands (`python -m demo.cli chat`) pick up when no .env override is present, for
@@ -31,7 +32,8 @@ The registry is consumed:
   - In Python by `VLLMOpenAIProvider` and `HFTransformersProvider` to pick
     runtime parameters by `model_id`.
   - In shell by `serving/Dockerfile` via the `serving/model_flags.py` CLI
-    shim, which prints the vLLM launch flags for a given `MODEL_ID`.
+    shim, which prints the vLLM engine flags for a given `MODEL_ID` and
+    runner.
   - In Terraform by `serving/model_flags.py <id> terraform`, which writes
     `terraform/model_registry.auto.tfvars.json` so the deployed-model machine
     type, accelerator, and `model_id` come from this registry rather than
@@ -48,6 +50,25 @@ class ProviderKind(StrEnum):
     HF_TRANSFORMERS = "hf_transformers"
 
 
+class ServingRunner(StrEnum):
+    """What a vLLM server process does with the model.
+
+    vLLM serves one runner per process: `generate` answers chat completions
+    (samples + logprobs for PE / SE), `embed` answers `/v1/embeddings` with a
+    pooled hidden state (for SEP). Each runs in its own container.
+    """
+
+    GENERATE = "generate"
+    EMBED = "embed"
+
+
+# SEP reads the raw last-layer hidden state at the final prompt token, exactly
+# what `HFTransformersProvider.pooled_hidden_state` returns. vLLM's embedding
+# runner defaults to that token but L2-normalizes it; `use_activation: false`
+# turns the normalization off so probes transfer between the two providers.
+_EMBED_POOLER_CONFIG: Final[str] = '{"seq_pooling_type":"LAST","use_activation":false}'
+
+
 @dataclass(frozen=True)
 class ModelEntry:
     model_id: str
@@ -60,20 +81,40 @@ class ModelEntry:
     default_provider: ProviderKind
     is_deployed_default: bool = False
     is_local_default: bool = False
-    sep_probe_path: str | None = None  # relative to repo root; set by Chunk 5
+    sep_probe_path: str | None = None  # relative to repo root, once a probe is trained
 
-    def vllm_flags(self) -> list[str]:
-        """Materialize the vLLM CLI flag list for this entry."""
+    def vllm_flags(self, runner: ServingRunner) -> list[str]:
+        """`vllm serve <model_id>` engine flags for this entry and runner.
+
+        The model id is positional to `vllm serve` and host/port belong to
+        the container, so neither is included here.
+        """
         flags = [
-            "--model",
-            self.model_id,
             "--dtype",
             self.dtype,
             "--max-model-len",
             str(self.max_model_len),
+            "--tensor-parallel-size",
+            str(self.accelerator_count),
+            # Gemma 4 is multimodal; this lab is text-only. Skipping the
+            # vision/audio towers frees their memory and startup profiling.
+            "--language-model-only",
         ]
         if self.quantization:
             flags += ["--quantization", self.quantization]
+        if runner is ServingRunner.GENERATE:
+            # Logprobs of the model's own distribution, before temperature /
+            # top-p. Predictive entropy must not depend on sampler settings.
+            flags += ["--logprobs-mode", "raw_logprobs"]
+        else:
+            flags += [
+                "--runner",
+                "pooling",
+                "--convert",
+                "embed",
+                "--pooler-config",
+                _EMBED_POOLER_CONFIG,
+            ]
         return flags
 
 
@@ -83,12 +124,18 @@ class ModelEntry:
 # the family. The 26B-A4B MoE has a known vLLM MXFP4/NVFP4 weight-loading
 # bug in the fused MoE layer; we therefore keep it unquantized on A100-80GB
 # until that ships. The 31B dense official recipe uses TP=2.
+#
+# max_model_len is sized to the GPU, not to the model's 128K maximum: on a
+# 24 GB L4 the bf16 weights leave room for only a few GB of KV cache, and vLLM
+# refuses to start if the configured context cannot fit. Short-answer QA
+# prompts plus SAMPLE_N completions need far less than 8K tokens.
+_L4_MAX_MODEL_LEN: Final[int] = 8192
 _REGISTRY: Final[dict[str, ModelEntry]] = {
     "google/gemma-4-E2B-it": ModelEntry(
         model_id="google/gemma-4-E2B-it",
         quantization=None,
         dtype="bfloat16",
-        max_model_len=131072,
+        max_model_len=_L4_MAX_MODEL_LEN,
         accelerator_type="NVIDIA_L4",
         accelerator_count=1,
         machine_type="g2-standard-12",
@@ -99,7 +146,7 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         model_id="google/gemma-4-E4B-it",
         quantization=None,
         dtype="bfloat16",
-        max_model_len=131072,
+        max_model_len=_L4_MAX_MODEL_LEN,
         accelerator_type="NVIDIA_L4",
         accelerator_count=1,
         machine_type="g2-standard-12",

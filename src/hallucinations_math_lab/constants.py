@@ -56,3 +56,14 @@ RANDOM_SEED: Final[int] = 42
 
 # Logging key (used in `extra={"key": ...}`)
 LOG_EXTRA_KEY: Final[str] = "ctx"
+
+
+class VLLMAuthMode(StrEnum):
+    """How the vLLM client authenticates (see `Settings.vllm_auth`)."""
+
+    API_KEY = "api_key"
+    GOOGLE = "google"
+
+
+# OAuth scope for calling Vertex AI with Application Default Credentials.
+GOOGLE_CLOUD_PLATFORM_SCOPE: Final[str] = "https://www.googleapis.com/auth/cloud-platform"

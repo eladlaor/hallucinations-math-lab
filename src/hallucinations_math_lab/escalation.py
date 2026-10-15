@@ -30,7 +30,8 @@ class EscalationPolicy(Protocol):
     so the evaluator can fail-fast-validate they are present in the scores
     map before calling `should_escalate`."""
 
-    detectors_referenced: tuple[DetectorName, ...]
+    @property
+    def detectors_referenced(self) -> tuple[DetectorName, ...]: ...
 
     def should_escalate(self, scores: dict[DetectorName, float]) -> bool: ...
 
