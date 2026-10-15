@@ -5,7 +5,7 @@ from functools import lru_cache
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from hallucinations_math_lab.constants import DetectorName, VLLMAuthMode
+from hallucinations_math_lab.constants import DetectorName, JudgeThinkingLevel, VLLMAuthMode
 
 _DEFAULT_TARGET_MODEL_IDS: list[str] = [
     "google/gemma-4-E2B-it",
@@ -69,8 +69,10 @@ class Settings(BaseSettings):
 
     # Judge models
     judge_model_id: str = Field(default="gemini-3.5-flash-lite")
-    # 0.0 keeps the judge's verdict as reproducible as the API allows.
-    judge_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    # Gemini 3.5 on Vertex ignores temperature, so the judge sends none; its
+    # reasoning depth is set here instead. 3.5 Flash-Lite defaults to MINIMAL,
+    # which Google warns can cut multi-step reasoning short.
+    judge_thinking_level: JudgeThinkingLevel = Field(default=JudgeThinkingLevel.LOW)
 
     # NLI for SE clustering
     nli_model_id: str = Field(default="microsoft/deberta-large-mnli")

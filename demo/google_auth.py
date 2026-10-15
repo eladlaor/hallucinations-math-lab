@@ -10,6 +10,7 @@ current token is no longer valid.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Protocol
 
 from hallucinations_math_lab.constants import GOOGLE_CLOUD_PLATFORM_SCOPE, LOG_EXTRA_KEY
@@ -38,6 +39,7 @@ class GoogleAccessToken:
                 first use with the cloud-platform scope.
         """
         self._credentials = credentials
+        self._lock = threading.Lock()
 
     def _ensure_credentials(self) -> RefreshableCredentials:
         if self._credentials is not None:
@@ -60,15 +62,18 @@ class GoogleAccessToken:
         return credentials
 
     def __call__(self) -> str:
-        credentials = self._ensure_credentials()
-        if not credentials.valid:
-            from google.auth.transport.requests import Request
+        # One refresh at a time: concurrent requests would otherwise each
+        # refresh the same expired credentials.
+        with self._lock:
+            credentials = self._ensure_credentials()
+            if not credentials.valid:
+                from google.auth.transport.requests import Request
 
-            try:
-                credentials.refresh(Request())
-            except Exception as e:
-                raise RuntimeError(f"Failed to refresh Google access token: {e!s}") from e
-        token = credentials.token
+                try:
+                    credentials.refresh(Request())
+                except Exception as e:
+                    raise RuntimeError(f"Failed to refresh Google access token: {e!s}") from e
+            token = credentials.token
         if not token:
             raise RuntimeError("Google credentials refreshed but returned no access token.")
         return str(token)

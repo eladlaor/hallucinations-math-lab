@@ -58,6 +58,19 @@ RANDOM_SEED: Final[int] = 42
 LOG_EXTRA_KEY: Final[str] = "ctx"
 
 
+class JudgeThinkingLevel(StrEnum):
+    """Gemini 3.x reasoning depth for the judge (Google Gen AI `ThinkingLevel`).
+
+    Gemini 3.5 models on Vertex ignore temperature / top-p / top-k; thinking
+    level and a structured schema are the documented controls instead.
+    """
+
+    MINIMAL = "MINIMAL"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
 class VLLMAuthMode(StrEnum):
     """How the vLLM client authenticates (see `Settings.vllm_auth`)."""
 

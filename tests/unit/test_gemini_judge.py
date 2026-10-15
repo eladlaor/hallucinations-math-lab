@@ -1,8 +1,9 @@
 """GeminiJudge tests with an injected fake `google.genai` client (no GCP).
 
 Contract pinned here:
-  - The request asks for JSON validated against `JudgeVerdict`, at the
-    configured judge temperature, with the prompt passed through verbatim.
+  - The request asks for JSON validated against `JudgeVerdict` (reasoning
+    before answer), at the configured thinking level and with no sampling
+    parameters, with the prompt passed through verbatim.
   - A parsed verdict is returned as `(answer, reasoning)`.
   - A response that does not parse into a verdict fails fast.
   - Without an injected client, an empty GCP_PROJECT_ID fails fast.
@@ -17,6 +18,7 @@ from hallucinations_math_lab.custom_types.llm_schemas import JudgeVerdict
 from hallucinations_math_lab.judges.gemini import GeminiJudge
 
 pytest.importorskip("google.genai")
+from google.genai import types
 
 MODEL_ID = "gemini-test"
 PROMPT = "Who was the first person to walk on the Moon?"
@@ -44,7 +46,14 @@ def test_answer_requests_structured_output():
     assert kwargs["contents"] == PROMPT
     assert kwargs["config"].response_mime_type == "application/json"
     assert kwargs["config"].response_schema is JudgeVerdict
-    assert kwargs["config"].temperature == 0.0
+    # Gemini 3.5 ignores sampling parameters; thinking level is the control.
+    assert kwargs["config"].temperature is None
+    assert kwargs["config"].thinking_config.thinking_level == types.ThinkingLevel.LOW
+
+
+def test_reasoning_is_generated_before_the_answer():
+    """Structured output follows schema order; reasoning must precede answer."""
+    assert list(JudgeVerdict.model_fields) == ["reasoning", "answer"]
 
 
 def test_answer_fails_fast_on_unparseable_response():

@@ -17,8 +17,18 @@ Usage:
 
 import argparse
 import logging
+import sys
+from pathlib import Path
 
+from google.api_core.exceptions import GoogleAPIError
 from google.cloud import aiplatform
+
+# Make the model registry importable when run as `python serving/vertex_deploy.py`.
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from demo.model_registry import ServingRunner
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +62,16 @@ def deploy(args: argparse.Namespace) -> None:
             },
             serving_container_shared_memory_size_mb=SHARED_MEMORY_SIZE_MB,
         )
-        logger.info(
-            "Uploaded model.",
-            extra={LOG_EXTRA_KEY: {"model": model.resource_name, "runner": args.runner}},
-        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Vertex model upload failed for model_id={args.model_id!r} "
+            f"runner={args.runner!r}: {e!s}"
+        ) from e
+    logger.info(
+        "Uploaded model.",
+        extra={LOG_EXTRA_KEY: {"model": model.resource_name, "runner": args.runner}},
+    )
+    try:
         model.deploy(
             endpoint=endpoint,
             deployed_model_display_name=args.display_name,
@@ -68,6 +84,20 @@ def deploy(args: argparse.Namespace) -> None:
             traffic_percentage=100,
         )
     except Exception as e:
+        # The uploaded model is not attached to the endpoint, so `undeploy`
+        # would never find it; delete it here rather than leave it orphaned.
+        try:
+            model.delete()
+        except GoogleAPIError as cleanup_error:
+            logger.error(
+                "Could not delete the uploaded model after a failed deploy; delete it by hand.",
+                extra={
+                    LOG_EXTRA_KEY: {
+                        "model": model.resource_name,
+                        "error": str(cleanup_error),
+                    }
+                },
+            )
         raise RuntimeError(
             f"Vertex deploy failed for model_id={args.model_id!r} runner={args.runner!r} "
             f"endpoint={args.endpoint_id!r}: {e!s}"
@@ -113,7 +143,7 @@ def _parser() -> argparse.ArgumentParser:
     dep = sub.choices["deploy"]
     dep.add_argument("--image-uri", required=True)
     dep.add_argument("--model-id", required=True)
-    dep.add_argument("--runner", required=True, choices=["generate", "embed"])
+    dep.add_argument("--runner", required=True, choices=[str(r) for r in ServingRunner])
     dep.add_argument("--machine-type", required=True)
     dep.add_argument("--accelerator-type", required=True)
     dep.add_argument("--accelerator-count", required=True, type=int)

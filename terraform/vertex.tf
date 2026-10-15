@@ -39,7 +39,6 @@ locals {
   vllm_runners = var.deploy_vertex_endpoint ? (
     var.with_embed_endpoint ? toset(["generate", "embed"]) : toset(["generate"])
   ) : toset([])
-  repo_root = abspath("${path.module}/..")
   # Vertex endpoint ids must be numeric; see var.vertex_endpoint_id.
   endpoint_ids = {
     generate = tostring(var.vertex_endpoint_id)
@@ -83,7 +82,6 @@ resource "null_resource" "deploy_model" {
     region            = var.region
     project_id        = var.project_id
     display_name      = "${var.name_prefix}-${each.key}-model"
-    repo_root         = local.repo_root
   }
 
   lifecycle {
@@ -95,7 +93,7 @@ resource "null_resource" "deploy_model" {
 
   provisioner "local-exec" {
     when        = create
-    working_dir = self.triggers.repo_root
+    working_dir = "${path.module}/.."
     command     = <<-EOT
       set -euo pipefail
       uv run --extra deploy python serving/vertex_deploy.py deploy \
@@ -115,7 +113,7 @@ resource "null_resource" "deploy_model" {
 
   provisioner "local-exec" {
     when        = destroy
-    working_dir = self.triggers.repo_root
+    working_dir = "${path.module}/.."
     command     = <<-EOT
       set -euo pipefail
       uv run --extra deploy python serving/vertex_deploy.py undeploy \

@@ -28,7 +28,10 @@ class GeminiJudge:
     """Vertex AI Gemini implementation of the `Judge` protocol.
 
     The verdict comes back as JSON validated against `JudgeVerdict`, so the
-    answer and its reasoning never depend on parsing free text.
+    answer and its reasoning never depend on parsing free text. No sampling
+    parameters are sent: Gemini 3.5 on Vertex ignores temperature / top-p /
+    top-k, and Google documents thinking level plus a response schema as the
+    controls for consistent output.
 
     Reference implementation only: any object with
     `.answer(prompt) -> (answer, reasoning)` can serve as the judge.
@@ -44,7 +47,7 @@ class GeminiJudge:
         """
         settings = get_settings()
         self._model_id = model_id or settings.judge_model_id
-        self._temperature = settings.judge_temperature
+        self._thinking_level = settings.judge_thinking_level
         self._client = client
 
     def _ensure_client(self) -> Client:
@@ -86,7 +89,9 @@ class GeminiJudge:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=JUDGE_INSTRUCTION,
-                    temperature=self._temperature,
+                    thinking_config=types.ThinkingConfig(
+                        thinking_level=types.ThinkingLevel(str(self._thinking_level))
+                    ),
                     response_mime_type="application/json",
                     response_schema=JudgeVerdict,
                 ),
