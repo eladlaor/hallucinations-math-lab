@@ -1,16 +1,17 @@
 [project]
 name = "hallucinations-math-lab"
 version = "0.1.0"
-description = "Response evaluators for LLM-native projects: Semantic Entropy, predictive entropy, Semantic Entropy Probes, plus optional LLM-as-a-judge escalation. Shippable as a library (import name: taste), with a reference vLLM-on-Vertex demo."
+description = "Response evaluators for LLM-native projects: Semantic Entropy, predictive entropy, Semantic Entropy Probes, plus optional LLM-as-a-judge escalation. Shippable as a library (import name: hallucinations_math_lab), with a reference vLLM-on-Vertex demo."
 readme = "README.md"
 authors = [
     { name = "Elad Laor", email = "eladlaor88@gmail.com" }
 ]
-license = { text = "Apache-2.0" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.14"
 
 # Core: the Semantic-Entropy detection path that the library exposes by default.
-# torch + transformers are required because taste/__init__ eagerly imports the
+# torch + transformers are required because hallucinations_math_lab/__init__ eagerly imports the
 # DeBERTa-MNLI NLI detector. Everything provider/judge/demo/eval specific is an
 # optional extra below.
 dependencies = [
@@ -54,10 +55,6 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = "src"
-# Distribution is `hallucinations-math-lab` but the import package stays `taste`,
-# so the backend must be told the module name explicitly (it otherwise
-# infers `ai_eval_math_lab` from the project name).
-module-name = "taste"
 
 [tool.ruff]
 line-length = 100
@@ -66,7 +63,7 @@ target-version = "py312"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-# Make both the src-layout library (taste) and the demo/ top-level package
+# Make both the src-layout library (hallucinations_math_lab) and the demo/ top-level package
 # importable in tests without installing demo as a distribution.
 pythonpath = ["src", "."]
 markers = [

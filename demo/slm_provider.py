@@ -30,9 +30,9 @@ import torch
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from taste.config import get_settings
-from taste.constants import LOG_EXTRA_KEY
-from taste.custom_types.domain_types import Sample, SampleSet, TokenLogprob
+from hallucinations_math_lab.config import get_settings
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
 
 logger = logging.getLogger(__name__)
 

@@ -4,8 +4,8 @@ Subcommands:
 - chat   : single-shot Q&A with the full detector + judge pipeline.
 - detect : print the DetectionResult JSON for a single prompt (no judge call).
 
-This is a demo. The library lives in `taste.*`; consumers who already own
-their LLM should call `taste.evaluate_responses(...)` directly and skip
+This is a demo. The library lives in `hallucinations_math_lab.*`; consumers who already own
+their LLM should call `hallucinations_math_lab.evaluate_responses(...)` directly and skip
 the demo's SLM provider plumbing entirely. See examples/ for that path.
 """
 
@@ -15,8 +15,8 @@ import logging
 import typer
 from rich.console import Console
 
-from taste import DetectorName, ResponseEvaluator
-from taste.judges import GeminiJudge
+from hallucinations_math_lab import DetectorName, ResponseEvaluator
+from hallucinations_math_lab.judges import GeminiJudge
 
 app = typer.Typer(
     add_completion=False,

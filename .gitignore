@@ -61,3 +61,8 @@ terraform/*.tfvars
 !terraform/terraform.tfvars.example
 terraform/*.tfplan
 
+
+# Private material: kept on disk, never published.
+.claude/
+knowledge/lectures/
+knowledge/submissions/

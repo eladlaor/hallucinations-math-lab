@@ -76,7 +76,7 @@ Two caveats that eat into the favorable latency number:
 - Under a **saturated** server there is no batch headroom — your N sequences compete with other users' requests, and the 10× converts back into latency. The cost does not vanish; it moves to throughput.
 - The request finishes when the **slowest** of the N finishes, not the average. Sampling variance means max-of-10 exceeds mean-of-1.
 
-**Do NOT "fix" this by gating SE behind Predictive Entropy.** It is the obvious move and it is broken: PE's blind spot *is* the confident lie, so a PE gate never escalates precisely the cases SE exists to catch. See `src/taste/escalation.py`, whose module docstring makes this a hard rule (PE may be an `AnyAbove` OR-trigger, never an `AllAbove` gate). The sound cheap-first path is **SEP**, which approximates SE itself rather than substituting a different question.
+**Do NOT "fix" this by gating SE behind Predictive Entropy.** It is the obvious move and it is broken: PE's blind spot *is* the confident lie, so a PE gate never escalates precisely the cases SE exists to catch. See `src/hallucinations_math_lab/escalation.py`, whose module docstring makes this a hard rule (PE may be an `AnyAbove` OR-trigger, never an `AllAbove` gate). The sound cheap-first path is **SEP**, which approximates SE itself rather than substituting a different question.
 
 **One sentence to say on stage:** "Semantic Entropy is roughly ten times the compute — but not ten times the wait, because the ten answers come back as one batch. Cost and latency are different axes."
 

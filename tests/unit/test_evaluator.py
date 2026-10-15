@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
-from taste import (
+from hallucinations_math_lab import (
     DetectorName,
     PredictiveEntropyDetector,
     ResponseEvaluator,
@@ -32,8 +32,8 @@ from taste import (
     TokenLogprob,
     evaluate_responses,
 )
-from taste.constants import DetectorCategory
-from taste.services.detector_protocol import (
+from hallucinations_math_lab.constants import DetectorCategory
+from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
     DetectorMetadata,
@@ -107,7 +107,7 @@ class _ConstScoreDetector(Detector):
 @pytest.fixture
 def patch_nli():
     with patch(
-        "taste.services.semantic_entropy.get_nli_scorer",
+        "hallucinations_math_lab.services.semantic_entropy.get_nli_scorer",
         return_value=FakeNLI(),
     ):
         yield
@@ -350,7 +350,7 @@ def test_evaluate_responses_invokes_judge_on_escalation(patch_nli):
             for i in range(10)
         ],
     )
-    from taste.constants import AnswerSource
+    from hallucinations_math_lab.constants import AnswerSource
 
     result = evaluate_responses(
         prompt="q",

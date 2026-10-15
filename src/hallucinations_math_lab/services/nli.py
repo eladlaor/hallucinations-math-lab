@@ -6,8 +6,8 @@ from functools import lru_cache
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from taste.config import get_settings
-from taste.constants import DEBERTA_MNLI_LABEL_ORDER, LOG_EXTRA_KEY, NLILabel
+from hallucinations_math_lab.config import get_settings
+from hallucinations_math_lab.constants import DEBERTA_MNLI_LABEL_ORDER, LOG_EXTRA_KEY, NLILabel
 
 logger = logging.getLogger(__name__)
 

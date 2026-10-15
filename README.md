@@ -6,7 +6,7 @@ detector on a cost / latency / accuracy frontier you can actually plan around.
 
 Ships as **two surfaces**:
 
-1. **A library** — `from taste import evaluate_responses, ResponseEvaluator`.
+1. **A library** — `from hallucinations_math_lab import evaluate_responses, ResponseEvaluator`.
    Drop into any LLM-native project (langrag, your own agent stack, anything
    producing N samples per prompt) and get back per-detector scores plus an
    optional judge verdict.
@@ -134,8 +134,8 @@ one.
 ## Library use
 
 ```python
-from taste import evaluate_responses, Sample, SampleSet, TokenLogprob
-from taste import PredictiveEntropyDetector, SemanticEntropyDetector, DetectorName
+from hallucinations_math_lab import evaluate_responses, Sample, SampleSet, TokenLogprob
+from hallucinations_math_lab import PredictiveEntropyDetector, SemanticEntropyDetector, DetectorName
 
 # Your LLM produced N=10 samples for the prompt already. Just pass them in.
 samples = SampleSet(
@@ -174,7 +174,7 @@ single-detector decision (`SingleDetector`). To combine detectors, pass an
 `escalation_policy` instead — it **takes precedence** over the scalar pair:
 
 ```python
-from taste import evaluate_responses, AnyAbove, DetectorName
+from hallucinations_math_lab import evaluate_responses, AnyAbove, DetectorName
 
 result = evaluate_responses(
     prompt="Who wrote 1984?",
@@ -233,7 +233,7 @@ of the CLI output.
 ## Repository layout
 
 ```
-src/taste/                  # the library — no demo dependencies
+src/hallucinations_math_lab/                  # the library — no demo dependencies
   __init__.py               # public surface
   evaluator.py              # evaluate_responses + ResponseEvaluator
   constants.py              # DetectorName, DetectorCategory, AnswerSource

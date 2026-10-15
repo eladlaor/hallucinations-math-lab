@@ -36,7 +36,7 @@ uncertainty of the answers langrag is actually shipping.
 from typing import Any
 
 # These imports are real and stable for consumer use:
-from taste import (
+from hallucinations_math_lab import (
     DetectorName,
     PredictiveEntropyDetector,
     Sample,

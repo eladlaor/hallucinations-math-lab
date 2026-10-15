@@ -30,8 +30,8 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
-from taste.constants import DetectorCategory, DetectorName
-from taste.custom_types.domain_types import Cluster, SampleSet
+from hallucinations_math_lab.constants import DetectorCategory, DetectorName
+from hallucinations_math_lab.custom_types.domain_types import Cluster, SampleSet
 
 
 @dataclass(frozen=True)

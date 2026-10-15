@@ -5,8 +5,8 @@ constructed and invoked."""
 
 import logging
 
-from taste.config import get_settings
-from taste.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.config import get_settings
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY
 
 logger = logging.getLogger(__name__)
 

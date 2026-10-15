@@ -11,7 +11,7 @@ Two public entry points:
     scoring for you. Implemented in terms of `evaluate_responses`.
 
 Detectors implement the `Detector` protocol and live under
-`taste.services.*`. Three ship by default:
+`hallucinations_math_lab.services.*`. Three ship by default:
 
   - `PredictiveEntropyDetector` — token-logprob baseline (cheap).
   - `SemanticEntropyDetector` — Farquhar et al. NLI-clustered Shannon
@@ -26,27 +26,27 @@ threshold. `GeminiJudge` is the reference Vertex impl; consumers may
 plug in any model that implements the `Judge` protocol.
 """
 
-from taste.constants import AnswerSource, DetectorName, NLILabel
-from taste.custom_types.domain_types import (
+from hallucinations_math_lab.constants import AnswerSource, DetectorName, NLILabel
+from hallucinations_math_lab.custom_types.domain_types import (
     Cluster,
     DetectionResult,
     Sample,
     SampleSet,
     TokenLogprob,
 )
-from taste.escalation import AllAbove, AnyAbove, EscalationPolicy, SingleDetector
-from taste.evaluator import ResponseEvaluator, evaluate_responses
-from taste.judges.protocol import Judge
-from taste.services.detector_protocol import (
+from hallucinations_math_lab.escalation import AllAbove, AnyAbove, EscalationPolicy, SingleDetector
+from hallucinations_math_lab.evaluator import ResponseEvaluator, evaluate_responses
+from hallucinations_math_lab.judges.protocol import Judge
+from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
     DetectorPrerequisiteError,
     DetectorScore,
 )
-from taste.services.predictive_entropy import PredictiveEntropyDetector
-from taste.services.sampling_provider import SamplingProvider
-from taste.services.semantic_entropy import SemanticEntropyDetector
-from taste.services.semantic_entropy_probe import SemanticEntropyProbeDetector
+from hallucinations_math_lab.services.predictive_entropy import PredictiveEntropyDetector
+from hallucinations_math_lab.services.sampling_provider import SamplingProvider
+from hallucinations_math_lab.services.semantic_entropy import SemanticEntropyDetector
+from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
 
 __all__ = [
     # Top-level entry points

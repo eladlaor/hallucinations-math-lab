@@ -16,16 +16,16 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from taste.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
-from taste.custom_types.domain_types import Cluster, SampleSet
-from taste.services.detector_protocol import (
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
+from hallucinations_math_lab.custom_types.domain_types import Cluster, SampleSet
+from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
     DetectorMetadata,
     DetectorPrerequisiteError,
     DetectorScore,
 )
-from taste.services.nli import NLIScorer, get_nli_scorer
+from hallucinations_math_lab.services.nli import NLIScorer, get_nli_scorer
 
 logger = logging.getLogger(__name__)
 

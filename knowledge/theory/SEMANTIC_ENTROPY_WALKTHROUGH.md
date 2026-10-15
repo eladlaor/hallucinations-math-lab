@@ -41,11 +41,11 @@ Code in this repo:
 
 | Concern | File |
 | --- | --- |
-| SE math + clustering | `src/taste/services/semantic_entropy.py` |
-| The "same meaning?" test | `src/taste/services/nli.py` |
-| Baseline for comparison | `src/taste/services/predictive_entropy.py` |
-| Threshold → verdict | `src/taste/escalation.py`, `src/taste/config.py:75` |
-| Data shapes | `src/taste/custom_types/domain_types.py` |
+| SE math + clustering | `src/hallucinations_math_lab/services/semantic_entropy.py` |
+| The "same meaning?" test | `src/hallucinations_math_lab/services/nli.py` |
+| Baseline for comparison | `src/hallucinations_math_lab/services/predictive_entropy.py` |
+| Threshold → verdict | `src/hallucinations_math_lab/escalation.py`, `src/hallucinations_math_lab/config.py:75` |
+| Data shapes | `src/hallucinations_math_lab/custom_types/domain_types.py` |
 
 ---
 
@@ -142,7 +142,7 @@ H_pred ≈ (1/N) · Σ_{n=1..N}  [ -(1/T_n) · Σ_{t=1..T_n}  log p(token_{n,t})
 - `T_n` — number of tokens in sample n
 - `log p(token_{n,t})` — the logprob the model reported for token t of sample n
 
-### Python (`src/taste/services/predictive_entropy.py`)
+### Python (`src/hallucinations_math_lab/services/predictive_entropy.py`)
 
 ```python
 def length_normalized_predictive_entropy(sample_set: SampleSet) -> float:
@@ -159,7 +159,7 @@ def length_normalized_predictive_entropy(sample_set: SampleSet) -> float:
 ```
 
 `mean_token_logprob` lives on the `Sample` model in
-`src/taste/custom_types/domain_types.py`:
+`src/hallucinations_math_lab/custom_types/domain_types.py`:
 
 ```python
 @property
@@ -199,7 +199,7 @@ answer distribution for question `x`, at temperature > 0 so the draws can differ
 
 ### Python
 
-Sampling happens in the vLLM client (`src/taste/services/sampling_provider.py`);
+Sampling happens in the vLLM client (`src/hallucinations_math_lab/services/sampling_provider.py`);
 `semantic_entropy.py` receives the finished `SampleSet`. The shape it works with:
 
 ```python
@@ -242,7 +242,7 @@ ways*:
 equiv(a, b)  ⟺  NLI(a, b) = entailment  AND  NLI(b, a) = entailment
 ```
 
-### Python (`src/taste/services/nli.py`)
+### Python (`src/hallucinations_math_lab/services/nli.py`)
 
 ```python
 @torch.no_grad()
@@ -306,7 +306,7 @@ for n = 1..N:
 
 Cost: `O(N · K)` entailment checks instead of `O(N²)`.
 
-### Python (`src/taste/services/semantic_entropy.py`)
+### Python (`src/hallucinations_math_lab/services/semantic_entropy.py`)
 
 ```python
 def cluster_by_bidirectional_entailment(
@@ -394,7 +394,7 @@ H_SE = - Σ_{k=1..K}  p(C_k) · log p(C_k)
 
 Bounds: `0 ≤ H_SE ≤ log(N)`.
 
-### Python (`src/taste/services/semantic_entropy.py`)
+### Python (`src/hallucinations_math_lab/services/semantic_entropy.py`)
 
 ```python
 def compute_semantic_entropy(sample_set: SampleSet, scorer: NLIScorer | None = None) -> SemanticEntropyResult:
@@ -447,9 +447,9 @@ SE is a continuous score, not a boolean. The verdict is a threshold comparison.
 escalate  ⟺  H_SE > τ
 ```
 
-where `τ` ("tau") is `se_threshold` — default `1.0` nats (`src/taste/config.py:75`).
+where `τ` ("tau") is `se_threshold` — default `1.0` nats (`src/hallucinations_math_lab/config.py:75`).
 
-### Python (`src/taste/escalation.py`)
+### Python (`src/hallucinations_math_lab/escalation.py`)
 
 ```python
 @dataclass(frozen=True)
@@ -584,7 +584,7 @@ Paraphrase variation is noise in the string space and vanishes in the meaning sp
 
 The price is real: SE costs N generations plus `O(N·K)` NLI forward-pass pairs per
 question, against a single forward pass for predictive entropy. That cost is why
-**SEP** (Semantic Entropy Probes, `src/taste/services/semantic_entropy_probe.py`)
+**SEP** (Semantic Entropy Probes, `src/hallucinations_math_lab/services/semantic_entropy_probe.py`)
 exists as the third detector — it trains a probe on the model's hidden states to
 *predict* `H_SE` from one forward pass, trading some accuracy for most of SE's cost.
 
@@ -640,8 +640,8 @@ for sizes in ([10], [9,1], [8,2], [7,2,1], [5,5], [4,3,2,1], [1]*10):
 To exercise the real pipeline with a stub NLI scorer:
 
 ```python
-from taste.services.semantic_entropy import compute_semantic_entropy
-from taste.custom_types.domain_types import Sample, SampleSet
+from hallucinations_math_lab.services.semantic_entropy import compute_semantic_entropy
+from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet
 
 class FakeNLI:
     """Equivalent iff the strings share a lowercase token — stands in for DeBERTa."""

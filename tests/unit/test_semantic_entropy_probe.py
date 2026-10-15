@@ -14,12 +14,12 @@ import torch
 
 import pytest
 
-from taste.constants import DetectorName
-from taste.services.detector_protocol import (
+from hallucinations_math_lab.constants import DetectorName
+from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     DetectorPrerequisiteError,
 )
-from taste.services.semantic_entropy_probe import (
+from hallucinations_math_lab.services.semantic_entropy_probe import (
     SEPProbe,
     SemanticEntropyProbeDetector,
 )

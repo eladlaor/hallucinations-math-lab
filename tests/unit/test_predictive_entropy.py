@@ -4,8 +4,8 @@ import math
 
 import pytest
 
-from taste.custom_types.domain_types import Sample, SampleSet, TokenLogprob
-from taste.services.predictive_entropy import length_normalized_predictive_entropy
+from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
+from hallucinations_math_lab.services.predictive_entropy import length_normalized_predictive_entropy
 
 
 def _mk_sample(logprobs: list[float]) -> Sample:

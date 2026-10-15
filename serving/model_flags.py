@@ -28,7 +28,7 @@ from pathlib import Path
 
 # Make the project layout importable when run from a checkout (deploy host).
 # `demo.model_registry` lives at <repo_root>/demo/, and the library lives at
-# <repo_root>/src/taste/. Inside the serving container PYTHONPATH already
+# <repo_root>/src/hallucinations_math_lab/. Inside the serving container PYTHONPATH already
 # covers both, so these inserts are no-ops there.
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 for _entry in (_REPO_ROOT, _REPO_ROOT / "src"):

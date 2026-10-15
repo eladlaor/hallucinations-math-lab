@@ -22,16 +22,16 @@ SE is not in the configured detector list, `clusters` is None.
 
 import logging
 
-from taste.config import get_settings
-from taste.constants import LOG_EXTRA_KEY, AnswerSource, DetectorName
-from taste.custom_types.domain_types import DetectionResult, SampleSet
-from taste.escalation import EscalationPolicy, SingleDetector
-from taste.judges.protocol import Judge
-from taste.services.detector_protocol import (
+from hallucinations_math_lab.config import get_settings
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, AnswerSource, DetectorName
+from hallucinations_math_lab.custom_types.domain_types import DetectionResult, SampleSet
+from hallucinations_math_lab.escalation import EscalationPolicy, SingleDetector
+from hallucinations_math_lab.judges.protocol import Judge
+from hallucinations_math_lab.services.detector_protocol import (
     Detector,
     DetectionContext,
 )
-from taste.services.sampling_provider import SamplingProvider
+from hallucinations_math_lab.services.sampling_provider import SamplingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +189,9 @@ def _build_default_detectors(enabled: list[DetectorName]) -> list[Detector]:
     Kept inside the evaluator module so the public surface stays small.
     SEP construction lazily resolves the probe path from settings."""
     # Lazy import — these detectors pull in torch / nli machinery.
-    from taste.services.predictive_entropy import PredictiveEntropyDetector
-    from taste.services.semantic_entropy import SemanticEntropyDetector
-    from taste.services.semantic_entropy_probe import SemanticEntropyProbeDetector
+    from hallucinations_math_lab.services.predictive_entropy import PredictiveEntropyDetector
+    from hallucinations_math_lab.services.semantic_entropy import SemanticEntropyDetector
+    from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
 
     detectors: list[Detector] = []
     for name in enabled:

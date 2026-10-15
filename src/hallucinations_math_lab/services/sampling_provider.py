@@ -9,7 +9,7 @@ Why this exists separately from the demo's SLMProvider:
   - The demo's SLMProvider satisfies this protocol structurally (same method
     names + shapes). The two protocols are intentionally identical in
     surface; the duplication is the price of clean directionality
-    (`taste` does not depend on `demo`).
+    (`hallucinations_math_lab` does not depend on `demo`).
 
 Use this type, not the demo type, in any library-side function signature
 that talks to "something that produces samples."
@@ -19,7 +19,7 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
-from taste.custom_types.domain_types import SampleSet
+from hallucinations_math_lab.custom_types.domain_types import SampleSet
 
 
 @runtime_checkable

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from taste import (
+from hallucinations_math_lab import (
     AllAbove,
     AnyAbove,
     DetectorName,
@@ -25,8 +25,8 @@ from taste import (
     TokenLogprob,
     evaluate_responses,
 )
-from taste.constants import DetectorCategory
-from taste.services.detector_protocol import (
+from hallucinations_math_lab.constants import DetectorCategory
+from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
     DetectorMetadata,

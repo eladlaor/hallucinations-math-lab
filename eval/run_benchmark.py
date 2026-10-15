@@ -11,9 +11,9 @@ import json
 import logging
 from pathlib import Path
 
-from taste.agents.detector_agent import DetectorAgent
-from taste.agents.judge_agent import JudgeAgent
-from taste.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.agents.detector_agent import DetectorAgent
+from hallucinations_math_lab.agents.judge_agent import JudgeAgent
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY
 
 logger = logging.getLogger(__name__)
 

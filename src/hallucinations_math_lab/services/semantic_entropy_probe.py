@@ -37,8 +37,8 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from taste.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
-from taste.services.detector_protocol import (
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
+from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
     DetectorMetadata,

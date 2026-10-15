@@ -27,7 +27,7 @@ from demo.slm_provider import (
 @pytest.fixture
 def gemma_settings(monkeypatch):
     """Force settings to a known shape: vLLM provider, Gemma 4 E4B, no embed."""
-    from taste.config import get_settings
+    from hallucinations_math_lab.config import get_settings
 
     get_settings.cache_clear()
     monkeypatch.setenv("SLM_PROVIDER", "vllm")
@@ -40,7 +40,7 @@ def gemma_settings(monkeypatch):
 
 @pytest.fixture
 def gemma_settings_with_embed(monkeypatch):
-    from taste.config import get_settings
+    from hallucinations_math_lab.config import get_settings
 
     get_settings.cache_clear()
     monkeypatch.setenv("SLM_PROVIDER", "vllm")
@@ -110,7 +110,7 @@ def test_build_default_provider_selects_vllm(gemma_settings):
 
 
 def test_build_default_provider_selects_hf_transformers(monkeypatch):
-    from taste.config import get_settings
+    from hallucinations_math_lab.config import get_settings
 
     get_settings.cache_clear()
     monkeypatch.setenv("SLM_PROVIDER", "hf_transformers")
@@ -125,7 +125,7 @@ def test_build_default_provider_selects_hf_transformers(monkeypatch):
 
 
 def test_build_default_provider_rejects_unknown_kind(monkeypatch):
-    from taste.config import get_settings
+    from hallucinations_math_lab.config import get_settings
 
     get_settings.cache_clear()
     monkeypatch.setenv("SLM_PROVIDER", "imaginary")

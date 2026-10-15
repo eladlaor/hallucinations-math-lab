@@ -5,8 +5,8 @@ import math
 import numpy as np
 import pytest
 
-from taste.custom_types.domain_types import Sample, SampleSet
-from taste.services.semantic_entropy import (
+from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet
+from hallucinations_math_lab.services.semantic_entropy import (
     cluster_by_bidirectional_entailment,
     compute_semantic_entropy,
 )

@@ -46,7 +46,7 @@ direction, B→A is also entailment. This is used as an operational proxy for
 "A and B express the same meaning" (semantic equivalence), because true semantic
 equivalence isn't directly computable — bidirectional entailment is the nearest
 checkable substitute. In `taste`, this is how `cluster_by_bidirectional_entailment`
-(`src/taste/services/semantic_entropy.py:39`) decides whether a new sampled answer
+(`src/hallucinations_math_lab/services/semantic_entropy.py:39`) decides whether a new sampled answer
 joins an existing cluster or starts a new one, which is the input to the Semantic
 Entropy calculation.
 

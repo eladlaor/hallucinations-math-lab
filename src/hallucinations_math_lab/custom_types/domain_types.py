@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from taste.constants import AnswerSource, DetectorName
+from hallucinations_math_lab.constants import AnswerSource, DetectorName
 
 
 class TokenLogprob(BaseModel):

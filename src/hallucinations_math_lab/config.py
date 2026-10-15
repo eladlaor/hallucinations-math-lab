@@ -5,7 +5,7 @@ from functools import lru_cache
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from taste.constants import DetectorName
+from hallucinations_math_lab.constants import DetectorName
 
 
 _DEFAULT_TARGET_MODEL_IDS: list[str] = [

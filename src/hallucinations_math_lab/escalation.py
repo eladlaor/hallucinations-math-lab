@@ -19,7 +19,7 @@ suppress an SE-driven escalation.
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from taste.constants import DetectorName
+from hallucinations_math_lab.constants import DetectorName
 
 
 @runtime_checkable

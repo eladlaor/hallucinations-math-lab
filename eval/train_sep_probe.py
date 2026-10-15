@@ -39,10 +39,10 @@ import numpy as np
 import torch
 from sklearn.linear_model import Ridge
 
-from taste.config import get_settings
-from taste.constants import LOG_EXTRA_KEY
-from taste.services.semantic_entropy import compute_semantic_entropy
-from taste.services.semantic_entropy_probe import SEPProbe
+from hallucinations_math_lab.config import get_settings
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.services.semantic_entropy import compute_semantic_entropy
+from hallucinations_math_lab.services.semantic_entropy_probe import SEPProbe
 from demo.slm_provider import build_default_provider
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
