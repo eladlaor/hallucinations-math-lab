@@ -8,16 +8,14 @@
 #
 # Base: the official vLLM image. v0.19.0 was the first release with Gemma 4
 # support; v0.31.0 carries the later Gemma 4 fixes. The cu129 build is used
-# because the default tag targets CUDA 13, whose minimum NVIDIA driver is
-# newer than what Vertex documents for its GPU nodes.
+# because the default tag targets CUDA 13, which needs NVIDIA driver R580+;
+# this build accepts drivers from R535. Its LD_LIBRARY_PATH already starts
+# with /usr/local/nvidia/lib64, where Vertex mounts the host driver libraries.
 FROM vllm/vllm-openai:v0.31.0-cu129
 
-# Vertex mounts the host NVIDIA libraries under /usr/local/nvidia
-# (per Google's vLLM-on-Vertex guide).
 ENV HF_HOME=/models \
     PYTHONUNBUFFERED=1 \
     VLLM_NO_USAGE_STATS=1 \
-    LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/nvidia/lib64" \
     PYTHONPATH=/opt/app \
     AIP_HTTP_PORT=8080 \
     MODEL_ID=google/gemma-4-E4B-it \
