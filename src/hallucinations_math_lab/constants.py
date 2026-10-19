@@ -51,6 +51,11 @@ DEBERTA_MNLI_LABEL_ORDER: Final[tuple[NLILabel, NLILabel, NLILabel]] = (
     NLILabel.ENTAILMENT,
 )
 
+# SE NLI input: the question is prepended to each answer before DeBERTa judges it,
+# as in Farquhar et al.'s reference code (condition_on_question=True), so short
+# answers like "Paris" vs "The capital is Paris" are compared in context.
+SE_NLI_INPUT_TEMPLATE: Final[str] = "{question} {answer}"
+
 # Reproducibility
 RANDOM_SEED: Final[int] = 42
 

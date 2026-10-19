@@ -60,3 +60,31 @@ def test_clustering_preserves_member_indices():
     # Find the "a" cluster
     a_cluster = next(c for c in clusters if c.representative_text == "a")
     assert sorted(a_cluster.member_indices) == [0, 2, 4]
+
+
+class RecordingNLI(FakeNLI):
+    """FakeNLI that records every (a, b) pair it is asked to judge."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def bidirectional_entails(self, a: str, b: str) -> bool:
+        self.calls.append((a, b))
+        return super().bidirectional_entails(a, b)
+
+
+def test_nli_inputs_are_conditioned_on_the_question():
+    # Farquhar et al.'s reference code prepends the question to every answer
+    # before DeBERTa NLI, so short answers are judged in context.
+    question = "What is the capital of France?"
+    nli = RecordingNLI()
+    ss = SampleSet(prompt=question, samples=[Sample(text="Paris"), Sample(text="Lyon")])
+    compute_semantic_entropy(ss, scorer=nli)
+    assert nli.calls == [(f"{question} Paris", f"{question} Lyon")]
+
+
+def test_cluster_representative_text_stays_the_bare_answer():
+    question = "What is the capital of France?"
+    ss = SampleSet(prompt=question, samples=[Sample(text="Paris"), Sample(text="Paris")])
+    res = compute_semantic_entropy(ss, scorer=FakeNLI())
+    assert [c.representative_text for c in res.clusters] == ["Paris"]

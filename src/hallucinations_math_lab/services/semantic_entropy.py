@@ -4,6 +4,7 @@ Algorithm:
   1. Sample N generations at T>0 (handled by the vLLM client; this module receives them).
   2. Greedy-cluster the N samples by bidirectional NLI entailment against each cluster's
      representative (the first member). O(N * |clusters|) NLI calls instead of O(N^2).
+     Each answer is prefixed with the question before NLI, as in the reference code.
   3. p(c) = |c| / N; SE = -Σ p(c) log p(c).
 
 High SE = answers disagree in MEANING -> likely hallucination.
@@ -16,7 +17,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from hallucinations_math_lab.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
+from hallucinations_math_lab.constants import (
+    LOG_EXTRA_KEY,
+    SE_NLI_INPUT_TEMPLATE,
+    DetectorCategory,
+    DetectorName,
+)
 from hallucinations_math_lab.custom_types.domain_types import Cluster, SampleSet
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
@@ -39,24 +45,32 @@ class SemanticEntropyResult:
 def cluster_by_bidirectional_entailment(
     answers: list[str],
     scorer: EntailmentScorer | None = None,
+    question: str | None = None,
 ) -> list[Cluster]:
     """Greedy single-pass clustering by bidirectional NLI entailment.
 
     Each new answer is compared to the representative of each existing cluster. If it
     bidirectionally entails any representative, it joins that cluster; otherwise it
-    starts a new one.
+    starts a new one. When `question` is given, NLI judges question-prefixed answers;
+    `representative_text` is always the bare answer.
     """
     if not answers:
         raise ValueError("Cannot cluster empty answer list.")
 
     nli = scorer or get_nli_scorer()
+    nli_texts = (
+        answers
+        if question is None
+        else [SE_NLI_INPUT_TEMPLATE.format(question=question, answer=a) for a in answers]
+    )
     clusters: list[Cluster] = []
+    rep_nli_texts: list[str] = []
 
     for idx, ans in enumerate(answers):
         placed = False
-        for cl in clusters:
+        for cl, rep_nli_text in zip(clusters, rep_nli_texts, strict=True):
             try:
-                if nli.bidirectional_entails(cl.representative_text, ans):
+                if nli.bidirectional_entails(rep_nli_text, nli_texts[idx]):
                     cl.member_indices.append(idx)
                     placed = True
                     break
@@ -69,6 +83,7 @@ def cluster_by_bidirectional_entailment(
                 raise
         if not placed:
             clusters.append(Cluster(member_indices=[idx], representative_text=ans))
+            rep_nli_texts.append(nli_texts[idx])
 
     return clusters
 
@@ -83,7 +98,9 @@ def compute_semantic_entropy(
         )
 
     answers = [s.text.strip() for s in sample_set.samples]
-    clusters = cluster_by_bidirectional_entailment(answers, scorer=scorer)
+    clusters = cluster_by_bidirectional_entailment(
+        answers, scorer=scorer, question=sample_set.prompt
+    )
     n_total = len(answers)
 
     probs = np.array([cl.size / n_total for cl in clusters], dtype=np.float64)

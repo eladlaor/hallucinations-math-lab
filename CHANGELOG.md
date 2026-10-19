@@ -115,6 +115,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serving/deploy_vertex.sh` — replaced by the Terraform path.
 
 ### Fixed
+- Semantic Entropy now prefixes each sampled answer with the question before
+  the DeBERTa NLI check, matching the reference implementation; bare short
+  answers ("Paris" vs. "The capital of France is Paris.") were judged neutral
+  and split into separate clusters, inflating SE on correct answers.
 - `HFTransformersProvider` computed logprobs from temperature/top-p processed
   scores, counted batch padding after EOS, and skipped the chat template;
   it now uses raw logits, keeps the first EOS, drops padding, and applies the

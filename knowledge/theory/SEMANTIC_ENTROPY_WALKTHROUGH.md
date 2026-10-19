@@ -12,6 +12,7 @@
 - [Step 1 — What does the baseline, predictive entropy, measure?](#step-1--what-does-the-baseline-predictive-entropy-measure)
 - [Step 2 — Why sample N answers instead of one?](#step-2--why-sample-n-answers-instead-of-one)
 - [Step 3 — How do we decide that two answers "mean the same thing"?](#step-3--how-do-we-decide-that-two-answers-mean-the-same-thing)
+  - [Why is the question glued to each answer before the NLI check?](#why-is-the-question-glued-to-each-answer-before-the-nli-check)
 - [Step 4 — How are the samples grouped by meaning?](#step-4--how-are-the-samples-grouped-by-meaning)
 - [Step 5 — How do the clusters become a Semantic Entropy number?](#step-5--how-do-the-clusters-become-a-semantic-entropy-number)
 - [Step 6 — How does a number become a verdict?](#step-6--how-does-a-number-become-a-verdict)
@@ -291,6 +292,29 @@ vague one and understate the disagreement — hiding a hallucination.
 Note the cost: each `bidirectional_entails` call is **two** forward passes through
 DeBERTa.
 
+### Why is the question glued to each answer before the NLI check?
+
+**Because a bare short answer has no meaning to compare.** Clustering never calls
+DeBERTa on `"Paris"`; it calls it on `"What is the capital of France? Paris"`. The
+prefix is built by `SE_NLI_INPUT_TEMPLATE = "{question} {answer}"` in `constants.py`,
+which is the same format the paper's reference code uses (`condition_on_question`,
+on by default).
+
+The misunderstanding worth heading off: *"the answers are what differ, so the
+question is redundant."* It isn't. Run against this repo's DeBERTa checkpoint:
+
+| Pair | Bare answers (a⇒b, b⇒a) | Question-prefixed (a⇒b, b⇒a) |
+| --- | --- | --- |
+| "Paris" / "The capital of France is Paris." | neutral, entailment → **2 clusters** | entailment, entailment → **1 cluster** |
+| "Shakespeare" / "William Shakespeare wrote it." | neutral, entailment → **2 clusters** | entailment, entailment → **1 cluster** |
+| "Leonardo da Vinci" / "Michelangelo" | contradiction, contradiction | contradiction, contradiction |
+
+Without the question, "Paris" does not entail "the capital of France is Paris" —
+the word alone says nothing about capitals. Two phrasings of the *correct* answer
+then land in separate clusters, SE rises on answers the model actually knew, and
+the detector's AUROC drops. The cluster's `representative_text` still stores the
+bare answer; only the NLI input carries the prefix.
+
 ---
 
 ## Step 4 — How are the samples grouped by meaning?
@@ -300,9 +324,9 @@ Greedily: each answer joins the first existing cluster whose representative it b
 ### Math
 
 Partition the N samples into clusters `C_1, …, C_K` such that members of a cluster
-are mutually equivalent. The paper's exact criterion is O(N²) pairwise; this repo
-uses the standard greedy approximation — compare each new answer only against each
-cluster's **representative** (its first member):
+are mutually equivalent. Checking every pair would be O(N²); this repo, like the
+paper's reference code, uses the greedy approximation — compare each new answer
+only against each cluster's **representative** (its first member):
 
 ```
 for n = 1..N:
@@ -317,23 +341,31 @@ Cost: `O(N · K)` entailment checks instead of `O(N²)`.
 ```python
 def cluster_by_bidirectional_entailment(
     answers: list[str],
-    scorer: NLIScorer | None = None,
+    scorer: EntailmentScorer | None = None,
+    question: str | None = None,
 ) -> list[Cluster]:
     if not answers:
         raise ValueError("Cannot cluster empty answer list.")
 
     nli = scorer or get_nli_scorer()
+    nli_texts = (
+        answers
+        if question is None
+        else [SE_NLI_INPUT_TEMPLATE.format(question=question, answer=a) for a in answers]
+    )
     clusters: list[Cluster] = []
+    rep_nli_texts: list[str] = []
 
     for idx, ans in enumerate(answers):
         placed = False
-        for cl in clusters:
-            if nli.bidirectional_entails(cl.representative_text, ans):
+        for cl, rep_nli_text in zip(clusters, rep_nli_texts, strict=True):
+            if nli.bidirectional_entails(rep_nli_text, nli_texts[idx]):
                 cl.member_indices.append(idx)
                 placed = True
                 break
         if not placed:
             clusters.append(Cluster(member_indices=[idx], representative_text=ans))
+            rep_nli_texts.append(nli_texts[idx])
 
     return clusters
 ```
@@ -406,7 +438,7 @@ Bounds: `0 ≤ H_SE ≤ log(N)`.
 
 ```python
 def compute_semantic_entropy(
-    sample_set: SampleSet, scorer: NLIScorer | None = None
+    sample_set: SampleSet, scorer: EntailmentScorer | None = None
 ) -> SemanticEntropyResult:
     if not sample_set.samples:
         raise ValueError(
@@ -414,7 +446,9 @@ def compute_semantic_entropy(
         )
 
     answers = [s.text.strip() for s in sample_set.samples]
-    clusters = cluster_by_bidirectional_entailment(answers, scorer=scorer)
+    clusters = cluster_by_bidirectional_entailment(
+        answers, scorer=scorer, question=sample_set.prompt
+    )
     n_total = len(answers)
 
     probs = np.array([cl.size / n_total for cl in clusters], dtype=np.float64)
