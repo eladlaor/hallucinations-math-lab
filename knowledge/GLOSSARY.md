@@ -103,4 +103,7 @@ domain-specific QA answers. In production this means:
   (entailment / neutral / contradiction), not a continuous score you can
   threshold or tune per-domain; softening this (e.g., using entailment
   probability instead of the argmax label) is a common but non-default
-  extension.
+  extension. Note that a softmax probability is *continuous*, not *calibrated*:
+  DeBERTa's probabilities are typically overconfident until measured against
+  labeled pairs. Mitigation plan:
+  [`plans/SOFT_NLI_EQUIVALENCE.md`](plans/SOFT_NLI_EQUIVALENCE.md).
