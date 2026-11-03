@@ -21,6 +21,9 @@ ALIASES_FIELD: Final[str] = "ground_truth_aliases"
 GREEDY_ANSWER_FIELD: Final[str] = "greedy_answer"
 FINAL_ANSWER_FIELD: Final[str] = "final_answer"
 FINAL_ANSWER_SOURCE_FIELD: Final[str] = "final_answer_source"
+# The judge's answer to the question, recorded on every row when the judge is
+# enabled (not only escalated rows), so escalation can be compared to random.
+JUDGE_ANSWER_FIELD: Final[str] = "judge_answer"
 DETECTOR_SCORES_FIELD: Final[str] = "detector_scores"
 ESCALATED_FIELD: Final[str] = "escalated"
 ID_FIELD: Final[str] = "id"

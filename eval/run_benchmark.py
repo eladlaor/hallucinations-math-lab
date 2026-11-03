@@ -10,6 +10,11 @@ ESCALATION_DETECTOR, SE_THRESHOLD); the SLM comes from SLM_PROVIDER /
 VLLM_MODEL_ID. Every row records all detector scores under `detector_scores`,
 so adding a detector needs no change here or in compute_auroc.py.
 
+With a judge, every row records the judge's answer as `judge_answer`, not
+only the escalated rows, so escalation_uplift.py can compare the detector's
+escalations with random ones at the same rate. This costs one judge call per
+question.
+
 Every row also records the run's `model_id`, `sample_n`,
 `sample_temperature`, `max_tokens` and `answer_instruction` (the brief-answer
 prompt); the scoring scripts refuse to mix rows from different runs or to
@@ -33,6 +38,7 @@ from typing import Any
 from eval.benchmark_results import (
     ANSWER_INSTRUCTION_FIELD,
     ID_FIELD,
+    JUDGE_ANSWER_FIELD,
     MAX_TOKENS_FIELD,
     MODEL_ID_FIELD,
     SAMPLE_N_FIELD,
@@ -42,7 +48,8 @@ from eval.benchmark_results import (
 from eval.sep_probe_provenance import assert_disjoint
 from hallucinations_math_lab import ResponseEvaluator
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.constants import LOG_EXTRA_KEY
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, AnswerSource
+from hallucinations_math_lab.custom_types.domain_types import DetectionResult
 from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
 
 logger = logging.getLogger(__name__)
@@ -69,6 +76,21 @@ def guard_probe_leakage(evaluator: ResponseEvaluator, questions: list[dict[str, 
     for detector in evaluator.detectors:
         if isinstance(detector, SemanticEntropyProbeDetector):
             assert_disjoint(detector.probe_path, ids)
+
+
+def _judge_answer(evaluator: ResponseEvaluator, prompt: str, result: DetectionResult) -> str | None:
+    """The judge's answer to `prompt`, for every row, or None without a judge.
+
+    Escalated rows reuse the answer the judge already gave; the rest ask the
+    judge once more. escalation_uplift.py needs it on every row to compare
+    the detector's escalations with random ones at the same rate.
+    """
+    if result.final_answer_source == AnswerSource.JUDGE_MODEL:
+        return result.final_answer
+    if evaluator.judge is None:
+        return None
+    answer, _reasoning = evaluator.judge.answer(prompt)
+    return answer
 
 
 def run(
@@ -106,6 +128,7 @@ def run(
             prompt = row["question"]
             try:
                 result = evaluator.evaluate(prompt)
+                judge_answer = _judge_answer(evaluator, prompt, result)
             except Exception as e:
                 logger.error(
                     "Benchmark row failed; stopping. Rows written so far are kept.",
@@ -134,6 +157,7 @@ def run(
                         "greedy_answer": result.greedy_answer,
                         "final_answer": result.final_answer,
                         "final_answer_source": str(result.final_answer_source),
+                        JUDGE_ANSWER_FIELD: judge_answer,
                         "detector_scores": {
                             str(name): score for name, score in result.detector_scores.items()
                         },

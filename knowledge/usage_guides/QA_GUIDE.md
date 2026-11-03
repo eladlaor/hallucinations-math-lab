@@ -9,6 +9,7 @@
   - [Why does criterion 4 need an effect size and not just p < 0.01?](#why-does-criterion-4-need-an-effect-size-and-not-just-p--001)
   - [What keeps two runs from being compared by mistake?](#what-keeps-two-runs-from-being-compared-by-mistake)
   - [What keeps the SEP probe from being scored on its own training data?](#what-keeps-the-sep-probe-from-being-scored-on-its-own-training-data)
+  - [Why isn't an accuracy uplift enough to credit the detector?](#why-isnt-an-accuracy-uplift-enough-to-credit-the-detector)
   - [Why might the escalation uplift be overstated?](#why-might-the-escalation-uplift-be-overstated)
 - [Test strategy](#test-strategy)
 - [What does each test file cover?](#what-does-each-test-file-cover)
@@ -51,6 +52,7 @@ interval, the target, and whether it was met. The pass bars live in
 | 1 | SE separates hallucinated from correct TriviaQA answers | SE AUROC ≥ 0.75 on TriviaQA-1000 (bootstrap 95% CI reported alongside) | `python -m eval.compute_auroc --in <triviaqa results>` |
 | 2 | Clustering by meaning beats token-level uncertainty | SE AUROC − PE AUROC ≥ 0.05 **and** the paired-bootstrap 95% CI of the gap excludes 0 | same command, `criteria.se_minus_pe_auroc` |
 | 3 | Escalating to the judge pays off | final − greedy accuracy ≥ 5 percentage points **and** McNemar's exact test p < 0.05 | `python -m eval.escalation_uplift --in <triviaqa results>` (benchmark run with the judge) |
+| 3b | The detector picks which questions to escalate better than chance | final accuracy − the expected accuracy of escalating the same number of questions at random > 0, with a paired-bootstrap 95% CI that excludes 0 | same command, `criteria.escalation_beats_random_pp` |
 | 4 | SE flags adversarial prompts | one-sided Mann-Whitney U p < 0.01 **and** effect size AUC ≥ 0.75 | `python -m eval.adversarial_separation --adversarial <adversarial results> --reference <triviaqa results>` |
 
 A fifth number is a diagnostic rather than a pass bar: how closely the
@@ -114,11 +116,30 @@ the probe; `run_benchmark` refuses to start if any benchmark question id is
 in it, or if a probe in use has no such file. A probe evaluated on the
 questions it was fit to would report an optimistic AUROC.
 
+### Why isn't an accuracy uplift enough to credit the detector?
+
+Because escalating *any* share of questions to a stronger judge raises
+accuracy, so criterion 3 alone would pass with a detector that outputs
+noise. Criterion 3b asks the counterfactual question: had the same number
+of questions been escalated at random, what accuracy would the system have
+reached? That expectation is exact,
+`greedy accuracy + (k / n) · mean(judge correct − greedy correct)`, so no
+simulation is needed. It requires the judge's answer to every question, which
+`run_benchmark` records as `judge_answer` whenever the judge is enabled, at
+one judge call per question.
+
+The report also gives `accuracy_vs_rate`: accuracy at escalation rates 0 to
+100% for random escalation and for each recorded detector, escalating the
+top-k questions by that detector's score. Ties at the cutoff share the
+remaining slots, so a detector with many identical scores, such as discrete
+SE at 0, gets no credit for an arbitrary tie-break.
+
 ### Why might the escalation uplift be overstated?
 
-Correctness is a case-insensitive substring match against the accepted
-answers, the usual TriviaQA convention. That favours longer answers: "It
-could be Paris or Lyon" contains more candidates than "Lyon". If the judge
+Correctness is a whole-token match of any accepted answer after SQuAD-style
+normalization (`eval/benchmark_results.py::is_correct`). That still favours
+longer answers: "It could be Paris or Lyon" contains more candidates than
+"Lyon". If the judge
 answers more verbosely than the small model, part of the uplift is
 verbosity. `escalation_uplift` reports the mean answer length on both sides
 and sets `length_warning` (and logs a warning) when the final answers are

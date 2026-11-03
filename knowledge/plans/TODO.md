@@ -97,7 +97,7 @@ destructive before it.
 - [ ] **τ=1.0 is called "calibrated", but nothing was measured.**
   - Label it a placeholder and calibrate it on a disjoint dev slice.
   - Justify each bar in `eval/success_criteria.py`.
-- [ ] **The escalation-uplift criterion doesn't test the detector.** Compare against
+- [x] **The escalation-uplift criterion doesn't test the detector.** Done 2026-11-03: criterion 3b and `accuracy_vs_rate`; `judge_answer` on every row. Compare against
   random and PE-triggered escalation at the same rate, report the accuracy-vs-rate
   curve, and control for answer length.
 - [ ] **The adversarial criterion is weak.**

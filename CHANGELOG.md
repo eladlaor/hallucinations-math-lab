@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Criterion 3b in `eval/escalation_uplift.py`: the run's escalation is compared
+  with escalating the same number of questions at random (exact expectation,
+  paired-bootstrap CI), and `accuracy_vs_rate` gives accuracy at every
+  escalation rate for random and for each detector's top-k.
+- `run_benchmark` records the judge's answer to every question
+  (`judge_answer`), not only escalated ones; `ResponseEvaluator.judge`
+  read-only property.
 - `DiscreteSemanticEntropyDetector` (`discrete_semantic_entropy`): Semantic
   Entropy with p(c) = |c| / N, for samples without token logprobs.
 - Benchmark rows record `max_tokens` and `answer_instruction`, and the

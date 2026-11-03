@@ -22,7 +22,11 @@ from eval.adversarial_separation import separation_report
 from eval.benchmark_results import is_correct, run_config
 from eval.compute_auroc import auroc_report
 from eval.datasets.load_triviaqa import slice_bounds
-from eval.escalation_uplift import uplift_report
+from eval.escalation_uplift import (
+    escalation_accuracy,
+    random_escalation_accuracy,
+    uplift_report,
+)
 from eval.inference_stats import auroc, mcnemar_exact_p, paired_bootstrap
 from eval.sep_probe_provenance import assert_disjoint, write_training_ids
 from eval.train_sep_probe import cross_validated_pearson_r
@@ -50,12 +54,18 @@ def _row(
     source: str = SLM,
     aliases: list[str] | None = None,
     run: dict | None = None,
+    judge: str | None = None,
 ) -> dict:
+    # The judge's answer to this question, recorded on every row. By default
+    # it is whatever the row finally returned (so escalated rows agree with
+    # their final answer and the rest change nothing).
+    final_answer = greedy if final is None else final
     return {
         "ground_truth_aliases": ["Paris"] if aliases is None else aliases,
         **(RUN if run is None else run),
         "greedy_answer": greedy,
-        "final_answer": greedy if final is None else final,
+        "final_answer": final_answer,
+        "judge_answer": final_answer if judge is None else judge,
         "final_answer_source": source,
         "escalated": escalated,
         "detector_scores": {SE: se, PE: pe},
@@ -224,6 +234,69 @@ def test_uplift_report_fails_fast_when_judge_never_answered():
     rows = [_row("Lyon", se=2.0, pe=1.0, escalated=True, source=SLM)]
     with pytest.raises(RuntimeError, match="without --no-judge"):
         uplift_report(rows, source="fixture")
+
+
+def test_escalation_accuracy_averages_ties_at_the_cutoff():
+    # Rows 0 and 1 tie for the single escalation slot: each is escalated with
+    # probability 1/2. Row 0 gains from the judge, row 1 is right either way.
+    scores = np.array([1.0, 1.0, 0.0])
+    greedy = np.array([False, True, True])
+    judge = np.array([True, True, True])
+    assert escalation_accuracy(scores, greedy, judge, k=1) == pytest.approx(2.5 / 3)
+    assert escalation_accuracy(scores, greedy, judge, k=0) == pytest.approx(2 / 3)
+    assert escalation_accuracy(scores, greedy, judge, k=3) == pytest.approx(1.0)
+
+
+def test_random_escalation_accuracy_is_the_expected_value():
+    greedy = np.array([False, True])
+    judge = np.array([True, True])
+    assert random_escalation_accuracy(greedy, judge, k=1) == pytest.approx(0.75)
+
+
+def _trigger_rows(informative: bool) -> list[dict]:
+    """10 rows the SLM gets wrong and 90 it gets right. The judge fixes the
+    10 and breaks the 90. An informative trigger escalates exactly the 10."""
+    wrong = [_row("Lyon", se=2.0 if informative else 0.1, pe=0.5, judge="Paris") for _ in range(10)]
+    right = [_row("Paris", se=0.1, pe=0.5, judge="Lyon") for _ in range(90)]
+    rows = wrong + right
+    escalate = range(10) if informative else range(10, 20)
+    for i in escalate:
+        rows[i] |= {"escalated": True, "final_answer_source": JUDGE}
+        rows[i]["final_answer"] = rows[i]["judge_answer"]
+    return rows
+
+
+def test_informative_trigger_beats_random_escalation_at_the_same_rate():
+    report = uplift_report(_trigger_rows(informative=True), "fixture")
+
+    vs_random = report["criteria"]["escalation_beats_random_pp"]
+    # Random at 10%: 0.9 + 0.1 * mean(judge - greedy) = 0.9 + 0.1 * (-0.8) = 0.82.
+    assert report["at_run_rate"]["escalation_rate"] == 0.1
+    assert report["at_run_rate"]["random_accuracy_pct"] == 82.0
+    assert vs_random["value"] == 18.0
+    assert vs_random["ci"]["low"] > 0
+    assert vs_random["met"] is True
+    # The same rate, chosen by each detector's score: SE picks the 10, PE is flat.
+    assert report["at_run_rate"]["detector_accuracy_pct"] == {SE: 100.0, PE: 82.0}
+
+
+def test_uninformative_trigger_does_not_beat_random():
+    report = uplift_report(_trigger_rows(informative=False), "fixture")
+    assert report["criteria"]["escalation_beats_random_pp"]["met"] is False
+
+
+def test_uplift_report_gives_an_accuracy_vs_escalation_rate_curve():
+    curve = uplift_report(_trigger_rows(informative=True), "fixture")["accuracy_vs_rate"]
+    assert curve[0] == {"rate": 0.0, "random": 90.0, SE: 90.0, PE: 90.0}
+    assert curve[-1] == {"rate": 1.0, "random": 10.0, SE: 10.0, PE: 10.0}
+    assert curve[1]["rate"] == 0.1 and curve[1][SE] == 100.0
+
+
+def test_uplift_report_fails_fast_without_judge_answers_on_every_row():
+    rows = _trigger_rows(informative=True)
+    rows[50]["judge_answer"] = None
+    with pytest.raises(RuntimeError, match="judge_answer"):
+        uplift_report(rows, "fixture")
 
 
 # --- criterion 4 -----------------------------------------------------------

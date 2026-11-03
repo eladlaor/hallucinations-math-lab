@@ -296,6 +296,11 @@ class ResponseEvaluator:
         """The detectors this evaluator runs, in order (read-only)."""
         return tuple(self._detectors)
 
+    @property
+    def judge(self) -> Judge | None:
+        """The judge escalated prompts go to, or None (read-only)."""
+        return self._judge
+
     def evaluate(self, prompt: str) -> DetectionResult:
         try:
             need_samples = any(d.requires_samples for d in self._detectors)

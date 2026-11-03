@@ -110,6 +110,54 @@ def test_benchmark_then_auroc(tmp_path, capsys):
     assert report["detectors"]["semantic_entropy"]["auroc"] == 1.0
 
 
+class CountingJudge:
+    """Answers every question with a fixed string and counts its calls."""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def answer(self, prompt: str) -> tuple[str, str]:
+        self.prompts.append(prompt)
+        return "judge says", ""
+
+
+def test_benchmark_records_the_judge_answer_on_every_row(tmp_path):
+    """Comparing escalation to random escalation at the same rate needs the
+    judge's answer to every question. Escalated rows reuse the answer the
+    judge already gave, so each question costs exactly one judge call."""
+    questions = tmp_path / "questions.jsonl"
+    results = tmp_path / "results.jsonl"
+    _write_questions(questions)
+    judge = CountingJudge()
+    evaluator = ResponseEvaluator(
+        slm=ScatteringSLM(),
+        detectors=[SemanticEntropyDetector(scorer=EqualityNLI())],
+        escalation_detector=DetectorName.SEMANTIC_ENTROPY,
+        escalation_threshold=1.0,
+        judge=judge,
+    )
+    run_benchmark(questions, results, evaluator=evaluator)
+
+    rows = [json.loads(line) for line in results.read_text().splitlines()]
+    assert [row["judge_answer"] for row in rows] == ["judge says"] * 4
+    assert sorted(judge.prompts) == sorted(row["question"] for row in rows)
+
+
+def test_benchmark_without_a_judge_records_no_judge_answer(tmp_path):
+    questions = tmp_path / "questions.jsonl"
+    results = tmp_path / "results.jsonl"
+    _write_questions(questions)
+    evaluator = ResponseEvaluator(
+        slm=ScatteringSLM(),
+        detectors=[SemanticEntropyDetector(scorer=EqualityNLI())],
+        escalation_detector=DetectorName.SEMANTIC_ENTROPY,
+        escalation_threshold=1.0,
+    )
+    run_benchmark(questions, results, judge=False, evaluator=evaluator)
+    rows = [json.loads(line) for line in results.read_text().splitlines()]
+    assert all(row["judge_answer"] is None for row in rows)
+
+
 def _probe_evaluator(probe_path: Path) -> ResponseEvaluator:
     torch.save(SEPProbe(HIDDEN_DIM).state_dict(), probe_path)
     return ResponseEvaluator(
