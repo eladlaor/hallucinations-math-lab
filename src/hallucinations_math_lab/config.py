@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     nli_model_id: str = Field(default="microsoft/deberta-large-mnli")
 
     # Detection
+    # Escalate when the escalation detector's score exceeds this, in nats.
+    # 1.0 is a placeholder, not a measured value: calibrate it on a dev
+    # slice disjoint from the test slice with eval/calibrate_threshold.py.
     se_threshold: float = Field(default=1.0, ge=0.0)
     sample_n: int = Field(default=10, ge=2, le=50)
     sample_temperature: float = Field(default=1.0, ge=0.0, le=2.0)

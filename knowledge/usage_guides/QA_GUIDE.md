@@ -170,16 +170,18 @@ New features follow test-first: write the failing test that defines
 | File | Covers |
 |---|---|
 | `test_predictive_entropy.py` | PE formula against a hand computation, confidence ordering, empty and missing-logprob errors |
-| `test_semantic_entropy.py` | clustering by bidirectional entailment, SE values, empty input |
+| `test_semantic_entropy.py` | clustering by bidirectional entailment, question-conditioned NLI input, likelihood-weighted and discrete SE values against hand computations, length normalization, fail-fast on missing or non-finite logprobs, empty input |
+| `test_nli.py` | NLI label names read from the checkpoint's `id2label` in any order, softmax `label_probs`, argmax `classify`, fail-fast on unknown labels (fake model, no download) |
 | `test_semantic_entropy_probe.py` | SEP probe loading and forward pass, missing-file, missing-hidden-state and hidden-size-mismatch errors |
 | `test_escalation.py` | `SingleDetector`, `AnyAbove`, `AllAbove` decisions and validation |
 | `test_evaluator.py` | `evaluate_responses` / `ResponseEvaluator` dispatch, prerequisites, judge escalation |
-| `test_model_registry.py` | registry entries, single local/deployed default, vLLM flags per runner (raw logprobs for generate, unnormalized last-token pooling for embed), tensor parallelism per GPU count, L4 context cap |
+| `test_model_registry.py` | registry entries, single local/deployed default, vLLM flags per runner (raw logprobs for generate, unnormalized last-token pooling for embed), tensor parallelism per GPU count, L4 context cap, every machine type able to carry its accelerator type and count |
 | `test_slm_provider.py` | vLLM provider against a mocked OpenAI client (sampling, chat-shaped embedding request, `VLLM_AUTH` modes), HF logprob extraction (raw distribution, first EOS kept, padding dropped), provider selection, sweep validation |
 | `test_google_auth.py` | `GoogleAccessToken` reuse and refresh with fake credentials, plus a contract test against the **real** OpenAI client (fake HTTP transport) proving the token is refreshed on chat and embedding requests |
 | `test_serving_launch.py` | the container's `vllm serve` argv: default runner, Vertex port, fail-fast on missing model, unknown runner or unregistered model |
-| `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end; run config recorded per row; SEP probe leakage guard (overlap and missing provenance refused) |
-| `test_eval_criteria.py` | statistics primitives (rank AUROC vs sklearn, deterministic bootstrap, exact McNemar); each criterion met only with its significance or effect-size condition; run comparability; cross-validated SEP Pearson r; slice bounds; probe provenance |
+| `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end; run config (incl. answer instruction) recorded per row; judge answer recorded on every row; SEP probe leakage guard (overlap and missing provenance refused) |
+| `test_eval_criteria.py` | statistics primitives (rank AUROC vs sklearn, deterministic bootstrap, exact McNemar); whole-token SQuAD-normalized correctness; each criterion met only with its significance or effect-size condition; escalation vs random escalation at the same rate, tie-averaged top-k, accuracy-vs-rate curve; answer-length distribution; run comparability; cross-validated SEP Pearson r; slice bounds; probe provenance |
+| `test_calibrate_threshold.py` | τ by Youden's J under the strict `score > τ` rule, ties to the higher τ, dev/test overlap refused |
 | `test_gemini_judge.py` | `GeminiJudge` request shape and verdict parsing against a fake `google-genai` client |
 
 ## Running the suites

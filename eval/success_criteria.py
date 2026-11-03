@@ -7,20 +7,37 @@ detectors?").
 Comparative criteria (2 and 3) need both a large enough point estimate and a
 statistically significant improvement, so a bar cleared by sampling noise
 alone does not count as met.
+
+Where the bars come from: they are pre-registered project choices, fixed
+before any run, not values taken from the papers. Each comment below says
+what clearing the bar would mean. They must not be moved after seeing
+results; a run that misses one is reported as missing it.
 """
 
 from typing import Final
 
 # 1. Semantic Entropy separates hallucinated from correct TriviaQA answers.
 #    Judged on the point estimate; the 95% bootstrap CI is reported alongside.
+#    0.75 means a random hallucinated answer outscores a random correct one
+#    three times in four: halfway between chance (0.5) and perfect (1.0), the
+#    point where the score is useful as a routing signal and not only as a
+#    statistically detectable one.
 SE_AUROC_TARGET: Final[float] = 0.75
 
 # 2. Clustering by meaning beats token-level uncertainty by a clear margin:
 #    point gap >= target AND the paired-bootstrap 95% CI excludes zero.
+#    SE costs N samples plus NLI calls over PE's single pass; 0.05 AUROC is
+#    the smallest gain judged worth that cost. Smaller gaps can be
+#    significant on 1000 questions and still not pay for themselves.
 SE_MINUS_PE_AUROC_TARGET: Final[float] = 0.05
 
 # 3. Escalating to the judge raises end-to-end accuracy (percentage points):
 #    uplift >= target AND McNemar's exact test p < the significance level.
+#    5 points is the smallest end-to-end gain judged worth adding a second
+#    model and its latency. 0.05 is the conventional significance level.
+#    Criterion 3b (escalation beats random escalation at the same rate) has
+#    no magnitude bar: its CI must exclude zero, i.e. the detector must
+#    choose better than chance at all.
 ESCALATION_UPLIFT_PP_TARGET: Final[float] = 5.0
 ESCALATION_SIGNIFICANCE_LEVEL: Final[float] = 0.05
 

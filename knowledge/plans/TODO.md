@@ -94,7 +94,7 @@ destructive before it.
     r. The paper trains a logistic classifier on binarized SE, with a layer sweep,
     and reports AUROC.
   - Implement the paper's recipe or drop the claim, and give SEP its own threshold.
-- [ ] **τ=1.0 is called "calibrated", but nothing was measured.**
+- [x] **τ=1.0 is called "calibrated", but nothing was measured.** Done 2026-11-03: labeled a placeholder; `eval/calibrate_threshold.py`; bars justified in `eval/success_criteria.py`. Running the calibration needs a real dev run.
   - Label it a placeholder and calibrate it on a disjoint dev slice.
   - Justify each bar in `eval/success_criteria.py`.
 - [x] **The escalation-uplift criterion doesn't test the detector.** Done 2026-11-03: criterion 3b and `accuracy_vs_rate`; `judge_answer` on every row. Compare against

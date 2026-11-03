@@ -548,11 +548,13 @@ Two multi-detector policies exist alongside it, `AnyAbove` (OR) and `AllAbove`
 **"Hallucination detected"** means: `SE > 1.0` → don't trust the model's first
 answer → escalate the question to the Gemini judge.
 
-Where does 1.0 come from? It is calibrated, not derived. With N=10 the scale runs
-0 → 2.303, and 1.0 nats corresponds roughly to "the samples split into about three
-competing meanings, or two meanings with a meaningful minority". You pick it by
-sweeping thresholds on a labeled dev set and choosing the point on the ROC curve
-that matches your tolerance for false alarms versus missed hallucinations.
+Where does 1.0 come from? It's a placeholder, not a measured value. With N=10
+the scale runs 0 → 2.303, and 1.0 nats corresponds roughly to "the samples split
+into about three competing meanings, or two meanings with a meaningful minority".
+The real value comes from a labeled dev slice that shares no question with the
+test slice: `python -m eval.calibrate_threshold --dev <dev results> --test <test
+results>` picks the τ that maximizes true-positive rate minus false-positive rate.
+Set that τ before benchmarking the test slice.
 
 This is also why the project's
 [success criteria](../usage_guides/QA_GUIDE.md#what-does-success-look-like-for-the-detectors)
@@ -682,8 +684,9 @@ Taken from `SemanticEntropyDetector.metadata.failure_modes`:
 
 Add to that:
 
-- **Threshold transfer.** τ = 1.0 is calibrated for this model, this dataset, this
-  N. It does not transfer unexamined to a different model or domain.
+- **Threshold transfer.** A τ calibrated with `eval.calibrate_threshold` holds for
+  that model, dataset, N and answer instruction. It doesn't transfer unexamined to a
+  different model or domain, and the default 1.0 isn't calibrated for any of them.
 - **Two-way splits under-score.** As in the `[5,5]` row above.
 
 See `knowledge/CAVEATS.md` for the project-level version of these.

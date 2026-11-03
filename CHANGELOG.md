@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `eval/calibrate_threshold.py`: chooses `SE_THRESHOLD` on a dev slice by
+  Youden's J and refuses a dev slice that overlaps the test slice. The
+  default `1.0` is now documented as a placeholder.
 - Criterion 3b in `eval/escalation_uplift.py`: the run's escalation is compared
   with escalating the same number of questions at random (exact expectation,
   paired-bootstrap CI), and `accuracy_vs_rate` gives accuracy at every

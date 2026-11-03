@@ -183,7 +183,11 @@ tight, or the questions are outside what the small model knows.
 
 ## How do I tune the threshold?
 
-Set `SE_THRESHOLD` in `.env` (default `1.0`).
+Set `SE_THRESHOLD` in `.env`. The default `1.0` is a placeholder, not a
+measured value. To measure one, benchmark a dev slice that shares no
+question with your test slice, then run
+`uv run python -m eval.calibrate_threshold --dev <dev results> --test <test results>`.
+It prints the τ that best separates hallucinated from correct answers.
 
 - **Lower** → escalates more → fewer hallucinations get through, more judge
   calls (cost, latency).
