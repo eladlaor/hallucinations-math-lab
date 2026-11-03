@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `DiscreteSemanticEntropyDetector` (`discrete_semantic_entropy`): Semantic
+  Entropy with p(c) = |c| / N, for samples without token logprobs.
 - Benchmark rows record `max_tokens` and `answer_instruction`, and the
   scoring scripts refuse to mix or compare runs that differ in them.
 - `eval/compute_auroc.py` reports the greedy answer-length distribution
@@ -52,6 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the real OpenAI client) and the HF logprob extraction.
 
 ### Changed
+- `semantic_entropy` now uses Farquhar et al.'s likelihood-weighted
+  estimator: each cluster's probability is its samples' share of
+  length-normalized sequence likelihood. The previous count-based estimator
+  is `discrete_semantic_entropy`. Likelihood-weighted SE fails fast on samples
+  without finite token logprobs.
 - **Breaking:** the import package is renamed from `taste` to
   `hallucinations_math_lab`, matching the `hallucinations-math-lab` distribution.
 - **Breaking:** `GeminiJudge` uses the Google Gen AI SDK (`google-genai`)
@@ -119,6 +126,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serving/deploy_vertex.sh` — replaced by the Terraform path.
 
 ### Fixed
+- Semantic Entropy added `1e-12` inside the log, so one cluster scored
+  slightly below zero; one cluster now scores exactly 0.
 - Answer correctness used a raw substring match, so alias "2" matched "It was
   1921."; it now matches whole tokens after SQuAD-style normalization of both
   sides (lowercase, no punctuation, no articles).

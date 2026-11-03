@@ -86,7 +86,7 @@ destructive before it.
 - [x] **NLI label order.** Done 2026-11-03: `nli_label_by_index` and `NLIScorer.label_probs`. Read it from `model.config.id2label`, not the hardcoded
   `DEBERTA_MNLI_LABEL_ORDER`. This is folded into step 1 of
   [`SOFT_NLI_EQUIVALENCE.md`](SOFT_NLI_EQUIVALENCE.md).
-- [ ] **"Discrete SE" naming.** `p(c)=|c|/N` ignores sequence likelihoods.
+- [x] **"Discrete SE" naming.** Done 2026-11-03: `semantic_entropy` is now likelihood-weighted; the count-based estimator is `discrete_semantic_entropy`. `p(c)=|c|/N` ignores sequence likelihoods.
   - Call it "discrete SE" everywhere.
   - Add probability-weighted SE from the logprobs already collected.
 - [ ] **The SEP probe does not match Kossen et al.**
@@ -164,8 +164,8 @@ destructive before it.
 
 ## Minor
 
-- [ ] SE adds `+1e-12` inside the log, so a single cluster scores slightly negative.
-- [ ] The log message in `semantic_entropy.py` says "fallback" and then re-raises.
+- [x] SE adds `+1e-12` inside the log, so a single cluster scores slightly negative.
+- [x] The log message in `semantic_entropy.py` says "fallback" and then re-raises.
 - [ ] `evaluate_responses` doesn't check that `prompt == samples.prompt`. This
   matters more now that SE reads `samples.prompt` as the NLI question.
 - [ ] Duplicate detector names silently overwrite each other's scores.

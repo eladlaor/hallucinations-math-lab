@@ -190,7 +190,10 @@ def _build_default_detectors(enabled: list[DetectorName]) -> list[Detector]:
     SEP construction lazily resolves the probe path from settings."""
     # Lazy import — these detectors pull in torch / nli machinery.
     from hallucinations_math_lab.services.predictive_entropy import PredictiveEntropyDetector
-    from hallucinations_math_lab.services.semantic_entropy import SemanticEntropyDetector
+    from hallucinations_math_lab.services.semantic_entropy import (
+        DiscreteSemanticEntropyDetector,
+        SemanticEntropyDetector,
+    )
     from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
 
     detectors: list[Detector] = []
@@ -199,6 +202,8 @@ def _build_default_detectors(enabled: list[DetectorName]) -> list[Detector]:
             detectors.append(PredictiveEntropyDetector())
         elif name == DetectorName.SEMANTIC_ENTROPY:
             detectors.append(SemanticEntropyDetector())
+        elif name == DetectorName.DISCRETE_SEMANTIC_ENTROPY:
+            detectors.append(DiscreteSemanticEntropyDetector())
         elif name == DetectorName.SEMANTIC_ENTROPY_PROBE:
             detectors.append(SemanticEntropyProbeDetector(probe_path=_resolve_sep_probe_path()))
         else:

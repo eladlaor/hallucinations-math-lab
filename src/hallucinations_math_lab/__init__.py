@@ -11,12 +11,15 @@ Two public entry points:
     scoring for you. Implemented in terms of `evaluate_responses`.
 
 Detectors implement the `Detector` protocol and live under
-`hallucinations_math_lab.services.*`. Three ship by default:
+`hallucinations_math_lab.services.*`. Four ship:
 
   - `PredictiveEntropyDetector` — token-logprob baseline (cheap).
   - `SemanticEntropyDetector` — Farquhar et al. NLI-clustered Shannon
-    entropy over N samples (strong signal, N forward passes plus
+    entropy over N samples, each meaning cluster weighted by its samples'
+    sequence likelihoods (strong signal, N forward passes plus
     O(N * |clusters|) NLI calls).
+  - `DiscreteSemanticEntropyDetector` — the same clusters weighted by count
+    alone (|c| / N), for samples without token logprobs.
     The equivalence test is pluggable via the `EntailmentScorer` protocol;
     `NLIScorer` (DeBERTa-MNLI) is the default.
   - `SemanticEntropyProbeDetector` — Kossen et al. linear probe over a
@@ -48,7 +51,10 @@ from hallucinations_math_lab.services.detector_protocol import (
 from hallucinations_math_lab.services.nli import EntailmentScorer, NLIScorer
 from hallucinations_math_lab.services.predictive_entropy import PredictiveEntropyDetector
 from hallucinations_math_lab.services.sampling_provider import SamplingProvider
-from hallucinations_math_lab.services.semantic_entropy import SemanticEntropyDetector
+from hallucinations_math_lab.services.semantic_entropy import (
+    DiscreteSemanticEntropyDetector,
+    SemanticEntropyDetector,
+)
 from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
 
 __all__ = [
@@ -68,6 +74,7 @@ __all__ = [
     # Detector implementations
     "PredictiveEntropyDetector",
     "SemanticEntropyDetector",
+    "DiscreteSemanticEntropyDetector",
     "SemanticEntropyProbeDetector",
     # NLI backend for Semantic Entropy clustering
     "NLIScorer",

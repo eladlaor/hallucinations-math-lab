@@ -24,8 +24,23 @@ class DetectorName(StrEnum):
     PREDICTIVE_ENTROPY = "predictive_entropy"
     SEMANTIC_ENTROPY_PROBE = "semantic_entropy_probe"
     SEMANTIC_ENTROPY = "semantic_entropy"
+    DISCRETE_SEMANTIC_ENTROPY = "discrete_semantic_entropy"
     LLAMA_JUDGE_QA = "llama_judge_qa"
     LLAMA_JUDGE_QA_SAMPLES = "llama_judge_qa_samples"
+
+
+class SemanticEntropyEstimator(StrEnum):
+    """How Semantic Entropy turns clusters into a probability distribution.
+
+    LIKELIHOOD_WEIGHTED: Farquhar et al.'s main estimator. p(c) is the sum of
+    its samples' sequence likelihoods (length-normalized: exp of the mean
+    token logprob), normalized over the N samples. Needs token logprobs.
+    DISCRETE: p(c) = |c| / N. The paper's "discrete semantic entropy", for
+    black-box models with no logprobs.
+    """
+
+    LIKELIHOOD_WEIGHTED = "likelihood_weighted"
+    DISCRETE = "discrete"
 
 
 class DetectorCategory(StrEnum):

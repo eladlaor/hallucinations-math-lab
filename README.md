@@ -130,9 +130,11 @@ works and when it silently fails.
 
 - **What it measures.** Sample N answers at temperature > 0, group them into
   meaning clusters (two answers share a cluster when an NLI model says each
-  one entails the other), then take the entropy of the cluster sizes:
-  `SE = -Σ_c (|c|/N) ln(|c|/N)` in nats. One cluster → 0; N distinct
-  meanings → ln N.
+  one entails the other), then take the entropy over the clusters:
+  `SE = -Σ_c p(c) ln p(c)` in nats. By default `p(c)` is the cluster's share
+  of the samples' length-normalized sequence likelihoods, as in the paper;
+  `discrete_semantic_entropy` uses `|c|/N` and needs no logprobs. One cluster
+  → 0; N distinct, equally likely meanings → ln N.
 - **Assumption.** When the model is making things up, independent samples
   disagree in *meaning*, even if each sounds fluent. It also assumes the NLI
   model is a good judge of "do these two answers mean the same thing?".

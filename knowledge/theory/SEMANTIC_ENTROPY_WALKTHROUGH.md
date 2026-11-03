@@ -15,6 +15,7 @@
   - [Why is the question glued to each answer before the NLI check?](#why-is-the-question-glued-to-each-answer-before-the-nli-check)
 - [Step 4 — How are the samples grouped by meaning?](#step-4--how-are-the-samples-grouped-by-meaning)
 - [Step 5 — How do the clusters become a Semantic Entropy number?](#step-5--how-do-the-clusters-become-a-semantic-entropy-number)
+  - [Why weight by likelihood instead of just counting?](#why-weight-by-likelihood-instead-of-just-counting)
 - [Step 6 — How does a number become a verdict?](#step-6--how-does-a-number-become-a-verdict)
 - [What do real cases look like end to end?](#what-do-real-cases-look-like-end-to-end)
 - [Why does SE beat predictive entropy?](#why-does-se-beat-predictive-entropy)
@@ -30,7 +31,8 @@ Semantic Entropy (SE) asks the model the same question **N** times and measures
 
 1. Sample N answers at temperature > 0.
 2. Group them into clusters of equivalent meaning, using a bidirectional-NLI test.
-3. Compute Shannon entropy over the cluster-size distribution.
+3. Give each cluster a probability (by default, its samples' share of the model's
+   sequence likelihood) and compute the Shannon entropy over the clusters.
 
 - All N answers mean the same thing → 1 cluster → **SE = 0** → confident.
 - N answers scatter into many contradicting meanings → **SE ≈ log N** → confabulating.
@@ -422,68 +424,90 @@ roughly N/K in NLI calls.
 
 ## Step 5 — How do the clusters become a Semantic Entropy number?
 
-Treat each cluster's share of the N samples as a probability and take the Shannon entropy of that distribution — that number, in nats, is SE.
+Give each cluster a probability, then take the Shannon entropy of those probabilities; that number, in nats, is SE. There are two ways to get the probabilities, and the default weighs each sample by how likely the model found it.
 
 ### Math
 
-Assign each cluster the fraction of samples it holds, then feed those probabilities
-into Step 0's entropy formula:
+**Likelihood-weighted SE (the default, `semantic_entropy`).** This is the paper's
+main estimator. Each sample `s_i` carries a weight: its length-normalized sequence
+likelihood, the exponent of its mean token logprob. A cluster's probability is its
+share of the total weight:
 
 ```
-p(C_k) = |C_k| / N
+w_i     = exp( (1/L_i) · Σ_t log p(token_t | earlier tokens) )
+p(C_k)  = Σ_{i ∈ C_k} w_i  /  Σ_{i=1..N} w_i
 
-H_SE = - Σ_{k=1..K}  p(C_k) · log p(C_k)
+H_SE    = - Σ_{k=1..K}  p(C_k) · log p(C_k)
 ```
 
-- `|C_k| / N` — the empirical probability of meaning *k*
-- The sum runs over **meanings**, not over strings. That is the entire idea.
+**Discrete SE (`discrete_semantic_entropy`).** Every sample counts the same, so a
+cluster's probability is its share of the samples. It needs no logprobs, which makes
+it the variant for black-box models:
 
-Bounds: `0 ≤ H_SE ≤ log(N)`.
+```
+p(C_k)  = |C_k| / N
+```
+
+- The sum runs over **meanings**, not over strings. That's the entire idea.
+- When all samples are equally likely, the two estimators give the same number.
+- Bounds: `0 ≤ H_SE ≤ log(N)`.
 
 ### Python (`src/hallucinations_math_lab/services/semantic_entropy.py`)
 
 ```python
-def compute_semantic_entropy(
-    sample_set: SampleSet, scorer: EntailmentScorer | None = None
-) -> SemanticEntropyResult:
-    if not sample_set.samples:
-        raise ValueError(
-            f"Cannot compute SE: empty sample set for prompt={sample_set.prompt[:80]!r}"
-        )
+def _cluster_probs(
+    clusters: list[Cluster], sample_set: SampleSet, estimator: SemanticEntropyEstimator
+) -> np.ndarray:
+    n_total = len(sample_set.samples)
+    if estimator is SemanticEntropyEstimator.DISCRETE:
+        return np.array([cl.size / n_total for cl in clusters], dtype=np.float64)
+    log_w = _sample_log_weights(sample_set)  # mean token logprob per sample
+    # Normalize in log space (max-shift) so tiny likelihoods do not underflow.
+    w = np.exp(log_w - log_w.max())
+    cluster_w = np.array([w[cl.member_indices].sum() for cl in clusters], dtype=np.float64)
+    return cluster_w / cluster_w.sum()
 
-    answers = [s.text.strip() for s in sample_set.samples]
-    clusters = cluster_by_bidirectional_entailment(
-        answers, scorer=scorer, question=sample_set.prompt
-    )
-    n_total = len(answers)
 
-    probs = np.array([cl.size / n_total for cl in clusters], dtype=np.float64)
-    # natural-log entropy (nats), matching the Nature paper
-    se = float(-np.sum(probs * np.log(probs + 1e-12)))
-
-    return SemanticEntropyResult(semantic_entropy=se, clusters=clusters)
+# in compute_semantic_entropy:
+probs = _cluster_probs(clusters, sample_set, estimator)
+se = float(-np.sum(probs * np.log(probs))) if len(clusters) > 1 else 0.0
 ```
 
 Line by line:
 
 | Line | Math it implements |
 | --- | --- |
-| `answers = [s.text.strip() ...]` | the sampled strings `s_1..s_N` |
-| `clusters = cluster_by_...(answers)` | the partition `C_1..C_K` (Step 4) |
-| `cl.size / n_total` | `p(C_k) = \|C_k\| / N` |
-| `-np.sum(probs * np.log(probs + 1e-12))` | `-Σ p(C_k) log p(C_k)` |
-| `+ 1e-12` | numerical guard; `log(0)` is `-inf` |
+| `_sample_log_weights(sample_set)` | `log w_i`, the mean token logprob of each sample |
+| `np.exp(log_w - log_w.max())` | `w_i`, up to a constant that cancels in the ratio |
+| `w[cl.member_indices].sum()` | `Σ_{i ∈ C_k} w_i` |
+| `cluster_w / cluster_w.sum()` | `p(C_k)` |
+| `cl.size / n_total` | the discrete `p(C_k) = \|C_k\| / N` |
+| `-np.sum(probs * np.log(probs))` | `-Σ p(C_k) log p(C_k)` |
+
+`_sample_log_weights` raises on a sample with no logprobs or a non-finite one,
+rather than dropping it.
 
 ### Plain English
 
-Count how many of the 10 answers fell into each meaning-bucket, turn those counts
-into fractions, and measure how spread out those fractions are.
+Put each of the 10 answers into its meaning bucket. In discrete SE every answer
+counts as one vote. In the default, an answer the model found likely counts for
+more than one it stumbled into. Then measure how spread out the buckets are.
 
-One bucket holding all 10 → the fraction is 1.0 → `log(1) = 0` → **SE = 0**. The
-model gave one answer ten times over. It knows.
+One bucket holding all 10 → its probability is 1.0 → `log(1) = 0` → **SE = 0**.
+The model gave one answer ten times over. It knows.
 
-Ten buckets holding one each → ten fractions of 0.1 → **SE = log(10) = 2.303**. The
-model produced ten different claims. It is generating from noise.
+Ten buckets holding one each, all equally likely → ten probabilities of 0.1 →
+**SE = log(10) = 2.303**. The model produced ten different claims. It's generating
+from noise.
+
+### Why weight by likelihood instead of just counting?
+
+Because a count treats a fluke like a conviction. Suppose 7 samples say "Paris" with
+high confidence and 3 say "Lyon" while the model was visibly unsure, token by token.
+Counting gives Lyon 30%. Weighting by the model's own sequence likelihood gives it
+less, which is closer to what the model believes. The wrong mental model to avoid:
+the two estimators aren't different detectors. They share the same clusters, and
+differ only in how much each sample's vote counts.
 
 ---
 

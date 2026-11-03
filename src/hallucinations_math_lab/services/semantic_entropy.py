@@ -5,13 +5,20 @@ Algorithm:
   2. Greedy-cluster the N samples by bidirectional NLI entailment against each cluster's
      representative (the first member). O(N * |clusters|) NLI calls instead of O(N^2).
      Each answer is prefixed with the question before NLI, as in the reference code.
-  3. p(c) = |c| / N; SE = -Σ p(c) log p(c).
+  3. Turn the clusters into a distribution p(c), one of two ways
+     (`SemanticEntropyEstimator`):
+       - likelihood-weighted (default, the paper's main estimator): each sample
+         weighs exp(mean token logprob), its length-normalized sequence
+         likelihood; p(c) is the cluster's share of the total weight.
+       - discrete: p(c) = |c| / N (the paper's black-box variant).
+     SE = -Σ p(c) log p(c), in nats.
 
 High SE = answers disagree in MEANING -> likely hallucination.
 Low SE  = answers agree in meaning -> likely confident.
 """
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 
@@ -22,6 +29,7 @@ from hallucinations_math_lab.constants import (
     SE_NLI_INPUT_TEMPLATE,
     DetectorCategory,
     DetectorName,
+    SemanticEntropyEstimator,
 )
 from hallucinations_math_lab.custom_types.domain_types import Cluster, SampleSet
 from hallucinations_math_lab.services.detector_protocol import (
@@ -76,10 +84,9 @@ def cluster_by_bidirectional_entailment(
                     break
             except RuntimeError as e:
                 logger.error(
-                    "NLI entailment check failed; starting a new cluster as fallback.",
+                    "NLI entailment check failed; aborting clustering.",
                     extra={LOG_EXTRA_KEY: {"error": str(e), "answer_index": idx}},
                 )
-                # Fail-fast on systemic NLI failure: re-raise after logging.
                 raise
         if not placed:
             clusters.append(Cluster(member_indices=[idx], representative_text=ans))
@@ -88,32 +95,73 @@ def cluster_by_bidirectional_entailment(
     return clusters
 
 
+def _sample_log_weights(sample_set: SampleSet) -> np.ndarray:
+    """Length-normalized sequence log-likelihood per sample: its mean token logprob.
+
+    Fails fast on a sample without logprobs or with a non-finite logprob;
+    silently dropping or zeroing either would bias the cluster distribution.
+    """
+    weights: list[float] = []
+    for idx, sample in enumerate(sample_set.samples):
+        if not sample.token_logprobs:
+            raise ValueError(
+                f"Likelihood-weighted SE needs token logprobs, but sample {idx} has none "
+                f"(prompt={sample_set.prompt[:80]!r}). Use the discrete estimator for "
+                "providers without logprobs."
+            )
+        logprobs = [t.logprob for t in sample.token_logprobs]
+        if not all(math.isfinite(lp) for lp in logprobs):
+            raise ValueError(
+                f"Sample {idx} has a non-finite token logprob (prompt={sample_set.prompt[:80]!r})."
+            )
+        weights.append(sum(logprobs) / len(logprobs))
+    return np.asarray(weights, dtype=np.float64)
+
+
+def _cluster_probs(
+    clusters: list[Cluster], sample_set: SampleSet, estimator: SemanticEntropyEstimator
+) -> np.ndarray:
+    n_total = len(sample_set.samples)
+    if estimator is SemanticEntropyEstimator.DISCRETE:
+        return np.array([cl.size / n_total for cl in clusters], dtype=np.float64)
+    log_w = _sample_log_weights(sample_set)
+    # Normalize in log space (max-shift) so tiny likelihoods do not underflow.
+    w = np.exp(log_w - log_w.max())
+    cluster_w = np.array([w[cl.member_indices].sum() for cl in clusters], dtype=np.float64)
+    return cluster_w / cluster_w.sum()
+
+
 def compute_semantic_entropy(
-    sample_set: SampleSet, scorer: EntailmentScorer | None = None
+    sample_set: SampleSet,
+    scorer: EntailmentScorer | None = None,
+    estimator: SemanticEntropyEstimator = SemanticEntropyEstimator.LIKELIHOOD_WEIGHTED,
 ) -> SemanticEntropyResult:
-    """Compute SE for a sample set. Raises if sample set is empty."""
+    """Compute SE for a sample set. Raises if the sample set is empty, or if the
+    likelihood-weighted estimator gets samples without finite logprobs."""
     if not sample_set.samples:
         raise ValueError(
             f"Cannot compute SE: empty sample set for prompt={sample_set.prompt[:80]!r}"
         )
+    if estimator is SemanticEntropyEstimator.LIKELIHOOD_WEIGHTED:
+        _sample_log_weights(sample_set)  # validate before paying for NLI calls
 
     answers = [s.text.strip() for s in sample_set.samples]
     clusters = cluster_by_bidirectional_entailment(
         answers, scorer=scorer, question=sample_set.prompt
     )
-    n_total = len(answers)
-
-    probs = np.array([cl.size / n_total for cl in clusters], dtype=np.float64)
-    # natural-log entropy (nats), matching the Nature paper
-    se = float(-np.sum(probs * np.log(probs + 1e-12)))
+    probs = _cluster_probs(clusters, sample_set, estimator)
+    # Natural-log entropy (nats), as in the paper. Every p(c) > 0, so no epsilon
+    # is needed, and a single cluster scores exactly 0.
+    se = float(-np.sum(probs * np.log(probs))) if len(clusters) > 1 else 0.0
 
     logger.info(
         "Computed semantic entropy.",
         extra={
             LOG_EXTRA_KEY: {
                 "se_nats": round(se, 4),
+                "estimator": str(estimator),
                 "n_clusters": len(clusters),
-                "n_samples": n_total,
+                "n_samples": len(answers),
                 "prompt": sample_set.prompt[:80],
             }
         },
@@ -123,11 +171,14 @@ def compute_semantic_entropy(
 
 
 class SemanticEntropyDetector(Detector):
+    """Likelihood-weighted Semantic Entropy, Farquhar et al.'s main estimator."""
+
     name = DetectorName.SEMANTIC_ENTROPY
+    estimator = SemanticEntropyEstimator.LIKELIHOOD_WEIGHTED
     requires_samples = True
     requires_hidden_state = False
     metadata = DetectorMetadata(
-        signal="Shannon entropy over the cluster-size distribution of N samples grouped by bidirectional NLI entailment",
+        signal="Shannon entropy over the meaning clusters of N samples (grouped by bidirectional NLI entailment), each cluster weighted by its samples' length-normalized sequence likelihoods",
         assumption="when the model is hallucinating, independent samples diverge in meaning even when each individually sounds fluent",
         failure_modes=(
             "NLI noise on long-form answers — clustering becomes unreliable past a few sentences",
@@ -150,7 +201,9 @@ class SemanticEntropyDetector(Detector):
         # external API. cost_usd is 0 (local GPU); latency_ms captures the
         # wall-clock cost so the Pareto frontier still ranks SE realistically.
         start = time.perf_counter()
-        result = compute_semantic_entropy(ctx.samples, scorer=self._scorer)
+        result = compute_semantic_entropy(
+            ctx.samples, scorer=self._scorer, estimator=self.estimator
+        )
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         return DetectorScore(
             name=self.name,
@@ -159,3 +212,21 @@ class SemanticEntropyDetector(Detector):
             latency_ms=elapsed_ms,
             clusters=result.clusters,
         )
+
+
+class DiscreteSemanticEntropyDetector(SemanticEntropyDetector):
+    """Discrete Semantic Entropy: p(c) = |c| / N, no token logprobs needed.
+
+    The paper's variant for black-box models. Enabling it next to
+    `SemanticEntropyDetector` clusters the samples a second time, doubling
+    the NLI cost.
+    """
+
+    name = DetectorName.DISCRETE_SEMANTIC_ENTROPY
+    estimator = SemanticEntropyEstimator.DISCRETE
+    metadata = DetectorMetadata(
+        signal="Shannon entropy over the cluster-size distribution (|c|/N) of N samples grouped by bidirectional NLI entailment",
+        assumption=SemanticEntropyDetector.metadata.assumption,
+        failure_modes=SemanticEntropyDetector.metadata.failure_modes,
+        category=DetectorCategory.UNCERTAINTY,
+    )

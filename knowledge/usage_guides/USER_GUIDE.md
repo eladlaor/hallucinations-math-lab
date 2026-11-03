@@ -46,7 +46,8 @@ answer or hands the question to a stronger judge.
    - **PE** averages how surprised the model was by its own tokens.
    - **SE** groups the N answers into meaning clusters (two answers share a
      cluster when an NLI model says each entails the other) and takes the
-     entropy of the cluster sizes.
+     entropy over the clusters, each weighted by how likely the model found
+     its answers. `discrete_semantic_entropy` weighs them by count alone.
    - **SEP** (opt-in) reads one hidden state through a trained linear probe.
 4. Apply the escalation rule (default: `SE > SE_THRESHOLD`). If it fires and
    a judge is configured, the judge answers instead.

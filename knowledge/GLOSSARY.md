@@ -80,7 +80,8 @@ Semantic Entropy's core mechanism: sample N answers from an LLM at temperature
 > 0, then use bidirectional entailment to group answers that mean the same thing
 into clusters, even if worded completely differently ("Orwell wrote it,"
 "George Orwell is the author," "1984 was written by Orwell"). The Shannon
-entropy of the resulting cluster-size distribution becomes the hallucination
+entropy over the resulting clusters, each weighted by its answers' sequence
+likelihoods (or by count alone, in discrete SE), becomes the hallucination
 signal.
 
 **7. Caveat when applying it in production.**
