@@ -31,6 +31,7 @@ from eval.benchmark_results import (
     DETECTOR_SCORES_FIELD,
     GREEDY_ANSWER_FIELD,
     BenchmarkRow,
+    answer_word_counts,
     is_correct,
     is_labeled,
     load_rows,
@@ -106,6 +107,9 @@ def auroc_report(rows: list[BenchmarkRow], source: str) -> dict[str, Any]:
         "run_config": config,
         "n_rows": len(labels),
         "n_hallucinations": int(labels.sum()),
+        "greedy_answer_words": answer_word_counts(
+            [row[GREEDY_ANSWER_FIELD] for row in rows if is_labeled(row)]
+        ),
         "detectors": detectors,
     }
 

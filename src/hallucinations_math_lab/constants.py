@@ -44,17 +44,15 @@ class DetectorCategory(StrEnum):
     EXTERNAL_JUDGMENT = "external_judgment"
 
 
-# DeBERTa-MNLI label index → string (HF model card order: contradiction, neutral, entailment)
-DEBERTA_MNLI_LABEL_ORDER: Final[tuple[NLILabel, NLILabel, NLILabel]] = (
-    NLILabel.CONTRADICTION,
-    NLILabel.NEUTRAL,
-    NLILabel.ENTAILMENT,
-)
-
 # SE NLI input: the question is prepended to each answer before DeBERTa judges it,
 # as in Farquhar et al.'s reference code (condition_on_question=True), so short
 # answers like "Paris" vs "The capital is Paris" are compared in context.
 SE_NLI_INPUT_TEMPLATE: Final[str] = "{question} {answer}"
+
+# What the SLM is sent for one question: the configured brief-answer
+# instruction, then the question (Farquhar et al.'s reference prompt shape).
+# `SampleSet.prompt` keeps the bare question; only the model sees this.
+ANSWER_MESSAGE_TEMPLATE: Final[str] = "{instruction}\nQuestion: {question}"
 
 # Reproducibility
 RANDOM_SEED: Final[int] = 42

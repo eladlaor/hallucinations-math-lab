@@ -72,18 +72,18 @@ destructive before it.
 - **Secrets:** none found by regex scan. gitleaks and trufflehog were not run.
 
 **B2. Evaluation-method flaws.** Remaining items:
-- [ ] **Brief-answer prompt.**
+- [x] **Brief-answer prompt.** Done 2026-11-03: `ANSWER_INSTRUCTION`, recorded per row; `compute_auroc` reports answer lengths.
   - The raw TriviaQA question goes to chat-tuned Gemma (`demo/slm_provider.py`), and
     `MAX_TOKENS=64` cuts off long answers.
   - Add a fixed answer-format instruction, record it in the run config, and report
     the answer-length distribution.
-- [ ] **Correctness matching.**
+- [x] **Correctness matching.** Done 2026-11-03: SQuAD normalization plus whole-token match. The hand-check of about 100 labels still needs a real run.
   - `eval/benchmark_results.py::is_correct` is a raw substring match on `aliases`
     (`"It was 1921."` matches alias `"2"`).
   - Use SQuAD-style normalization with whole-token matching on `normalized_aliases`,
     or an LLM correctness judge.
   - Hand-check about 100 labels and report the error rate.
-- [ ] **NLI label order.** Read it from `model.config.id2label`, not the hardcoded
+- [x] **NLI label order.** Done 2026-11-03: `nli_label_by_index` and `NLIScorer.label_probs`. Read it from `model.config.id2label`, not the hardcoded
   `DEBERTA_MNLI_LABEL_ORDER`. This is folded into step 1 of
   [`SOFT_NLI_EQUIVALENCE.md`](SOFT_NLI_EQUIVALENCE.md).
 - [ ] **"Discrete SE" naming.** `p(c)=|c|/N` ignores sequence likelihoods.
@@ -108,9 +108,9 @@ destructive before it.
   [`SOFT_NLI_EQUIVALENCE.md`](SOFT_NLI_EQUIVALENCE.md).
 
 **B3. The 26B model cannot deploy.**
-- [ ] `demo/model_registry.py` pairs `NVIDIA_A100_80GB` with `a2-highgpu-1g`, which
+- [x] `demo/model_registry.py` pairs `NVIDIA_A100_80GB` with `a2-highgpu-1g`, which
   only carries the 40GB A100. Change it to `a2-ultragpu-1g`.
-- [ ] Add a test that checks each accelerator type against its valid machine families.
+- [x] Add a test that checks each accelerator type against its valid machine families.
 
 ## Major
 

@@ -134,3 +134,50 @@ def test_every_gemma_4_entry_runs_bf16_native(model_id):
 def test_provider_kind_enum_round_trips():
     entry = get_model_entry("google/gemma-4-E4B-it")
     assert isinstance(entry.default_provider, ProviderKind)
+
+
+# Which Compute Engine machine types carry which Vertex accelerator, and how
+# many. Vertex rejects a machine type that cannot carry the accelerator only at
+# deploy time, after a long image pull, so check it here instead.
+# Source: cloud.google.com/compute/docs/gpus (G2 = L4, A2 Standard/High =
+# A100 40GB, A2 Ultra = A100 80GB).
+_GPU_MACHINE_TYPES: dict[str, dict[str, int]] = {
+    "NVIDIA_L4": {
+        "g2-standard-4": 1,
+        "g2-standard-8": 1,
+        "g2-standard-12": 1,
+        "g2-standard-16": 1,
+        "g2-standard-32": 1,
+        "g2-standard-24": 2,
+        "g2-standard-48": 4,
+        "g2-standard-96": 8,
+    },
+    "NVIDIA_TESLA_A100": {
+        "a2-highgpu-1g": 1,
+        "a2-highgpu-2g": 2,
+        "a2-highgpu-4g": 4,
+        "a2-highgpu-8g": 8,
+        "a2-megagpu-16g": 16,
+    },
+    "NVIDIA_A100_80GB": {
+        "a2-ultragpu-1g": 1,
+        "a2-ultragpu-2g": 2,
+        "a2-ultragpu-4g": 4,
+        "a2-ultragpu-8g": 8,
+    },
+}
+
+
+@pytest.mark.parametrize("model_id", list_model_ids())
+def test_machine_type_carries_the_accelerator_type_and_count(model_id):
+    entry = get_model_entry(model_id)
+    valid = _GPU_MACHINE_TYPES.get(entry.accelerator_type)
+    assert valid is not None, f"{model_id}: add {entry.accelerator_type!r} to the test table"
+    assert entry.machine_type in valid, (
+        f"{model_id}: {entry.machine_type!r} cannot carry {entry.accelerator_type}; "
+        f"valid: {sorted(valid)}"
+    )
+    assert valid[entry.machine_type] == entry.accelerator_count, (
+        f"{model_id}: {entry.machine_type!r} carries {valid[entry.machine_type]} GPU(s), "
+        f"the entry says {entry.accelerator_count}"
+    )

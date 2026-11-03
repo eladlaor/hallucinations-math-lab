@@ -253,15 +253,21 @@ equiv(a, b)  ⟺  NLI(a, b) = entailment  AND  NLI(b, a) = entailment
 
 ```python
 @torch.no_grad()
-def classify(self, premise: str, hypothesis: str) -> NLILabel:
-    """Return the predicted NLI label (entailment / neutral / contradiction)."""
-    self._ensure_loaded()
-    inputs = self._tokenizer(
+def label_probs(self, premise: str, hypothesis: str) -> dict[NLILabel, float]:
+    """Softmax over the three NLI labels, named by the model's own `id2label`."""
+    tokenizer, model = self._ensure_loaded()
+    label_by_index = nli_label_by_index(model.config.id2label, self._model_id)
+    inputs = tokenizer(
         premise, hypothesis, return_tensors="pt", truncation=True, max_length=512
     ).to(self._device)
-    logits = self._model(**inputs).logits
-    idx = int(torch.argmax(logits, dim=-1).item())
-    return DEBERTA_MNLI_LABEL_ORDER[idx]
+    probs = torch.softmax(model(**inputs).logits[0], dim=-1).tolist()
+    return {label_by_index[idx]: float(p) for idx, p in enumerate(probs)}
+
+
+def classify(self, premise: str, hypothesis: str) -> NLILabel:
+    """Return the most likely NLI label (entailment / neutral / contradiction)."""
+    probs = self.label_probs(premise, hypothesis)
+    return max(probs, key=lambda label: probs[label])
 
 
 def bidirectional_entails(self, a: str, b: str) -> bool:

@@ -32,7 +32,13 @@ SE = str(DetectorName.SEMANTIC_ENTROPY)
 PE = str(DetectorName.PREDICTIVE_ENTROPY)
 SLM = str(AnswerSource.SMALL_MODEL_GREEDY)
 JUDGE = str(AnswerSource.JUDGE_MODEL)
-RUN = {"model_id": "google/gemma-4-E4B-it", "sample_n": 10, "sample_temperature": 1.0}
+RUN = {
+    "model_id": "google/gemma-4-E4B-it",
+    "sample_n": 10,
+    "sample_temperature": 1.0,
+    "max_tokens": 64,
+    "answer_instruction": "Answer the following question as briefly as possible.",
+}
 
 
 def _row(
@@ -59,10 +65,33 @@ def _row(
 # --- statistics primitives -------------------------------------------------
 
 
-def test_is_correct_is_case_insensitive_substring():
+def test_is_correct_matches_a_normalized_alias_as_whole_tokens():
     assert is_correct("It is PARIS, France.", ["Paris"])
+    assert is_correct("New York City", ["new york"])
     assert not is_correct("", ["Paris"])
     assert not is_correct("Lyon", ["Paris"])
+
+
+def test_is_correct_ignores_articles_and_punctuation_squad_style():
+    assert is_correct("The Beatles.", ["Beatles"])
+    assert is_correct("Beatles", ["The Beatles"])
+    assert is_correct("Dr. Who", ["dr who"])
+
+
+@pytest.mark.parametrize(
+    ("answer", "alias"),
+    [
+        ("It was 1921.", "2"),  # a digit inside a number
+        ("Parisian cafes", "Paris"),  # a prefix of a longer word
+        ("Theodore Roosevelt", "Teddy"),  # no shared token
+    ],
+)
+def test_is_correct_rejects_substrings_that_are_not_whole_tokens(answer, alias):
+    assert not is_correct(answer, [alias])
+
+
+def test_is_correct_ignores_aliases_that_normalize_to_nothing():
+    assert not is_correct("Anything at all", ["", "The", "!"])
 
 
 def test_rank_auroc_matches_sklearn_including_ties():
@@ -112,6 +141,12 @@ def test_auroc_report_checks_se_target_and_gap():
     assert gap["ci"]["low"] > 0
     assert gap["met"] is True
     assert report["criteria"]["se_auroc"]["met"] is True
+
+
+def test_auroc_report_gives_the_greedy_answer_length_distribution():
+    rows = [_row("Paris", se=0.1, pe=0.5)] * 9 + [_row("It is Lyon in France", se=2.0, pe=0.5)]
+    words = auroc_report(rows, source="fixture")["greedy_answer_words"]
+    assert words == {"median": 1.0, "p90": 1.4, "max": 5}
 
 
 def test_gap_criterion_fails_when_ci_includes_zero():

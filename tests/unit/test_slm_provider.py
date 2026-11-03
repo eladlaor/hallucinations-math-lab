@@ -9,6 +9,9 @@ Contract pinned here:
   - When the embed endpoint is configured, the provider hits /v1/embeddings
     and returns a float32 tensor.
   - `sample` extracts text + token logprobs from chat.completions response.
+  - The model sees the brief-answer instruction plus the question on every
+    path (sample, greedy, embed); `SampleSet.prompt` stays the bare question,
+    which is what SE's NLI step is conditioned on.
   - `build_default_provider` selects the right class from config.slm_provider.
   - `raw_token_logprobs` (the HF provider's logprob math) uses the raw
     distribution, cuts each sample at its first EOS/PAD, and is model-free so
@@ -25,6 +28,7 @@ from transformers import GenerationConfig
 from demo.slm_provider import (
     HFTransformersProvider,
     VLLMOpenAIProvider,
+    build_answer_message,
     build_default_provider,
     build_sweep_providers,
     raw_token_logprobs,
@@ -152,7 +156,9 @@ def test_vllm_embedding_request_matches_the_hf_hidden_state(gemma_settings_with_
     path = embed_client.post.call_args.args[0]
     kwargs = embed_client.post.call_args.kwargs
     assert path == "/embeddings"
-    assert kwargs["body"]["messages"] == [{"role": "user", "content": "Who wrote Hamlet?"}]
+    assert kwargs["body"]["messages"] == [
+        {"role": "user", "content": build_answer_message("Who wrote Hamlet?")}
+    ]
     assert kwargs["body"]["add_generation_prompt"] is True
     assert kwargs["body"]["use_activation"] is False
     # Without this the client would skip refreshing a Google access token.
@@ -281,3 +287,41 @@ def test_hf_provider_end_to_end_on_tiny_model():
     provider = HFTransformersProvider()
     provider.sample("hello")
     provider.pooled_hidden_state("hello")
+
+
+def test_answer_message_puts_the_instruction_before_the_question(monkeypatch):
+    from hallucinations_math_lab.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("ANSWER_INSTRUCTION", "Answer in one word.")
+    try:
+        message = build_answer_message("Who wrote Hamlet?")
+    finally:
+        get_settings.cache_clear()
+    assert message == "Answer in one word.\nQuestion: Who wrote Hamlet?"
+
+
+def test_answer_instruction_must_not_be_empty(monkeypatch):
+    from pydantic import ValidationError
+
+    from hallucinations_math_lab.config import Settings
+
+    monkeypatch.setenv("ANSWER_INSTRUCTION", "")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_vllm_sample_and_greedy_send_the_instruction_but_keep_the_bare_prompt(gemma_settings):
+    fake_choice = MagicMock(message=MagicMock(content="Paris"), logprobs=None)
+    with patch("demo.slm_provider.OpenAI") as openai_cls:
+        client = MagicMock()
+        client.chat.completions.create.return_value = MagicMock(choices=[fake_choice])
+        openai_cls.return_value = client
+        provider = VLLMOpenAIProvider()
+        sample_set = provider.sample("Capital of France?")
+        provider.greedy("Capital of France?")
+
+    expected = [{"role": "user", "content": build_answer_message("Capital of France?")}]
+    for call in client.chat.completions.create.call_args_list:
+        assert call.kwargs["messages"] == expected
+    assert sample_set.prompt == "Capital of France?"

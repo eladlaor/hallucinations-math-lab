@@ -1,6 +1,7 @@
 """DeBERTa-MNLI wrapper for bidirectional entailment judgments used by semantic clustering."""
 
 import logging
+from collections.abc import Mapping
 from functools import lru_cache
 from typing import Protocol
 
@@ -13,7 +14,7 @@ from transformers import (
 )
 
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.constants import DEBERTA_MNLI_LABEL_ORDER, LOG_EXTRA_KEY, NLILabel
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, NLILabel
 
 logger = logging.getLogger(__name__)
 
@@ -57,21 +58,26 @@ class NLIScorer:
         return tokenizer, model
 
     @torch.no_grad()
-    def classify(self, premise: str, hypothesis: str) -> NLILabel:
-        """Return the predicted NLI label (entailment / neutral / contradiction)."""
+    def label_probs(self, premise: str, hypothesis: str) -> dict[NLILabel, float]:
+        """Softmax over the three NLI labels, named by the model's own `id2label`."""
         tokenizer, model = self._ensure_loaded()
+        label_by_index = nli_label_by_index(model.config.id2label, self._model_id)
         try:
             inputs = tokenizer(
                 premise, hypothesis, return_tensors="pt", truncation=True, max_length=512
             ).to(self._device)
-            logits = model(**inputs).logits
-            idx = int(torch.argmax(logits, dim=-1).item())
-            return DEBERTA_MNLI_LABEL_ORDER[idx]
+            probs = torch.softmax(model(**inputs).logits[0], dim=-1).tolist()
         except Exception as e:
             raise RuntimeError(
                 f"NLI classification failed for premise={premise[:60]!r}, "
                 f"hypothesis={hypothesis[:60]!r}: {e!s}"
             ) from e
+        return {label_by_index[idx]: float(p) for idx, p in enumerate(probs)}
+
+    def classify(self, premise: str, hypothesis: str) -> NLILabel:
+        """Return the most likely NLI label (entailment / neutral / contradiction)."""
+        probs = self.label_probs(premise, hypothesis)
+        return max(probs, key=lambda label: probs[label])
 
     def bidirectional_entails(self, a: str, b: str) -> bool:
         """True iff a entails b AND b entails a (the SE paper's clustering criterion)."""
@@ -79,6 +85,37 @@ class NLIScorer:
             self.classify(a, b) == NLILabel.ENTAILMENT
             and self.classify(b, a) == NLILabel.ENTAILMENT
         )
+
+
+def nli_label_by_index(
+    id2label: Mapping[int, str] | Mapping[str, str] | None, model_id: str
+) -> dict[int, NLILabel]:
+    """Map a checkpoint's output indices to `NLILabel`, from its `config.id2label`.
+
+    NLI checkpoints disagree on label order (MNLI models commonly put
+    contradiction first, others entailment first), so the order is read from
+    the model, never assumed. Fails fast unless the model has exactly the
+    three NLI labels.
+    """
+    if not id2label:
+        raise ValueError(f"NLI model {model_id!r} has no config.id2label; cannot name its outputs.")
+    known = {str(label): label for label in NLILabel}
+    mapping: dict[int, NLILabel] = {}
+    for idx, name in id2label.items():
+        label = known.get(str(name).strip().lower())
+        if label is None:
+            raise ValueError(
+                f"NLI model {model_id!r} has output label {name!r} at index {idx}, which is "
+                f"not one of {sorted(known)}. Use an MNLI-style checkpoint with named labels."
+            )
+        mapping[int(idx)] = label
+    missing = set(NLILabel) - set(mapping.values())
+    if missing or len(mapping) != len(NLILabel):
+        raise ValueError(
+            f"NLI model {model_id!r} labels {dict(id2label)!r} must be exactly "
+            f"{sorted(known)}; missing {sorted(str(m) for m in missing)}."
+        )
+    return mapping
 
 
 @lru_cache(maxsize=1)

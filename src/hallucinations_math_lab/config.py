@@ -83,6 +83,15 @@ class Settings(BaseSettings):
     sample_temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     top_logprobs: int = Field(default=5, ge=1, le=20)
     max_tokens: int = Field(default=64, ge=1, le=512)
+    # Prepended to every question the SLM answers (see
+    # constants.ANSWER_MESSAGE_TEMPLATE). Chat-tuned models otherwise answer
+    # TriviaQA in long sentences that max_tokens truncates and that make
+    # correctness matching and NLI clustering noisy. The default is the
+    # short-answer instruction of Farquhar et al.'s reference code. Recorded
+    # in every benchmark row, since changing it changes every score.
+    answer_instruction: str = Field(
+        default="Answer the following question as briefly as possible.", min_length=1
+    )
 
     # Detector dispatch
     enabled_detectors: list[DetectorName] = Field(

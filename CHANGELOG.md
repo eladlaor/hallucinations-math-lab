@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Benchmark rows record `max_tokens` and `answer_instruction`, and the
+  scoring scripts refuse to mix or compare runs that differ in them.
+- `eval/compute_auroc.py` reports the greedy answer-length distribution
+  (median, p90, max words).
 - Terraform configuration under `terraform/` for GCP resources (APIs, GCS,
   Artifact Registry, IAM, Vertex). The Vertex AI endpoints are gated behind
   `deploy_vertex_endpoint` (default `false`) so GPU nodes run only during
@@ -115,6 +119,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serving/deploy_vertex.sh` — replaced by the Terraform path.
 
 ### Fixed
+- Answer correctness used a raw substring match, so alias "2" matched "It was
+  1921."; it now matches whole tokens after SQuAD-style normalization of both
+  sides (lowercase, no punctuation, no articles).
+- The SLM received the bare TriviaQA question and answered in long sentences
+  cut off by `MAX_TOKENS`; every provider path now prepends a brief-answer
+  instruction (`ANSWER_INSTRUCTION`), while `SampleSet.prompt` and SE's NLI
+  input stay the bare question.
+- `NLIScorer` read labels in a hardcoded DeBERTa-MNLI index order; it now
+  names each output from the checkpoint's `config.id2label` and fails fast on
+  an unrecognized label. New `NLIScorer.label_probs` returns the softmax.
+- The 26B registry entry paired the 80 GB A100 with `a2-highgpu-1g`, which
+  carries only the 40 GB A100; it now uses `a2-ultragpu-1g`.
 - Semantic Entropy now prefixes each sampled answer with the question before
   the DeBERTa NLI check, matching the reference implementation; bare short
   answers ("Paris" vs. "The capital of France is Paris.") were judged neutral

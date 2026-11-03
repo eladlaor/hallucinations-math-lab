@@ -99,7 +99,8 @@ def test_benchmark_then_auroc(tmp_path, capsys):
     assert set(rows[0]["detector_scores"]) == {"predictive_entropy", "semantic_entropy"}
     assert rows[2]["escalated"] is True
     assert rows[0]["model_id"] == "fake-slm"
-    assert {"sample_n", "sample_temperature"} <= set(rows[0])
+    assert {"sample_n", "sample_temperature", "max_tokens", "answer_instruction"} <= set(rows[0])
+    assert rows[0]["answer_instruction"]  # the brief-answer prompt is part of the run
 
     compute_auroc(results)
     report = json.loads(capsys.readouterr().out)

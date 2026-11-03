@@ -160,7 +160,7 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         max_model_len=32768,
         accelerator_type="NVIDIA_A100_80GB",
         accelerator_count=1,
-        machine_type="a2-highgpu-1g",
+        machine_type="a2-ultragpu-1g",
         default_provider=ProviderKind.VLLM,
     ),
     "google/gemma-4-31B-it": ModelEntry(

@@ -1,15 +1,20 @@
 """Reading and labeling run_benchmark.py output, shared by the scoring scripts.
 
-One labeling rule for every script: an answer is correct when it contains any
-ground-truth alias (case-insensitive substring match, the TriviaQA
-convention). Rows without aliases (e.g. the adversarial set) carry no label.
+One labeling rule for every script: an answer is correct when some
+ground-truth alias appears in it as a run of whole tokens, after SQuAD-style
+normalization of both (see `is_correct`). Rows without aliases (e.g. the
+adversarial set) carry no label.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import string
 from pathlib import Path
 from typing import Any, Final
+
+import numpy as np
 
 # Field names written by run_benchmark.py.
 ALIASES_FIELD: Final[str] = "ground_truth_aliases"
@@ -23,11 +28,18 @@ ID_FIELD: Final[str] = "id"
 MODEL_ID_FIELD: Final[str] = "model_id"
 SAMPLE_N_FIELD: Final[str] = "sample_n"
 SAMPLE_TEMPERATURE_FIELD: Final[str] = "sample_temperature"
+MAX_TOKENS_FIELD: Final[str] = "max_tokens"
+ANSWER_INSTRUCTION_FIELD: Final[str] = "answer_instruction"
 RUN_CONFIG_FIELDS: Final[tuple[str, ...]] = (
     MODEL_ID_FIELD,
     SAMPLE_N_FIELD,
     SAMPLE_TEMPERATURE_FIELD,
+    MAX_TOKENS_FIELD,
+    ANSWER_INSTRUCTION_FIELD,
 )
+
+_PUNCTUATION: Final[frozenset[str]] = frozenset(string.punctuation)
+_ARTICLES_RE: Final[re.Pattern[str]] = re.compile(r"\b(a|an|the)\b")
 
 BenchmarkRow = dict[str, Any]
 RunConfig = dict[str, Any]
@@ -89,12 +101,57 @@ def is_labeled(row: BenchmarkRow) -> bool:
     return bool(row.get(ALIASES_FIELD))
 
 
+def normalize_answer_tokens(text: str) -> list[str]:
+    """SQuAD-style normalization, split into tokens.
+
+    Lowercase, drop punctuation, drop the articles a/an/the, collapse
+    whitespace: the normalization of the SQuAD v1.1 evaluation script, which
+    TriviaQA's own evaluation reuses.
+    """
+    lowered = text.lower()
+    no_punct = "".join(ch for ch in lowered if ch not in _PUNCTUATION)
+    no_articles = _ARTICLES_RE.sub(" ", no_punct)
+    return no_articles.split()
+
+
+def _contains_token_run(haystack: list[str], needle: list[str]) -> bool:
+    width = len(needle)
+    return any(haystack[i : i + width] == needle for i in range(len(haystack) - width + 1))
+
+
 def is_correct(answer: str | None, aliases: list[str]) -> bool:
-    """True when `answer` contains any alias (case-insensitive substring)."""
-    a = (answer or "").lower().strip()
-    if not a:
+    """True when some alias appears in `answer` as a run of whole normalized tokens.
+
+    Both sides are SQuAD-normalized, so "The Beatles." matches alias
+    "Beatles". Whole tokens only, so alias "2" does not match "It was 1921."
+    and "Paris" does not match "Parisian". Aliases that normalize to nothing
+    (e.g. "The") are ignored.
+    """
+    answer_tokens = normalize_answer_tokens(answer or "")
+    if not answer_tokens:
         return False
-    return any(alias.lower().strip() in a for alias in aliases if alias)
+    for alias in aliases:
+        alias_tokens = normalize_answer_tokens(alias)
+        if alias_tokens and _contains_token_run(answer_tokens, alias_tokens):
+            return True
+    return False
+
+
+def answer_word_counts(answers: list[str | None]) -> dict[str, float | int]:
+    """Median, 90th percentile and max answer length in words.
+
+    Correctness matching and NLI clustering both degrade on long answers, and
+    a long tail here means the brief-answer instruction is not being followed
+    or `max_tokens` is truncating answers, so every report carries it.
+    """
+    if not answers:
+        raise ValueError("answer_word_counts needs at least one answer.")
+    counts = np.array([len((a or "").split()) for a in answers], dtype=np.float64)
+    return {
+        "median": float(np.median(counts)),
+        "p90": round(float(np.percentile(counts, 90)), 4),
+        "max": int(counts.max()),
+    }
 
 
 def detector_score(row: BenchmarkRow, detector: str, where: str) -> float:

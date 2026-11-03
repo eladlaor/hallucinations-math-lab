@@ -36,7 +36,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from demo.google_auth import GoogleAccessToken
 from demo.model_registry import ProviderKind, list_model_ids
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.constants import LOG_EXTRA_KEY, VLLMAuthMode
+from hallucinations_math_lab.constants import (
+    ANSWER_MESSAGE_TEMPLATE,
+    LOG_EXTRA_KEY,
+    VLLMAuthMode,
+)
 from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
 
 if TYPE_CHECKING:
@@ -56,6 +60,19 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def build_answer_message(question: str) -> str:
+    """The user message the SLM receives for `question`.
+
+    The configured brief-answer instruction comes first (see
+    `Settings.answer_instruction`). Every provider path (sampling, greedy,
+    hidden state) sends this same message, so PE, SE and SEP all read the
+    model's behavior on one input. `SampleSet.prompt` keeps the bare question.
+    """
+    return ANSWER_MESSAGE_TEMPLATE.format(
+        instruction=get_settings().answer_instruction, question=question
+    )
 
 
 @runtime_checkable
@@ -135,7 +152,7 @@ class VLLMOpenAIProvider:
         try:
             resp = self._generation.chat.completions.create(
                 model=self.model_id,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": build_answer_message(prompt)}],
                 n=self._n,
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
@@ -173,7 +190,7 @@ class VLLMOpenAIProvider:
         try:
             resp = self._generation.chat.completions.create(
                 model=self.model_id,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[{"role": "user", "content": build_answer_message(prompt)}],
                 n=1,
                 temperature=0.0,
                 max_tokens=self._max_tokens,
@@ -193,7 +210,7 @@ class VLLMOpenAIProvider:
         # trained on either provider reads the same feature.
         body = {
             "model": self._embed_model_id,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": build_answer_message(prompt)}],
             "add_generation_prompt": True,
             "use_activation": False,
         }
@@ -296,13 +313,13 @@ class HFTransformersProvider:
 
         if tokenizer.chat_template:
             encoded = tokenizer.apply_chat_template(
-                [{"role": "user", "content": prompt}],
+                [{"role": "user", "content": build_answer_message(prompt)}],
                 add_generation_prompt=True,
                 return_tensors="pt",
                 return_dict=True,
             )
         else:
-            encoded = tokenizer(prompt, return_tensors="pt")
+            encoded = tokenizer(build_answer_message(prompt), return_tensors="pt")
         if not isinstance(encoded, BatchEncoding):
             raise TypeError(f"Tokenizer returned {type(encoded).__name__}, expected BatchEncoding.")
         return encoded.to(model.device)

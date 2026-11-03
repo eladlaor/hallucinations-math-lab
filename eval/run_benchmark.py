@@ -10,9 +10,10 @@ ESCALATION_DETECTOR, SE_THRESHOLD); the SLM comes from SLM_PROVIDER /
 VLLM_MODEL_ID. Every row records all detector scores under `detector_scores`,
 so adding a detector needs no change here or in compute_auroc.py.
 
-Every row also records the run's `model_id`, `sample_n` and
-`sample_temperature`; the scoring scripts refuse to mix rows from different
-runs or to compare runs that differ in them.
+Every row also records the run's `model_id`, `sample_n`,
+`sample_temperature`, `max_tokens` and `answer_instruction` (the brief-answer
+prompt); the scoring scripts refuse to mix rows from different runs or to
+compare runs that differ in them.
 
 When a Semantic Entropy Probe is among the detectors, the run fails before
 scoring anything if a question was in the probe's training set (see
@@ -30,7 +31,9 @@ from pathlib import Path
 from typing import Any
 
 from eval.benchmark_results import (
+    ANSWER_INSTRUCTION_FIELD,
     ID_FIELD,
+    MAX_TOKENS_FIELD,
     MODEL_ID_FIELD,
     SAMPLE_N_FIELD,
     SAMPLE_TEMPERATURE_FIELD,
@@ -92,6 +95,8 @@ def run(
         MODEL_ID_FIELD: evaluator.slm.model_id,
         SAMPLE_N_FIELD: settings.sample_n,
         SAMPLE_TEMPERATURE_FIELD: settings.sample_temperature,
+        MAX_TOKENS_FIELD: settings.max_tokens,
+        ANSWER_INSTRUCTION_FIELD: settings.answer_instruction,
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
