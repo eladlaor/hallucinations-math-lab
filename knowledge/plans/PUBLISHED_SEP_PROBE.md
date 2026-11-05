@@ -31,7 +31,7 @@
 - **Code:** the trainer writes its record to files (not only stdout), a
   publish script uploads, and the detector loads a probe straight from the Hub,
   refusing a probe whose backbone doesn't match the model under test.
-- **Do it after** the SEP recipe decision and the B2 label fixes in
+- **Do it after** switching SEP to the classifier recipe and the B2 label fixes in
   [`TODO.md`](TODO.md) — otherwise the first published probe is obsolete on arrival.
 - **Done when:** a fresh clone, with no training run, can enable SEP by pointing at
   the Hub repo and reproduce the published held-out numbers.
@@ -57,9 +57,9 @@ part first. Concretely, a published probe:
 regression: it predicts the SE value itself (a number in nats). A *classifier*
 predicts a category — "high SE" vs "low SE". The paper (Kossen et al., 2024)
 does the classifier version: it splits SE into high/low and fits logistic
-regression. Whether to switch is an open decision in [`TODO.md`](TODO.md); the
-published probe will be whichever recipe that decision picks. The general term
-covering both is **linear probe**.
+regression. **Decided 2026-11-05: we switch to the classifier**, so the
+published probe is a linear classifier. The general term covering both is
+**linear probe**.
 
 **"Training log" — what to expect.** A linear probe is fitted in one shot, not
 over many epochs, so there is no falling loss curve to show. The meaningful
@@ -74,10 +74,10 @@ what gets published as the training record.
 | File | Content |
 |---|---|
 | `probe.safetensors` | The linear layer's weights and bias. `safetensors`, the Hub's standard weight format, which cannot carry executable code. |
-| `probe_config.json` | Backbone model id **and commit hash**, hidden size, which layer and token the hidden state is taken from, the chat template used, recipe (ridge / logistic), its hyperparameters, the SE settings (N samples, temperature, NLI model), and — for a classifier — the high/low split point and the recommended threshold. |
+| `probe_config.json` | Backbone model id **and commit hash**, hidden size, which layer and token the hidden state is taken from, the chat template used, recipe (logistic), its hyperparameters, the SE settings (N samples, temperature, NLI model), the high/low split point and the recommended threshold. |
 | `train_ids.json` | The existing sidecar: the training question ids, so `run_benchmark` can keep refusing overlap. |
 | `training_log.jsonl` | One line per calibration question: id, SE, cluster count, answer lengths, elapsed time. |
-| `metrics.json` | Cross-validated agreement (Pearson r, or AUROC for a classifier) with mean ± std per fold, plus the held-out benchmark AUROC of SEP next to PE and SE on the disjoint 200-question slice, with confidence intervals. |
+| `metrics.json` | Cross-validated AUROC of the probe against binarized SE, with mean ± std per fold, plus the held-out benchmark AUROC of SEP next to PE and SE on the disjoint 200-question slice, with confidence intervals. |
 | `README.md` | Model card: what it is, how to use it with this repo, the numbers, the limits (works only for this exact backbone; TriviaQA-style questions only; not a correctness oracle), the license, and citations. |
 
 **Dataset repo** `<hf-user>/sep-calibration-gemma-4-E2B-it`: one row per
@@ -87,8 +87,8 @@ our probe" into "refit it yourself".
 
 ## Prerequisites (ordering)
 
-1. **SEP recipe decision** (TODO, *Open decisions*): Kossen logistic recipe or
-   ridge with the claim dropped. Publishing first means republishing.
+1. **Switch SEP to the classifier recipe** (decided; implementation is the B2
+   item in TODO). Publishing the ridge probe first means republishing.
 2. **B2 label fixes** that change SE values: brief-answer prompt, correctness
    matching (for the benchmark AUROC), NLI label order.
 3. **B1 history cleanup / repo going public** — the model card links to the repo.
