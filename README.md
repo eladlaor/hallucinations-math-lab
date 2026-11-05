@@ -12,6 +12,8 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 - [Which model am I testing, and how do I choose it?](#which-model-am-i-testing-and-how-do-i-choose-it)
 - [Quickstart: no GPU, no LLM](#quickstart-no-gpu-no-llm)
 - [What do I need before running a real model?](#what-do-i-need-before-running-a-real-model)
+- [What hardware do I need, and why?](#what-hardware-do-i-need-and-why)
+  - [How can an agent check which tier this machine fits?](#how-can-an-agent-check-which-tier-this-machine-fits)
 - [What does a single run actually do?](#what-does-a-single-run-actually-do)
 - [How do the three detectors differ?](#how-do-the-three-detectors-differ)
 - [How do I ask one question?](#how-do-i-ask-one-question)
@@ -163,6 +165,85 @@ cp .env.example .env
 
 Without Google credentials, escalation fails fast — there is no silent
 fallback to another provider.
+
+## What hardware do I need, and why?
+
+Find the highest tier your machine reaches; it can also do everything in the
+lower tiers. Linux and macOS only, for now.
+
+| Tier | What you can run | Download (once) | NVIDIA GPU memory | Apple Silicon Mac memory | No usable GPU |
+|---|---|---|---|---|---|
+| **0** | the library, the quickstart, every scoring script (`compute_auroc`, `compare_models`, …) on existing results, and the benchmark or demo against a **remote** model server | ~1.3 GB of Python packages (macOS; larger with Linux GPU builds), +1.6 GB for the DeBERTa meaning check | not needed | any | any machine with 8 GB of memory |
+| **1** | `gemma-4-E2B-it` locally — the default | 10.2 GB | 16 GB | 24 GB | 24 GB of memory; runs, but slowly |
+| **2** | `gemma-4-E4B-it` | 16.0 GB | 24 GB (one L4) | 32 GB | not practical |
+| **3** | `gemma-4-26B-A4B-it` / `gemma-4-31B-it` | 51.6 GB / 62.5 GB | 80 GB (one A100) / 2× 80 GB ("two A100s, eighty gig each") | 96 GB / 128 GB — estimates, untested | not practical |
+
+The GPU and Mac columns are minimums. Disk: the download size plus a few GB
+of headroom, in `~/.cache/huggingface` unless `HF_HOME` moves it. No model is
+gated, so no Hugging Face account is needed.
+
+**Why does it need this much memory?** The whole model has to sit in memory
+while it answers, and every parameter takes 2 bytes, because the models run
+unquantized in bf16 ("bee-eff-sixteen", a 16-bit number format). So memory ≈
+2 × parameters: E2B's 5.1 billion parameters are its 10.2 GB, plus room for
+the text being generated. The misunderstanding to avoid: "26B-A4B" means only
+about 4 billion parameters do work for each word, but all 26 billion must
+still be loaded — the "A4B" saves time, not memory.
+
+**Why does a Mac need more than an NVIDIA GPU of the same size?** An Apple
+Silicon Mac shares one pool of memory between the CPU and the GPU, and macOS
+lets the GPU use only part of it (roughly two-thirds to three-quarters), while
+the rest of the system needs room too. The project uses the Mac's GPU
+automatically; the DeBERTa meaning check runs on its CPU. Intel Macs have no
+usable GPU here.
+
+**Why is a GPU strongly recommended, when the CPU works?** Each question
+generates 11 answers (`SAMPLE_N`=10 samples plus one greedy answer), and SE
+then compares those answers in pairs with DeBERTa. All of that is many
+passes through the model per question, which a GPU does in parallel and a
+CPU does slowly. Lowering `SAMPLE_N` speeds it up proportionally, at the cost
+of a noisier SE.
+
+**Why does bandwidth matter only once?** Models, DeBERTa and the TriviaQA
+questions (~7 MB) download on first use and are cached. At 100 Mbit/s
+("a hundred megabit"), 10 GB takes about 15 minutes. After that, only the
+Gemini judge (`chat`, or a benchmark without `--no-judge`) and remote
+servers use the network, with small requests.
+
+**What if my machine is below tier 1?** Run the model somewhere else: a vLLM
+server on a rented GPU or a Vertex AI endpoint ([DevOps
+Guide](knowledge/usage_guides/DEVOPS_GUIDE.md)). This machine then only needs
+tier 0.
+
+### How can an agent check which tier this machine fits?
+
+Run these from the repo root (after `uv sync --all-extras`). Each prints one
+fact:
+
+```bash
+uname -sm                                      # "Darwin arm64" = Apple Silicon; "Darwin x86_64" = Intel Mac
+sysctl -n hw.memsize | awk '{printf "%.0f GB\n", $1/2^30}'   # macOS: total memory
+free -b | awk '/Mem:/{printf "%.0f GB\n", $2/2^30}'          # Linux: total memory
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader  # Linux: each NVIDIA GPU; "command not found" = none
+uv run python -c "import torch; print('cuda', torch.cuda.is_available(), '| mps', torch.backends.mps.is_available())"
+df -h "${HF_HOME:-$HOME/.cache/huggingface}" 2>/dev/null || df -h ~   # free disk where models are cached
+curl -sL -o /dev/null -w '%{speed_download}\n' \
+  https://huggingface.co/api/datasets/mandarjoshi/trivia_qa/parquet/rc.nocontext/validation/0.parquet \
+  | awk '{printf "%.0f Mbit/s\n", $1*8/1e6}'                 # rough download speed (7 MB test file)
+```
+
+Then decide, top to bottom, and stop at the first match:
+
+1. `cuda True`: add up the GPU memory `nvidia-smi` printed (MiB ÷ 1024 = GB)
+   and read the **NVIDIA** column.
+2. `mps True`: read the **Apple Silicon Mac** column with the total memory.
+3. Otherwise, 24 GB of memory or more → tier 1 on the CPU (slow); less →
+   tier 0.
+4. Check free disk ≥ the tier's download + a few GB, and estimate download
+   time as GB × 8000 ÷ Mbit/s seconds. If disk is short, drop a tier.
+5. Report the tier and the model, and set it in `.env`:
+   `VLLM_MODEL_ID=<model>`. For tier 0, point `SLM_PROVIDER=vllm` at a remote
+   server instead.
 
 ## What does a single run actually do?
 
