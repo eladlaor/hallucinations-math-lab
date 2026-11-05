@@ -48,14 +48,13 @@ When a chosen score crosses a threshold, the answer can be routed to a judge
 model (Gemini on Vertex is the reference; any class with
 `.answer(prompt) -> (answer, reasoning)` works).
 
-Three ways in, from cheapest to most involved:
+Three ways to use the repo, from cheapest to most involved:
 
-1. **Library, no model at all** — score samples you already have (or made up)
-   with `evaluate_responses(...)`. Runs on a laptop CPU.
-2. **Benchmark** — run the detectors over TriviaQA with one Gemma 4 model, or
-   several side by side, and get one AUROC per detector per model.
-3. **Live demo** — `python -m demo.cli chat "..."` against one Gemma 4 model,
-   locally or on a Vertex endpoint, with Gemini escalation.
+| Way in | You bring | You get back | You need | Start with |
+|---|---|---|---|---|
+| **1. Library** — score answers you already have | N sampled answers (with token logprobs) from any LLM, or made-up ones | PE and SE scores, the meaning clusters, and an escalate yes/no — the repo never calls a model | a laptop CPU; nothing else | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model) |
+| **2. Benchmark** — measure how well each detector spots wrong answers | a TriviaQA question set and one Gemma 4 model, or several to compare | one AUROC per detector (per model), with confidence intervals | the model running locally (GPU strongly recommended) or on a vLLM / Vertex server | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), or [`--sweep` + `eval.compare_models`](#how-do-i-compare-several-models) |
+| **3. Live demo** — ask one question end to end | a single question typed on the command line | the detector scores and an answer — the model's own, or Gemini's when the score crosses the threshold | one Gemma 4 model as above, plus Google credentials for the Gemini judge (`chat` only) | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question) |
 
 Everything is configured in `.env` (copy [`.env.example`](.env.example);
 every key is documented there).
