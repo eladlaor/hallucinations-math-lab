@@ -56,6 +56,13 @@ DEBERTA_MNLI_LABEL_ORDER: Final[tuple[NLILabel, NLILabel, NLILabel]] = (
 # answers like "Paris" vs "The capital is Paris" are compared in context.
 SE_NLI_INPUT_TEMPLATE: Final[str] = "{question} {answer}"
 
+# SEP probes: one per model, at SEP_PROBE_DIR/<model slug>.pt unless SEP_PROBE_PATH says otherwise.
+SEP_PROBE_DIR: Final[str] = "data/probes"
+SEP_PROBE_SUFFIX: Final[str] = ".pt"
+# Model id -> filesystem-safe slug: lowercase, runs of other characters become "-".
+MODEL_SLUG_PATTERN: Final[str] = r"[^a-z0-9]+"
+MODEL_SLUG_SEPARATOR: Final[str] = "-"
+
 # Reproducibility
 RANDOM_SEED: Final[int] = 42
 

@@ -12,15 +12,12 @@ Design choices specific to this implementation:
     units, so the same threshold scale carries over and SEP can be slotted
     into the escalation comparator as a drop-in for SE.
 
-  - Weights are loaded lazily on first `score(...)` call. Construction takes
-    only the probe file path and a hidden-dim expectation; if the file is
-    missing the detector raises immediately at construction time so the
-    misconfiguration surfaces before the first request, not on the first
-    request.
+  - Weights are loaded at construction. A missing or malformed probe file
+    raises there, so the misconfiguration surfaces before the first request.
 
   - Per-model probes. The probe weights are specific to the SLM that
-    produced the training hidden states; the registry tracks per-model
-    probe paths under `data/probes/<slug>.pt`.
+    produced the training hidden states; `default_probe_path(model_id)`
+    gives each model its own file under `data/probes/<slug>.pt`.
 
 Why a regressor over a classifier:
   - SE is itself a continuous score that the orchestrator's threshold
@@ -32,13 +29,22 @@ Why a regressor over a classifier:
 """
 
 import logging
+import re
 import time
 from pathlib import Path
 
 import torch
 from torch import nn
 
-from hallucinations_math_lab.constants import LOG_EXTRA_KEY, DetectorCategory, DetectorName
+from hallucinations_math_lab.constants import (
+    LOG_EXTRA_KEY,
+    MODEL_SLUG_PATTERN,
+    MODEL_SLUG_SEPARATOR,
+    SEP_PROBE_DIR,
+    SEP_PROBE_SUFFIX,
+    DetectorCategory,
+    DetectorName,
+)
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
@@ -48,6 +54,21 @@ from hallucinations_math_lab.services.detector_protocol import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def model_slug(model_id: str) -> str:
+    """Filesystem-safe name for a model id: `google/gemma-4-E2B-it` -> `google-gemma-4-e2b-it`."""
+    slug = re.sub(MODEL_SLUG_PATTERN, MODEL_SLUG_SEPARATOR, model_id.lower()).strip(
+        MODEL_SLUG_SEPARATOR
+    )
+    if not slug:
+        raise ValueError(f"model_slug: model id {model_id!r} has no letters or digits.")
+    return slug
+
+
+def default_probe_path(model_id: str) -> Path:
+    """Where the SEP probe for `model_id` lives unless SEP_PROBE_PATH overrides it."""
+    return Path(SEP_PROBE_DIR) / f"{model_slug(model_id)}{SEP_PROBE_SUFFIX}"
 
 
 class SEPProbe(nn.Module):

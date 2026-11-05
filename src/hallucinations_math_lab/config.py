@@ -94,7 +94,8 @@ class Settings(BaseSettings):
     escalation_detector: DetectorName = Field(default=DetectorName.SEMANTIC_ENTROPY)
 
     # SEP probe weights. Default is the per-model slug under data/probes/.
-    # Resolved at agent construction time from vllm_model_id.
+    # Resolved per evaluated model when the evaluator is built. Must stay unset
+    # for a multi-model sweep (one file cannot serve several models).
     sep_probe_path: str = Field(default="")
 
     @field_validator("target_model_ids")
@@ -107,7 +108,7 @@ class Settings(BaseSettings):
             )
         if len(set(value)) != len(value):
             raise ValueError(f"target_model_ids must be unique; got duplicates in {value!r}.")
-        # Registry membership is checked by demo.slm_provider.build_sweep_providers:
+        # Registry membership is checked by demo.slm_provider.sweep_model_ids:
         # the library must not import the demo package, which is not shipped in
         # the wheel.
         return value

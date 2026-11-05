@@ -45,7 +45,6 @@ part (N samples per prompt + NLI clustering).
 import argparse
 import json
 import logging
-import re
 import sys
 from pathlib import Path
 
@@ -59,7 +58,7 @@ from eval.sep_probe_provenance import write_training_ids
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY, RANDOM_SEED
 from hallucinations_math_lab.services.semantic_entropy import compute_semantic_entropy
-from hallucinations_math_lab.services.semantic_entropy_probe import SEPProbe
+from hallucinations_math_lab.services.semantic_entropy_probe import SEPProbe, default_probe_path
 
 logger = logging.getLogger("train_sep_probe")
 
@@ -94,10 +93,6 @@ def cross_validated_pearson_r(
     return float(np.mean(rs)), float(np.std(rs))
 
 
-def _slugify(model_id: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", model_id.lower()).strip("-")
-
-
 def _iter_questions(path: Path):
     """(id, question) per calibration row; fails fast on a malformed row."""
     with path.open() as f:
@@ -115,7 +110,7 @@ def _iter_questions(path: Path):
             if missing:
                 raise RuntimeError(
                     f"Calibration set {path} line {i + 1} lacks {missing}. Build it with "
-                    "eval.datasets.load_triviaqa (see the User Guide)."
+                    "eval.datasets.load_triviaqa (see the README)."
                 )
             yield str(obj[ID_FIELD]), obj[QUESTION_FIELD]
 
@@ -140,9 +135,8 @@ def main() -> int:
 
     settings = get_settings()
     model_id = settings.vllm_model_id
-    slug = _slugify(model_id)
     if args.output_path == "auto":
-        output_path = Path("data") / "probes" / f"{slug}.pt"
+        output_path = default_probe_path(model_id)
     else:
         output_path = Path(args.output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

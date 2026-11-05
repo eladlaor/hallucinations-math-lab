@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Model comparison: `eval.run_benchmark --sweep` runs the question set once per
+  model in `TARGET_MODEL_IDS` (one results file per model, one model loaded at a
+  time, registry and per-model SEP probes checked before any scoring), and
+  `eval.compare_models` reports accuracy and per-detector AUROC with CIs side by
+  side, refusing runs over different questions or sampling settings.
 - Terraform configuration under `terraform/` for GCP resources (APIs, GCS,
   Artifact Registry, IAM, Vertex). The Vertex AI endpoints are gated behind
   `deploy_vertex_endpoint` (default `false`) so GPU nodes run only during
@@ -48,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the real OpenAI client) and the HF logprob extraction.
 
 ### Changed
+- The README is now the user guide; `knowledge/usage_guides/USER_GUIDE.md` is
+  folded into it, and it states up front which model is under test and how to
+  run one model or compare several.
+- `demo.slm_provider.build_sweep_providers` is replaced by `sweep_model_ids`,
+  which validates the ids so the sweep can build one provider at a time.
 - **Breaking:** the import package is renamed from `taste` to
   `hallucinations_math_lab`, matching the `hallucinations-math-lab` distribution.
 - The Terraform `name_prefix` default changes from `taste` to `hml`, renaming the
@@ -117,6 +127,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serving/deploy_vertex.sh` — replaced by the Terraform path.
 
 ### Fixed
+- The default SEP probe is resolved from the model being evaluated, not from
+  `VLLM_MODEL_ID`, so a provider built for another model no longer loads the
+  wrong model's probe.
 - Semantic Entropy now prefixes each sampled answer with the question before
   the DeBERTa NLI check, matching the reference implementation; bare short
   answers ("Paris" vs. "The capital of France is Paris.") were judged neutral

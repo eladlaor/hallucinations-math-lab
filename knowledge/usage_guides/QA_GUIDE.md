@@ -60,14 +60,14 @@ cross-validated Pearson r (mean ± std), logged by
 
 **Status: not yet measured on real hardware.** The scripts are unit-tested
 on hand-built rows; no GPU benchmark run has been recorded. Run
-[the benchmark](USER_GUIDE.md#how-do-i-run-a-benchmark) to produce the
+[the benchmark](../../README.md#how-do-i-evaluate-one-model) to produce the
 numbers.
 
 ### Why AUROC and not accuracy at a threshold?
 
 AUROC scores the *ranking* across every possible threshold, so it measures
 the detector itself; the threshold is a separate, deployment-specific choice
-(see the [User Guide](USER_GUIDE.md#how-do-i-tune-the-threshold)).
+(see the [README](../../README.md#when-does-it-escalate-and-how-do-i-tune-it)).
 
 ### Why do the comparative criteria need a significance test as well as a bar?
 
@@ -154,11 +154,12 @@ New features follow test-first: write the failing test that defines
 | `test_escalation.py` | `SingleDetector`, `AnyAbove`, `AllAbove` decisions and validation |
 | `test_evaluator.py` | `evaluate_responses` / `ResponseEvaluator` dispatch, prerequisites, judge escalation |
 | `test_model_registry.py` | registry entries, single local/deployed default, vLLM flags per runner (raw logprobs for generate, unnormalized last-token pooling for embed), tensor parallelism per GPU count, L4 context cap |
-| `test_slm_provider.py` | vLLM provider against a mocked OpenAI client (sampling, chat-shaped embedding request, `VLLM_AUTH` modes), HF logprob extraction (raw distribution, first EOS kept, padding dropped), provider selection, sweep validation |
+| `test_slm_provider.py` | vLLM provider against a mocked OpenAI client (sampling, chat-shaped embedding request, `VLLM_AUTH` modes), HF logprob extraction (raw distribution, first EOS kept, padding dropped), provider selection, sweep model-id validation |
 | `test_google_auth.py` | `GoogleAccessToken` reuse and refresh with fake credentials, plus a contract test against the **real** OpenAI client (fake HTTP transport) proving the token is refreshed on chat and embedding requests |
 | `test_serving_launch.py` | the container's `vllm serve` argv: default runner, Vertex port, fail-fast on missing model, unknown runner or unregistered model |
 | `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end; run config recorded per row; SEP probe leakage guard (overlap and missing provenance refused) |
 | `test_eval_criteria.py` | statistics primitives (rank AUROC vs sklearn, deterministic bootstrap, exact McNemar); each criterion met only with its significance or effect-size condition; run comparability; cross-validated SEP Pearson r; slice bounds; probe provenance |
+| `test_model_comparison.py` | `run_benchmark --sweep` (one file per model, one model at a time, registry and per-model SEP probe checked before any scoring); SEP's default probe follows the evaluated model; `compare_models` accuracy and AUROC per model, refusing different questions, different sampling or a repeated model |
 | `test_gemini_judge.py` | `GeminiJudge` request shape and verdict parsing against a fake `google-genai` client |
 
 ## Running the suites
@@ -238,7 +239,9 @@ A red `test` job that fails during install usually means `uv.lock` is stale
    `--nli deberta`) and `examples/custom_detector.py`.
 5. With a model available: `python -m demo.cli detect "Who wrote 1984?"`
    returns SE near 0, and a 10-question `python -m eval.run_benchmark --limit 10 --no-judge`
-   followed by `python -m eval.compute_auroc` completes.
+   followed by `python -m eval.compute_auroc` completes. With two small models
+   in `TARGET_MODEL_IDS`, the same with `--sweep` followed by
+   `python -m eval.compare_models` prints one row per model.
 6. Every command in the README and the usage guides still matches the code.
 
 ## Bug triage and reporting

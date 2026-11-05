@@ -24,7 +24,9 @@ uv run python examples/score_precollected_samples.py
 If these pass you have a working setup — no GPU, model or cloud account
 needed. The library lives in `src/hallucinations_math_lab/` and must never
 import `demo/`. New detectors implement the `Detector` protocol and are
-picked up by the benchmark and AUROC scripts automatically.
+picked up by the benchmark, AUROC and comparison scripts automatically.
+Using the project (models, demo, benchmark) is documented in the
+[README](../../README.md).
 
 ## Local setup
 
@@ -74,7 +76,8 @@ demo/
   model_registry.py        # per-model serving settings + vLLM flags per runner (Gemma 4 family)
 eval/
   datasets/                # TriviaQA loader, adversarial prompts
-  run_benchmark.py         # questions -> JSONL of scores and answers
+  run_benchmark.py         # questions -> JSONL of scores and answers; --sweep: one file per model
+  compare_models.py        # several models' runs side by side: accuracy + AUROC per detector
   benchmark_results.py     # shared row schema, loading, correctness rule
   compute_auroc.py         # criteria 1-2: per-detector AUROC, SE-PE gap
   escalation_uplift.py     # criterion 3: accuracy gained by escalating
@@ -147,7 +150,8 @@ accelerator type and count). `vllm_flags(runner)` turns the entry into
 the model's maximum context, or vLLM refuses to start. Exactly one entry may
 be `is_local_default` and one `is_deployed_default`; `tests/unit/test_model_registry.py` enforces this. A
 model must be in the registry before it can appear in `VLLM_MODEL_ID` or
-`TARGET_MODEL_IDS`.
+`TARGET_MODEL_IDS`. Its SEP probe and its sweep results file are named by
+`model_slug(model_id)` (`services/semantic_entropy_probe.py`).
 
 ## How do I plug in a different judge?
 
