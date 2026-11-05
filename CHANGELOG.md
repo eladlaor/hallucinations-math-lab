@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active benchmark runs.
 - `examples/langrag_integration.py` reference integration.
 - Runnable no-GPU playground scripts: `examples/score_precollected_samples.py`
-  (PE and SE on hand-written samples, string-match vs. DeBERTa NLI) and
+  (PE and SE on hand-written samples, with DeBERTa NLI) and
   `examples/custom_detector.py` (a user-defined detector next to PE and SE).
 - Measurable research success criteria (QA Guide) with a script for each:
   `eval/compute_auroc.py` now reports the SE AUROC and SE-PE gap,

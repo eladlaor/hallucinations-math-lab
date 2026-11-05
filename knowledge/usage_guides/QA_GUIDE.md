@@ -240,8 +240,7 @@ A red `test` job that fails during install usually means `uv.lock` is stale
 3. `uv build` succeeds and the wheel contains only `hallucinations_math_lab/`
    plus `LICENSE`.
 4. Both playground scripts run and print the tables shown in the README:
-   `examples/score_precollected_samples.py` (with and without
-   `--nli deberta`) and `examples/custom_detector.py`.
+   `examples/score_precollected_samples.py` and `examples/custom_detector.py`.
 5. With a model available: `python -m demo.cli detect "Who wrote 1984?"`
    returns SE near 0, and a 10-question `python -m eval.run_benchmark --limit 10 --no-judge`
    followed by `python -m eval.compute_auroc` completes. With two small models

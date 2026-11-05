@@ -52,11 +52,11 @@ model (Gemini on Vertex is the reference; any class with
 
 Three ways to use the repo, from cheapest to most involved:
 
-| Way in | You bring | What runs | You get back | Hardware prerequisites | Start with |
-|---|---|---|---|---|---|
-| **1. Library** — score answers you already have | **for the example:** nothing — it ships three hand-written sample sets.<br>**for your own model:** N answers it gave to one question, with their token logprobs | no model generates answers — yours are scored as given. To group them by meaning, DeBERTa (a small 1.6 GB model) checks which answers say the same thing; the example uses plain string matching unless you pass `--nli deberta` | PE and SE scores, the meaning clusters, and an escalate yes/no | any laptop ([tier 0](#what-hardware-do-i-need-and-why)) | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model) |
-| **2. Benchmark** — measure how well each detector spots wrong answers | nothing — 200 TriviaQA questions download on first run; you pick the Gemma 4 model(s) in `.env`, and add Google credentials unless you pass `--no-judge` | per question: Gemma 4 generates 11 answers (here or on a server), DeBERTa groups them by meaning, the detectors score them; Gemini answers the questions that escalate, unless you pass `--no-judge` | one AUROC per detector (per model), with confidence intervals | a machine that fits the model ([tiers 1–3](#what-hardware-do-i-need-and-why)), or a remote vLLM / Vertex server | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), or [`--sweep` + `eval.compare_models`](#how-do-i-compare-several-models) |
-| **3. Live demo** — ask one question end to end | a single question typed on the command line; for `chat`, also Google credentials for the Gemini judge | the same as the benchmark, for that one question; only `chat` calls Gemini, and only if the question escalates | the detector scores and an answer — the model's own, or Gemini's when the score crosses the threshold | as for the benchmark | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question) |
+| Way in | What is evaluated | You bring | What runs | You get back | Hardware prerequisites | Start with |
+|---|---|---|---|---|---|---|
+| **1. Library** | **A set of answers.** Do these N answers to one question look like a hallucination? The example shows how PE and SE react to consistent, paraphrased and contradictory answers. | **for the example:** nothing — it ships three hand-written sample sets.<br>**for your own model:** N answers it gave to one question, with their token logprobs | no model generates answers — yours are scored as given. DeBERTa (a small 1.6 GB model) checks which answers say the same thing, to group them by meaning | PE and SE scores, the meaning clusters, and an escalate yes/no | any laptop ([tier 0](#what-hardware-do-i-need-and-why)) | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model) |
+| **2. Benchmark** | **The detectors.** Across many questions, how reliably does each detector's score separate the model's right answers from its wrong ones? With several models: on which model does each detector work best? | nothing — 200 TriviaQA questions download on first run; you pick the Gemma 4 model(s) in `.env`, and add Google credentials unless you pass `--no-judge` | per question: Gemma 4 generates 11 answers (here or on a server), DeBERTa groups them by meaning, the detectors score them; Gemini answers the questions that escalate, unless you pass `--no-judge` | one AUROC per detector (per model), with confidence intervals | a machine that fits the model ([tiers 1–3](#what-hardware-do-i-need-and-why)), or a remote vLLM / Vertex server | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), or [`--sweep` + `eval.compare_models`](#how-do-i-compare-several-models) |
+| **3. Live demo** | **One live answer.** Should the model's answer to your question be trusted, or handed to the stronger judge? | a single question typed on the command line; for `chat`, also Google credentials for the Gemini judge | the same as the benchmark, for that one question; only `chat` calls Gemini, and only if the question escalates | the detector scores and an answer — the model's own, or Gemini's when the score crosses the threshold | as for the benchmark | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question) |
 
 Everything is configured in `.env` (copy [`.env.example`](.env.example);
 every key is documented there).
@@ -118,37 +118,24 @@ uv sync --all-extras
 uv run python examples/score_precollected_samples.py
 ```
 
-The script scores three hand-written sets of 10 "samples" each:
+The script scores three hand-written sets of 10 "samples" each. SE decides
+which samples mean the same thing with the NLI model
+`microsoft/deberta-large-mnli` (~1.6 GB, downloaded once; CPU is fine):
 
 ```
-NLI = exact   escalation: SE > 1.0 nats
+escalation: SE > 1.0 nats
 
-scenario         PE     SE  clusters  escalate
-consistent    0.050  0.000         1  False
-paraphrased   0.600  1.973         8  True
-divergent     0.400  1.834         7  True
-```
-
-`--nli exact` (the default) decides "same meaning" by string equality, so
-ten wordings of "Paris" look like eight different answers — a false alarm.
-Now let a real NLI model decide (downloads `microsoft/deberta-large-mnli`,
-~1.6 GB, once; CPU is fine):
-
-```bash
-uv run python examples/score_precollected_samples.py --nli deberta
-```
-
-```
 scenario         PE     SE  clusters  escalate
 consistent    0.050  0.000         1  False
 paraphrased   0.600  0.000         1  False
 divergent     0.400  1.834         7  True
 ```
 
-The paraphrases collapse into one meaning cluster and stop escalating,
-while the genuinely contradictory answers still do. PE never notices the
-difference — it only sees token probabilities. That gap is the whole case
-for Semantic Entropy.
+Ten wordings of "Paris" collapse into one meaning cluster and do not
+escalate, while the genuinely contradictory answers do. PE scores the
+paraphrases higher than the consistent answers — it only sees token
+probabilities, so varied wording looks like uncertainty. That gap is the
+whole case for Semantic Entropy.
 
 ## What do I need before running a real model?
 
@@ -719,9 +706,9 @@ The samples are identical, which almost always means the temperature is 0
 somewhere. Check `SAMPLE_TEMPERATURE` and, on vLLM, the server's settings.
 
 **Why is SE always very high?**
-Clustering is splitting paraphrases. Check `NLI_MODEL_ID`, and compare the
-two modes of `examples/score_precollected_samples.py` to see what a healthy
-NLI model does.
+Clustering is splitting paraphrases. Check `NLI_MODEL_ID`, and run
+`examples/score_precollected_samples.py`: with a healthy NLI model, the
+"paraphrased" row is one cluster with SE 0.
 
 ## Where does the theory live?
 

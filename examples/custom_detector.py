@@ -7,7 +7,8 @@ hallucination, by convention.
 
 This example implements the simplest possible "sample disagreement"
 detector — the fraction of samples that differ from the most common
-answer — and scores it alongside the built-ins. No GPU, no LLM.
+answer — and scores it alongside the built-ins. No GPU, no answer-generating
+LLM; SE uses the DeBERTa NLI model (~1.6 GB download on first run).
 
 Run:
     uv run python examples/custom_detector.py
@@ -22,13 +23,14 @@ tests/unit/test_semantic_entropy.py.
 import time
 from collections import Counter
 
-from score_precollected_samples import SCENARIOS, ExactMatchNLI, _normalize
+from score_precollected_samples import SCENARIOS
 
 from hallucinations_math_lab import (
     DetectionContext,
     DetectorName,
     DetectorPrerequisiteError,
     DetectorScore,
+    NLIScorer,
     PredictiveEntropyDetector,
     SampleSet,
     SemanticEntropyDetector,
@@ -40,6 +42,11 @@ from hallucinations_math_lab.services.detector_protocol import DetectorMetadata
 # Reuses an existing id so the example needs no edit to the library. A real
 # detector gets its own DetectorName member (see module docstring).
 DISAGREEMENT_ID = DetectorName.LLAMA_JUDGE_QA_SAMPLES
+
+
+def _normalize(text: str) -> str:
+    """Lowercase, keep only letters, digits and spaces."""
+    return "".join(ch for ch in text.lower() if ch.isalnum() or ch.isspace()).strip()
 
 
 class MajorityDisagreementDetector:
@@ -75,7 +82,7 @@ class MajorityDisagreementDetector:
 def main() -> None:
     detectors = [
         PredictiveEntropyDetector(),
-        SemanticEntropyDetector(scorer=ExactMatchNLI()),
+        SemanticEntropyDetector(scorer=NLIScorer()),
         MajorityDisagreementDetector(),
     ]
     print(f"{'scenario':<12} {'PE':>6} {'SE':>6} {'disagree':>9}")
