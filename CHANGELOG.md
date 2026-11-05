@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - README hardware tiers: what each model needs in GPU memory, Mac memory,
-  download and disk, why, and shell checks (Linux, macOS) to find the tier a
-  machine fits.
+  download and disk, and why.
+- `python -m demo.check_hardware` (Linux, macOS): measures memory, GPU, free
+  disk and download speed, and recommends the tier and `VLLM_MODEL_ID`;
+  `--json` for agents.
 - Model comparison: `eval.run_benchmark --sweep` runs the question set once per
   model in `TARGET_MODEL_IDS` (one results file per model, one model loaded at a
   time, registry and per-model SEP probes checked before any scoring), and

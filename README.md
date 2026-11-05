@@ -13,7 +13,7 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 - [Quickstart: no GPU, no LLM](#quickstart-no-gpu-no-llm)
 - [What do I need before running a real model?](#what-do-i-need-before-running-a-real-model)
 - [What hardware do I need, and why?](#what-hardware-do-i-need-and-why)
-  - [How can an agent check which tier this machine fits?](#how-can-an-agent-check-which-tier-this-machine-fits)
+  - [How do I check which tier my machine fits?](#how-do-i-check-which-tier-my-machine-fits)
 - [What does a single run actually do?](#what-does-a-single-run-actually-do)
 - [How do the three detectors differ?](#how-do-the-three-detectors-differ)
 - [How do I ask one question?](#how-do-i-ask-one-question)
@@ -155,8 +155,9 @@ fallback to another provider.
 
 ## What hardware do I need, and why?
 
-Find the highest tier your machine reaches; it can also do everything in the
-lower tiers. Linux and macOS only, for now.
+A machine can run everything in its tier and the tiers below it;
+[the checker](#how-do-i-check-which-tier-my-machine-fits) finds yours. Linux
+and macOS only, for now.
 
 | Tier | What you can run | Download (once) | NVIDIA GPU memory | Apple Silicon Mac memory | No usable GPU |
 |---|---|---|---|---|---|
@@ -202,35 +203,34 @@ server on a rented GPU or a Vertex AI endpoint ([DevOps
 Guide](knowledge/usage_guides/DEVOPS_GUIDE.md)). This machine then only needs
 tier 0.
 
-### How can an agent check which tier this machine fits?
+### How do I check which tier my machine fits?
 
-Run these from the repo root (after `uv sync --all-extras`). Each prints one
-fact:
+Run the checker (after `uv sync --all-extras`):
 
 ```bash
-uname -sm                                      # "Darwin arm64" = Apple Silicon; "Darwin x86_64" = Intel Mac
-sysctl -n hw.memsize | awk '{printf "%.0f GB\n", $1/2^30}'   # macOS: total memory
-free -b | awk '/Mem:/{printf "%.0f GB\n", $2/2^30}'          # Linux: total memory
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader  # Linux: each NVIDIA GPU; "command not found" = none
-uv run python -c "import torch; print('cuda', torch.cuda.is_available(), '| mps', torch.backends.mps.is_available())"
-df -h "${HF_HOME:-$HOME/.cache/huggingface}" 2>/dev/null || df -h ~   # free disk where models are cached
-curl -sL -o /dev/null -w '%{speed_download}\n' \
-  https://huggingface.co/api/datasets/mandarjoshi/trivia_qa/parquet/rc.nocontext/validation/0.parquet \
-  | awk '{printf "%.0f Mbit/s\n", $1*8/1e6}'                 # rough download speed (7 MB test file)
+uv run python -m demo.check_hardware
 ```
 
-Then decide, top to bottom, and stop at the first match:
+```
+OS            Darwin arm64
+Memory        36 GB
+NVIDIA GPU    none
+PyTorch GPU   cuda=False  mps=True
+Free disk     301 GB (model cache)
+Download      29 Mbit/s
 
-1. `cuda True`: add up the GPU memory `nvidia-smi` printed (MiB ÷ 1024 = GB)
-   and read the **NVIDIA** column.
-2. `mps True`: read the **Apple Silicon Mac** column with the total memory.
-3. Otherwise, 24 GB of memory or more → tier 1 on the CPU (slow); less →
-   tier 0.
-4. Check free disk ≥ the tier's download + a few GB, and estimate download
-   time as GB × 8000 ÷ Mbit/s seconds. If disk is short, drop a tier.
-5. Report the tier and the model, and set it in `.env`:
-   `VLLM_MODEL_ID=<model>`. For tier 0, point `SLM_PROVIDER=vllm` at a remote
-   server instead.
+Tier 2: google/gemma-4-E4B-it on apple
+Download      16.0 GB once, about 75 min
+
+Set in .env:
+VLLM_MODEL_ID=google/gemma-4-E4B-it
+```
+
+It reads the machine's memory, NVIDIA GPU memory, which GPU PyTorch can use,
+and free disk where models are cached; times a 7 MB download from Hugging
+Face; and picks the largest model that fits both memory and disk, using the
+figures in the table above. Agents should add `--json` for machine-readable
+output; `--no-network` skips the speed test.
 
 ## What does a single run actually do?
 
