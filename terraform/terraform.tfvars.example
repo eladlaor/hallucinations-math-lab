@@ -5,7 +5,7 @@ project_id = "<your-project-id>"
 
 # Optional overrides (defaults shown):
 # region                     = "us-central1"
-# name_prefix                = "taste"
+# name_prefix                = "hml"
 # deploy_vertex_endpoint     = false
 # vllm_image_uri             = ""   # set once the vLLM container is pushed to Artifact Registry
 # with_embed_endpoint        = false  # true adds an embed-runner endpoint for SEP (doubles GPU cost)

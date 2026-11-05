@@ -80,11 +80,11 @@ uv run python examples/score_precollected_samples.py --nli deberta
 ```
 scenario         PE     SE  clusters  escalate
 consistent    0.050  0.000         1  False
-paraphrased   0.600  0.802         3  False
+paraphrased   0.600  0.000         1  False
 divergent     0.400  1.834         7  True
 ```
 
-The paraphrases collapse into a few meaning clusters and stop escalating,
+The paraphrases collapse into one meaning cluster and stop escalating,
 while the genuinely contradictory answers still do. PE never notices the
 difference — it only sees token probabilities. That gap is the whole case
 for Semantic Entropy.

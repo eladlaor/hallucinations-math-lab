@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Breaking:** the import package is renamed from `taste` to
   `hallucinations_math_lab`, matching the `hallucinations-math-lab` distribution.
+- The Terraform `name_prefix` default changes from `taste` to `hml`, renaming the
+  service account, Artifact Registry repo and Vertex display names.
 - **Breaking:** `GeminiJudge` uses the Google Gen AI SDK (`google-genai`)
   with schema-validated output instead of the deprecated
   `vertexai.generative_models`; the `judge` extra changed accordingly.

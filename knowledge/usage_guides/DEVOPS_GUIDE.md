@@ -87,11 +87,11 @@ terraform apply
 
 The provider versions are pinned by the committed `.terraform.lock.hcl`
 (Google provider `~> 8.0`). The first apply creates, with the default
-`name_prefix = "taste"`:
+`name_prefix = "hml"`:
 
 - the required API enablements;
-- the `taste-vertex-runtime` service account and its IAM roles;
-- the Artifact Registry Docker repo `taste-containers`;
+- the `hml-vertex-runtime` service account and its IAM roles;
+- the Artifact Registry Docker repo `hml-containers`;
 - three buckets: `<your-project-id>-tfstate`, `<your-project-id>-artifacts`,
   `<your-project-id>-eval-results`.
 

@@ -1,14 +1,15 @@
 """Detector protocol and dispatch primitives.
 
-All hallucination detectors (PE, SEP, SE, LlamaJudge*) implement the `Detector`
-protocol and operate on a shared `DetectionContext`. `DetectorAgent` builds the
-context once per request and dispatches it to every configured detector,
-regardless of which detectors actually need samples or hidden states.
+All hallucination detectors (PE, SEP, SE, and the planned LLM-as-judge) implement
+the `Detector` protocol and operate on a shared `DetectionContext`.
+`evaluate_responses` builds the context once per request, checks that each
+detector's declared inputs are present, and dispatches it to every configured
+detector.
 
 Why a protocol and not a base class:
   - The detectors share no implementation, only an interface.
   - SE depends on N samples + an NLI scorer, PE on per-token logprobs of those
-    same samples, SEP on a single pooled hidden state, LlamaJudge* on an
+    same samples, SEP on a single pooled hidden state, the LLM-as-judge on an
     external LLM call. The context carries the common inputs; each detector
     reads only what it needs.
 

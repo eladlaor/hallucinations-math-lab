@@ -12,7 +12,7 @@ variable "region" {
 variable "name_prefix" {
   description = "Prefix applied to resource names to keep them grouped and easy to clean up."
   type        = string
-  default     = "taste"
+  default     = "hml"
 }
 
 variable "deploy_vertex_endpoint" {

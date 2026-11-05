@@ -153,8 +153,8 @@ destructive before it.
   - Python 3.14 is excluded.
   - Add `py.typed`, `[project.urls]` and classifiers.
   - Fix the README links so they work on PyPI.
-- [ ] **Leftover old names.** The Terraform `name_prefix` defaults to `"taste"`, and
-  `detector_protocol.py` mentions `DetectorAgent`.
+- [x] **Leftover old names.** The Terraform `name_prefix` now defaults to `"hml"`;
+  `detector_protocol.py` no longer mentions `DetectorAgent`.
 - [ ] **Missing OSS files.**
   - CONTRIBUTING, SECURITY.md, CODE_OF_CONDUCT, issue and PR templates,
     `CITATION.cff`, badges.
