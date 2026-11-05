@@ -52,9 +52,9 @@ Three ways to use the repo, from cheapest to most involved:
 
 | Way in | You bring | You get back | You need | Start with |
 |---|---|---|---|---|
-| **1. Library** — score answers you already have | N sampled answers (with token logprobs) from any LLM, or made-up ones | PE and SE scores, the meaning clusters, and an escalate yes/no — the repo never calls a model | a laptop CPU; nothing else | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model) |
-| **2. Benchmark** — measure how well each detector spots wrong answers | a TriviaQA question set and one Gemma 4 model, or several to compare | one AUROC per detector (per model), with confidence intervals | the model running locally (GPU strongly recommended) or on a vLLM / Vertex server | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), or [`--sweep` + `eval.compare_models`](#how-do-i-compare-several-models) |
-| **3. Live demo** — ask one question end to end | a single question typed on the command line | the detector scores and an answer — the model's own, or Gemini's when the score crosses the threshold | one Gemma 4 model as above, plus Google credentials for the Gemini judge (`chat` only) | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question) |
+| **1. Library** — score answers you already have | nothing to start (the example ships three sample sets); later, N sampled answers with token logprobs from any LLM | PE and SE scores, the meaning clusters, and an escalate yes/no — the repo never calls a model | any laptop ([tier 0](#what-hardware-do-i-need-and-why)) | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model) |
+| **2. Benchmark** — measure how well each detector spots wrong answers | nothing — 200 TriviaQA questions download on first run; you pick the Gemma 4 model(s) in `.env` | one AUROC per detector (per model), with confidence intervals | a machine that fits the model ([tiers 1–3](#what-hardware-do-i-need-and-why)), or a remote vLLM / Vertex server | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), or [`--sweep` + `eval.compare_models`](#how-do-i-compare-several-models) |
+| **3. Live demo** — ask one question end to end | a single question typed on the command line | the detector scores and an answer — the model's own, or Gemini's when the score crosses the threshold | as for the benchmark, plus Google credentials for the Gemini judge (`chat` only) | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question) |
 
 Everything is configured in `.env` (copy [`.env.example`](.env.example);
 every key is documented there).
@@ -348,21 +348,21 @@ detector — the chance that a random hallucinated answer scores higher than a
 random correct one (0.5 = coin flip, 1.0 = perfect). It runs the model in
 `VLLM_MODEL_ID`.
 
-1. **Build a question set.** The loader shuffles TriviaQA's validation split
-   once with a fixed seed and takes a slice of `--n` questions starting at
-   `--offset`. Slices that do not overlap share no questions; start after
-   the first 500, which are kept for SEP probe training:
+1. **Questions come with the repo.** Without `--in`, the benchmark uses 200
+   TriviaQA questions (positions 500–699 of a fixed-seed shuffle), downloaded
+   once (~7 MB) to `data/questions/`. The first 500 are kept for SEP probe
+   training, so the two sets never share a question. For a different slice,
+   build one and pass it with `--in`:
    ```bash
-   uv run python -m eval.datasets.load_triviaqa --offset 500 --n 200 \
-       --out eval/datasets/triviaqa_200.jsonl
+   uv run python -m eval.datasets.load_triviaqa --offset 700 --n 1000 \
+       --out data/questions/my_slice.jsonl
    ```
    [`eval/datasets/adversarial.jsonl`](eval/datasets/adversarial.jsonl)
-   holds a few false-premise and unknowable questions. They have no answer
-   key, so AUROC skips them — read their rows by hand.
+   ships in the repo: a few false-premise and unknowable questions. They
+   have no answer key, so AUROC skips them — read their rows by hand.
 2. **Run the detectors.** `--limit 10` is a good first smoke test:
    ```bash
    uv run python -m eval.run_benchmark \
-       --in eval/datasets/triviaqa_200.jsonl \
        --out eval/results/triviaqa_200.jsonl --no-judge
    ```
    Each output row carries the question, answer key, greedy and final
@@ -428,7 +428,6 @@ of them with `--sweep`, then compare:
 # .env: TARGET_MODEL_IDS=["google/gemma-4-E2B-it","google/gemma-4-E4B-it"]
 
 uv run python -m eval.run_benchmark --sweep \
-    --in eval/datasets/triviaqa_200.jsonl \
     --out eval/results/sweep/ --no-judge
 
 uv run python -m eval.compare_models --in eval/results/sweep/
@@ -468,19 +467,17 @@ A probe is trained per model: for each calibration question it computes SE
 input), then fits a ridge regression — a linear fit with a penalty that
 keeps the weights small.
 
-1. **Make a calibration set that does not overlap your benchmark** — the
-   slice *before* the benchmark's `--offset`:
-   ```bash
-   uv run python -m eval.datasets.load_triviaqa --offset 0 --n 500 \
-       --out data/calibration/triviaqa_calibration_500.jsonl
-   ```
+1. **Calibration questions come with the repo.** Without `--calibration-set`,
+   training uses the first 500 questions of the same fixed-seed shuffle,
+   downloaded once to `data/questions/`. They never overlap the default
+   benchmark questions. To use your own, pass any slice that does not
+   overlap your benchmark.
 2. **Train** for the model in `VLLM_MODEL_ID`. Needs a provider that exposes
    hidden states (the default `hf_transformers` does):
    ```bash
-   uv run python -m eval.train_sep_probe \
-       --calibration-set data/calibration/triviaqa_calibration_500.jsonl --output-path auto
+   uv run python -m eval.train_sep_probe
    ```
-   `auto` writes `data/probes/<model slug>.pt`, which is where the evaluator
+   It writes `data/probes/<model slug>.pt` (or `--output-path`), which is where the evaluator
    looks for that model unless `SEP_PROBE_PATH` says otherwise. Next to it,
    it writes `<model slug>.train_ids.json`, the ids of the questions it was
    trained on. Before saving, it logs the probe's 5-fold cross-validated

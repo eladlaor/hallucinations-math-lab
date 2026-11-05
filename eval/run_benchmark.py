@@ -1,7 +1,9 @@
 """Run the configured detectors over a question set and write one JSONL row per question.
 
 Input: JSONL with a `question` field per line (eval/datasets/load_triviaqa.py
-output, or eval/datasets/adversarial.jsonl). Ground-truth fields
+output, or eval/datasets/adversarial.jsonl). Without `--in`, the default
+200-question TriviaQA slice is used, downloaded on first use
+(eval/datasets/default_question_sets.py). Ground-truth fields
 (`ground_truth_aliases`, `ground_truth_value`, `expected_behavior`) are copied
 through untouched so compute_auroc.py can label each row.
 
@@ -45,6 +47,12 @@ from eval.benchmark_results import (
     SAMPLE_N_FIELD,
     SAMPLE_TEMPERATURE_FIELD,
     RunConfig,
+)
+from eval.datasets.default_question_sets import (
+    BENCHMARK_SLICE,
+    QuestionLoader,
+    QuestionSlice,
+    ensure_question_set,
 )
 from eval.sep_probe_provenance import assert_disjoint
 from hallucinations_math_lab import ResponseEvaluator
@@ -241,10 +249,24 @@ def run_sweep(
     return out_paths
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+def resolve_questions_path(
+    in_path: Path | None,
+    loader: QuestionLoader | None = None,
+    slice_: QuestionSlice = BENCHMARK_SLICE,
+) -> Path:
+    """The given question file, or the default benchmark slice (built on first use)."""
+    return in_path if in_path is not None else ensure_question_set(slice_, loader=loader)
+
+
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run the detectors over a question set.")
-    p.add_argument("--in", dest="in_path", type=Path, required=True)
+    p.add_argument(
+        "--in",
+        dest="in_path",
+        type=Path,
+        default=None,
+        help=f"Question JSONL; default: {BENCHMARK_SLICE.path}, downloaded on first use.",
+    )
     p.add_argument(
         "--out",
         dest="out_path",
@@ -259,8 +281,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Run every model in TARGET_MODEL_IDS instead of only VLLM_MODEL_ID.",
     )
-    args = p.parse_args()
+    return p
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    args = build_parser().parse_args()
+    in_path = resolve_questions_path(args.in_path)
     if args.sweep:
-        run_sweep(args.in_path, args.out_path, judge=not args.no_judge, limit=args.limit)
+        run_sweep(in_path, args.out_path, judge=not args.no_judge, limit=args.limit)
     else:
-        run(args.in_path, args.out_path, judge=not args.no_judge, limit=args.limit)
+        run(in_path, args.out_path, judge=not args.no_judge, limit=args.limit)

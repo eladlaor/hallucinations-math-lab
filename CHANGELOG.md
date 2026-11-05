@@ -53,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the real OpenAI client) and the HF logprob extraction.
 
 ### Changed
+- `eval.run_benchmark --in` and `eval.train_sep_probe --calibration-set` are
+  optional: without them, fixed non-overlapping TriviaQA slices (200
+  benchmark, 500 calibration questions) are downloaded once to
+  `data/questions/`.
 - The README is now the user guide; `knowledge/usage_guides/USER_GUIDE.md` is
   folded into it, and it states up front which model is under test and how to
   run one model or compare several.
@@ -127,6 +131,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serving/deploy_vertex.sh` — replaced by the Terraform path.
 
 ### Fixed
+- `eval.datasets.load_triviaqa` loads `mandarjoshi/trivia_qa`; the bare
+  `trivia_qa` name is rejected by current `datasets` releases.
+- TriviaQA slices are cut from unique questions: the validation split repeats
+  most questions once per evidence source, which put the same question in
+  both the calibration and benchmark slices and twice within a slice.
 - The default SEP probe is resolved from the model being evaluated, not from
   `VLLM_MODEL_ID`, so a provider built for another model no longer loads the
   wrong model's probe.

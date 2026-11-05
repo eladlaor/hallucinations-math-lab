@@ -26,11 +26,10 @@ Why local training, not a released probe checkpoint:
   - Training keeps the project self-contained and reproducible per backbone.
 
 Usage:
-    uv run python -m eval.datasets.load_triviaqa --offset 0 --n 500 \\
-        --out data/calibration/triviaqa_calibration_500.jsonl
-    uv run python -m eval.train_sep_probe \\
-        --calibration-set data/calibration/triviaqa_calibration_500.jsonl \\
-        --output-path auto
+    uv run python -m eval.train_sep_probe
+
+Without `--calibration-set`, the default 500-question TriviaQA calibration
+slice is used, downloaded on first use (eval/datasets/default_question_sets.py).
 
 `auto` writes to `data/probes/<slugified model id>.pt`. Pass an explicit
 filename to override.
@@ -54,6 +53,12 @@ from sklearn.linear_model import Ridge
 from sklearn.model_selection import KFold
 
 from demo.slm_provider import build_default_provider
+from eval.datasets.default_question_sets import (
+    CALIBRATION_SLICE,
+    QuestionLoader,
+    QuestionSlice,
+    ensure_question_set,
+)
 from eval.sep_probe_provenance import write_training_ids
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY, RANDOM_SEED
@@ -115,9 +120,25 @@ def _iter_questions(path: Path):
             yield str(obj[ID_FIELD]), obj[QUESTION_FIELD]
 
 
-def main() -> int:
+def resolve_calibration_path(
+    calibration_set: Path | None,
+    loader: QuestionLoader | None = None,
+    slice_: QuestionSlice = CALIBRATION_SLICE,
+) -> Path:
+    """The given calibration file, or the default calibration slice (built on first use)."""
+    if calibration_set is not None:
+        return calibration_set
+    return ensure_question_set(slice_, loader=loader)
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--calibration-set", type=Path, required=True)
+    parser.add_argument(
+        "--calibration-set",
+        type=Path,
+        default=None,
+        help=f"Question JSONL; default: {CALIBRATION_SLICE.path}, downloaded on first use.",
+    )
     parser.add_argument(
         "--output-path",
         type=str,
@@ -131,7 +152,12 @@ def main() -> int:
         default=DEFAULT_CV_FOLDS,
         help="Folds for the cross-validated SEP-vs-SE Pearson r reported before the final fit.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+    calibration_set = resolve_calibration_path(args.calibration_set)
 
     settings = get_settings()
     model_id = settings.vllm_model_id
@@ -148,7 +174,7 @@ def main() -> int:
     question_ids: list[str] = []
 
     n_prompts = 0
-    for question_id, prompt in _iter_questions(args.calibration_set):
+    for question_id, prompt in _iter_questions(calibration_set):
         n_prompts += 1
         question_ids.append(question_id)
         try:
