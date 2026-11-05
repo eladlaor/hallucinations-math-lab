@@ -23,10 +23,11 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 
 ## Summary
 
-The idea: ask a model the same question several times. If it really knows
-the answer, the answers agree in meaning. If it is making something up, they
-scatter. This repo turns that idea into numbers you can compute, compare and
-tune:
+The idea behind Semantic Entropy: ask a model the same question several
+times. If it really knows the answer, the answers agree in meaning. If it is
+making something up, they scatter. This repo turns that idea into numbers you
+can compute, compare and tune — plus two neighbours: a cheaper baseline (PE)
+and a probe that predicts the same signal without the repeated sampling (SEP):
 
 | Detector | What it reads | Cost |
 |---|---|---|

@@ -93,8 +93,10 @@ terraform/                 # see the DevOps Guide
 
 ## Why is the library separate from the demo?
 
-So that someone who already has an LLM stack can `pip install` the scorers
-without pulling in vLLM clients, Gemma settings or Google Cloud. The wheel
+So that someone who already has an LLM stack can install the scorers
+without pulling in vLLM clients, Gemma settings or Google Cloud. The package
+is not on PyPI; install it from Git
+(`uv add git+https://github.com/eladlaor/hallucinations-math-lab`). The wheel
 ships only `src/hallucinations_math_lab/`; `demo/`, `eval/` and `examples/`
 exist only in the repository.
 
@@ -107,7 +109,8 @@ makes sense inside the repo.
 
 1. `ResponseEvaluator.evaluate(prompt)` asks the provider for N samples (if
    any detector `requires_samples`), a greedy answer, and a pooled hidden
-   state (if any detector `requires_hidden_state`).
+   state — the last layer's vector at the final prompt token — (if any
+   detector `requires_hidden_state`).
 2. It calls `evaluate_responses(...)`, which validates that every detector's
    inputs are present (fail fast), builds one `DetectionContext`, and calls
    each detector's `score(ctx)`.
@@ -141,8 +144,8 @@ accelerator type and count). `vllm_flags(runner)` turns the entry into
 `vllm serve` flags for the `generate` or `embed` runner, including
 `--tensor-parallel-size` equal to the accelerator count. Size
 `max_model_len` to what the GPU's memory can hold next to the weights, not to
-the model's maximum context, or vLLM refuses to start. Exactly one entry may be `is_local_default` and one
-`is_deployed_default`; `tests/unit/test_model_registry.py` enforces this. A
+the model's maximum context, or vLLM refuses to start. Exactly one entry may
+be `is_local_default` and one `is_deployed_default`; `tests/unit/test_model_registry.py` enforces this. A
 model must be in the registry before it can appear in `VLLM_MODEL_ID` or
 `TARGET_MODEL_IDS`.
 

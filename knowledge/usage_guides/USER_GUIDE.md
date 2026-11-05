@@ -78,8 +78,11 @@ native bf16 precision — nothing is quantized.
   chat-templated prompt's last-token hidden state, unnormalized), so a probe
   trained on one works on the other.
 
-To compare models, set `TARGET_MODEL_IDS` (at least two registry ids). The
-judge (`JUDGE_MODEL_ID`, default `gemini-3.5-flash-lite`) is Gemini on
+The name `VLLM_MODEL_ID` applies to both providers, including the local
+`hf_transformers` one. To compare models, rerun the benchmark once per model
+(see [How do I run a benchmark?](#how-do-i-run-a-benchmark));
+`TARGET_MODEL_IDS` in `.env` is validated but no command iterates over it
+yet. The judge (`JUDGE_MODEL_ID`, default `gemini-3.5-flash-lite`) is Gemini on
 Vertex AI through the `google-genai` SDK; it returns a schema-validated
 reasoning and answer (reasoning first, so the answer is conditioned on it).
 Gemini 3.5 on Vertex ignores temperature, so the judge sends no sampling
@@ -117,7 +120,7 @@ from `.env`.
 answer, the N sample texts, `detector_scores`, the SE `clusters` (each with
 its member indices and a representative text), and the escalation decision.
 
-`chat` prints three blocks:
+`chat` prints two blocks, plus a third when the judge answered:
 
 ```
 ──────────── Detection ────────────
@@ -143,8 +146,8 @@ ln N (≈ 2.30 for N = 10), meaning every answer was different.
 |---|---|---|
 | 10 | 0.00 | full agreement |
 | 9 + 1 | 0.33 | one stray answer |
-| 7 + 2 + 1 | 0.80 | real wobble |
 | 5 + 5 | 0.69 | two camps |
+| 7 + 2 + 1 | 0.80 | real wobble |
 | 4 + 3 + 2 + 1 | 1.28 | scattered |
 | 1 × 10 | 2.30 | every answer different |
 
