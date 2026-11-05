@@ -11,6 +11,7 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 - [Summary](#summary)
 - [Which model am I testing, and how do I choose it?](#which-model-am-i-testing-and-how-do-i-choose-it)
 - [Quickstart: no GPU, no LLM](#quickstart-no-gpu-no-llm)
+- [How do I use the web playground?](#how-do-i-use-the-web-playground)
 - [What do I need before running a real model?](#what-do-i-need-before-running-a-real-model)
 - [What hardware do I need, and why?](#what-hardware-do-i-need-and-why)
   - [How can an agent check which tier this machine fits?](#how-can-an-agent-check-which-tier-this-machine-fits)
@@ -54,9 +55,9 @@ Three ways to use the repo, from cheapest to most involved:
 
 | Way in | What is evaluated | You bring | What runs | You get back | Hardware prerequisites | Start with |
 |---|---|---|---|---|---|---|
-| **1. Library** | **A set of answers.** Do these N answers to one question look like a hallucination? The example shows how PE and SE react to consistent, paraphrased and contradictory answers. | **for the example:** nothing — it ships three hand-written sample sets.<br>**for your own model:** N answers it gave to one question, with their token logprobs | no model generates answers — yours are scored as given. DeBERTa (a small 1.6 GB model) checks which answers say the same thing, to group them by meaning | PE and SE scores, the meaning clusters, and an escalate yes/no | any laptop ([tier 0](#what-hardware-do-i-need-and-why)) | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model) |
-| **2. Benchmark** | **The detectors.** Across many questions, how reliably does each detector's score separate the model's right answers from its wrong ones? With several models: on which model does each detector work best? | nothing — 200 TriviaQA questions download on first run; you pick the Gemma 4 model(s) in `.env`, and add Google credentials unless you pass `--no-judge` | per question: Gemma 4 generates 11 answers (here or on a server), DeBERTa groups them by meaning, the detectors score them; Gemini answers the questions that escalate, unless you pass `--no-judge` | one AUROC per detector (per model), with confidence intervals | a machine that fits the model ([tiers 1–3](#what-hardware-do-i-need-and-why)), or a remote vLLM / Vertex server | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), or [`--sweep` + `eval.compare_models`](#how-do-i-compare-several-models) |
-| **3. Live demo** | **One live answer.** Should the model's answer to your question be trusted, or handed to the stronger judge? | a single question typed on the command line; for `chat`, also Google credentials for the Gemini judge | the same as the benchmark, for that one question; only `chat` calls Gemini, and only if the question escalates | the detector scores and an answer — the model's own, or Gemini's when the score crosses the threshold | as for the benchmark | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question) |
+| **1. Library** | **A set of answers.** Do these N answers to one question look like a hallucination? The example shows how PE and SE react to consistent, paraphrased and contradictory answers. | **for the example:** nothing — it ships three hand-written sample sets.<br>**for your own model:** N answers it gave to one question, with their token logprobs | no model generates answers — yours are scored as given. DeBERTa (a small 1.6 GB model) checks which answers say the same thing, to group them by meaning | PE and SE scores, the meaning clusters, and an escalate yes/no | any laptop ([tier 0](#what-hardware-do-i-need-and-why)) | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model); or the [web playground](#how-do-i-use-the-web-playground), *Score answers* tab |
+| **2. Benchmark** | **The detectors.** Across many questions, how reliably does each detector's score separate the model's right answers from its wrong ones? With several models: on which model does each detector work best? | nothing — 200 TriviaQA questions download on first run; you pick the Gemma 4 model(s) in `.env`, and add Google credentials unless you pass `--no-judge` | per question: Gemma 4 generates 11 answers (here or on a server), DeBERTa groups them by meaning, the detectors score them; Gemini answers the questions that escalate, unless you pass `--no-judge` | one AUROC per detector (per model), with confidence intervals | a machine that fits the model ([tiers 1–3](#what-hardware-do-i-need-and-why)), or a remote vLLM / Vertex server | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), or [`--sweep` + `eval.compare_models`](#how-do-i-compare-several-models); view the results in the [web playground](#how-do-i-use-the-web-playground), *Benchmark results* tab |
+| **3. Live demo** | **One live answer.** Should the model's answer to your question be trusted, or handed to the stronger judge? | a single question typed on the command line; for `chat`, also Google credentials for the Gemini judge | the same as the benchmark, for that one question; only `chat` calls Gemini, and only if the question escalates | the detector scores and an answer — the model's own, or Gemini's when the score crosses the threshold | as for the benchmark | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question), or the [web playground](#how-do-i-use-the-web-playground), *Ask the model* tab |
 
 Everything is configured in `.env` (copy [`.env.example`](.env.example);
 every key is documented there).
@@ -136,6 +137,41 @@ escalate, while the genuinely contradictory answers do. PE scores the
 paraphrases higher than the consistent answers — it only sees token
 probabilities, so varied wording looks like uncertainty. That gap is the
 whole case for Semantic Entropy.
+
+## How do I use the web playground?
+
+Run one command and open <http://127.0.0.1:8765>:
+
+```bash
+uv sync --all-extras
+uv run python -m demo.web
+```
+
+It serves a small web UI and its API from one local process, bound to
+`127.0.0.1` only (`--port` picks another port). The UI is prebuilt and
+committed, so you do not need Node. It has one tab per way in:
+
+| Tab | Way in | Needs |
+|---|---|---|
+| **Score answers** | 1. Library | nothing — DeBERTa downloads on the first score (~1.6 GB, once) |
+| **Ask the model** | 3. Live demo | the model from `.env`, as for `demo.cli`; *Chat* also needs `GCP_PROJECT_ID` and Google credentials |
+| **Benchmark results** | 2. Benchmark (read-only) | results files under `eval/results/`, from `eval.run_benchmark` |
+
+- **Score answers** — load one of the three presets from
+  `examples/score_precollected_samples.py`, or type your own answers. You
+  get SE, the meaning clusters (one colour and number per meaning) and PE.
+  The presets reproduce the Quickstart table exactly. Typed answers have no
+  token logprobs, so PE shows "needs token logprobs" instead of a number.
+  The threshold slider flips *escalate* in the browser, with no new request.
+- **Ask the model** — *Detect* and *Chat* do what `demo.cli detect` and
+  `demo.cli chat` do, and show the samples grouped into clusters. A status
+  strip shows the provider and model; *Chat* is disabled, with the reason,
+  when the judge is not configured. Errors from the model are shown as the
+  server reports them.
+- **Benchmark results** — pick a results file for per-detector AUROC with
+  its 95% confidence interval (the same numbers as `eval.compute_auroc`),
+  or a `--sweep` directory for the model comparison table. Benchmarks are
+  run from the command line, not from the UI.
 
 ## What do I need before running a real model?
 
@@ -731,6 +767,8 @@ src/hallucinations_math_lab/   # the library — imports nothing from demo/
   services/                    # detector protocol, PE, SE, SEP, NLI wrapper
   judges/                      # Judge protocol + GeminiJudge
 demo/                          # CLI, SLM providers (vLLM, transformers), model registry
+  web/                         # web playground: FastAPI app + the committed, prebuilt UI
+frontend/                      # the playground UI's source (Vite, React); only for UI work
 examples/                      # runnable playground scripts
 eval/                          # datasets, benchmark (one model or a sweep), model comparison,
                                # success-criteria scoring, SEP probe training

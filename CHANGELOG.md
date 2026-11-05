@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Local web playground (`uv run python -m demo.web`, http://127.0.0.1:8765): a
+  FastAPI app with a committed React UI, one tab per way in — score answers
+  with their meaning clusters, PE and a client-side escalation threshold; ask
+  the model (`detect` / `chat`); and view benchmark AUROCs with CIs or a
+  model comparison. New `web` optional extra (`fastapi`, `uvicorn`), included
+  in `all`.
 - README hardware tiers: what each model needs in GPU memory, Mac memory,
   download and disk, why, and shell checks (Linux, macOS) to find the tier a
   machine fits.

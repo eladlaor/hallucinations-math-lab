@@ -164,6 +164,18 @@ New features follow test-first: write the failing test that defines
 | `test_eval_criteria.py` | statistics primitives (rank AUROC vs sklearn, deterministic bootstrap, exact McNemar); each criterion met only with its significance or effect-size condition; run comparability; cross-validated SEP Pearson r; slice bounds; probe provenance |
 | `test_model_comparison.py` | `run_benchmark --sweep` (one file per model, one model at a time, registry and per-model SEP probe checked before any scoring); SEP's default probe follows the evaluated model; `compare_models` accuracy and AUROC per model, refusing different questions, different sampling or a repeated model |
 | `test_gemini_judge.py` | `GeminiJudge` request shape and verdict parsing against a fake `google-genai` client |
+| `web/test_web_shell.py` | playground status (provider, model, judge readiness with its reason), presets equal the example's `SCENARIOS`, the UI served at `/`, JSON 404 for unknown API routes, fail-fast without a built UI, `127.0.0.1:8765` binding |
+| `web/test_web_score.py` | `/api/score`: the three presets give the example's PE / SE / cluster counts, clusters and SE for typed answers, PE null unless every answer carries logprobs, 422 on empty or blank input, NLI failures surfaced with their message |
+| `web/test_web_ask.py` | `/api/ask`: detect vs chat, the judge called only by chat and only on escalation, chat refused (400) without `GCP_PROJECT_ID`, provider errors surfaced (500 with the message), the provider built once |
+| `web/test_web_results.py` | `/api/results` listing (runs and sweep directories), run report equal to `auroc_report`, sweep report equal to `comparison_report`, paths outside `eval/results/` refused (400), missing (404) and unscorable (422) files |
+| `web/test_web_static_build.py` | the Vite build is committed under `demo/web/static/` and every asset `index.html` loads exists |
+
+The playground UI has its own suite under `frontend/` (Vitest + React
+Testing Library, the API client mocked), covering the logger and API client,
+the Score tab (presets, cluster chips, the threshold slider flipping
+*escalate* with no request, the "needs token logprobs" state), the Ask tab
+(status strip, Chat disabled with its reason, progress, errors shown
+verbatim) and the Results tab (empty state, AUROC with CIs, comparison table).
 
 ## Running the suites
 
@@ -176,7 +188,14 @@ uv run pytest -x --lf                              # stop at first failure, reru
 
 `pyproject.toml` puts both `src/` and the repo root on the import path, so
 tests can import `hallucinations_math_lab`, `demo` and `eval` without
-installing them. `tests/integration/` is reserved for tests that need real
+installing them. The playground UI's checks run from `frontend/` (needs Node):
+
+```bash
+cd frontend && npm ci
+npm run typecheck && npm run lint && npm test   # tsc --noEmit, eslint, vitest run
+```
+
+`tests/integration/` is reserved for tests that need real
 services and is currently empty.
 
 ## GPU-gated tests
@@ -246,7 +265,13 @@ A red `test` job that fails during install usually means `uv.lock` is stale
    followed by `python -m eval.compute_auroc` completes. With two small models
    in `TARGET_MODEL_IDS`, the same with `--sweep` followed by
    `python -m eval.compare_models` prints one row per model.
-6. Every command in the README and the usage guides still matches the code.
+6. The web playground: `npm run build` in `frontend/` leaves no diff in
+   `demo/web/static/` (the committed build is current); `uv run python -m demo.web`
+   serves `http://127.0.0.1:8765`; on the Score tab the *paraphrased* preset
+   gives PE 0.600, SE 0.000, 1 cluster and *divergent* PE 0.400, SE 1.834,
+   7 clusters; moving the threshold slider sends no request; and
+   `curl "http://127.0.0.1:8765/api/results/report?path=../../etc/passwd"` returns 400.
+7. Every command in the README and the usage guides still matches the code.
 
 ## Bug triage and reporting
 

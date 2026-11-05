@@ -10,6 +10,7 @@
 - [How do I add a detector?](#how-do-i-add-a-detector)
 - [How do I add a model to the registry?](#how-do-i-add-a-model-to-the-registry)
 - [How do I plug in a different judge?](#how-do-i-plug-in-a-different-judge)
+- [How do I work on the web playground?](#how-do-i-work-on-the-web-playground)
 - [Coding conventions](#coding-conventions)
 - [Contribution workflow](#contribution-workflow)
 
@@ -41,6 +42,7 @@ Using the project (models, demo, benchmark) is documented in the
    | `judge` | `GeminiJudge` (`google-genai`) |
    | `eval` | the benchmark and scoring scripts (`datasets`, `scikit-learn`, `scipy`) |
    | `deploy` | `serving/vertex_deploy.py` (`google-cloud-aiplatform`), run by Terraform |
+   | `web` | the web playground server (`fastapi`, `uvicorn`) |
    | `dev` | `pytest`, `ruff`, `mypy` |
 3. `cp .env.example .env` — every setting is documented inline. List-valued
    settings are JSON (`ENABLED_DETECTORS=["predictive_entropy"]`).
@@ -74,6 +76,9 @@ demo/
   slm_provider.py          # VLLMOpenAIProvider, HFTransformersProvider, sweep builder
   google_auth.py           # refreshing Google access token for VLLM_AUTH=google
   model_registry.py        # per-model serving settings + vLLM flags per runner (Gemma 4 family)
+  web/                     # `python -m demo.web`: FastAPI app (app.py), presets, results reports,
+                           # and static/ — the committed UI build
+frontend/                  # the playground UI source: Vite, React, TypeScript, Tailwind, shadcn/ui
 eval/
   datasets/                # TriviaQA loader, adversarial prompts
   run_benchmark.py         # questions -> JSONL of scores and answers; --sweep: one file per model
@@ -161,6 +166,40 @@ reasoning) satisfies the `Judge` protocol. Pass it as `judge=` to
 reference; it calls Gemini on Vertex AI through `google-genai`, asks for JSON
 validated against `JudgeVerdict`, and imports the SDK lazily so the library
 loads without it.
+
+## How do I work on the web playground?
+
+The playground is two halves. `demo/web/` is a thin FastAPI layer: every
+endpoint calls existing code (`evaluate_responses`, `ResponseEvaluator`,
+`auroc_report`, `comparison_report`) and adds no scoring logic of its own.
+`create_app(...)` takes the NLI scorer, the provider and judge factories, the
+results directory and the settings as arguments, so the tests in
+`tests/unit/web/` pass fakes. `frontend/` is the UI; its production build is
+committed to `demo/web/static/` so users never need Node.
+
+The dev loop needs Node 22.12+ and two terminals:
+
+```bash
+uv run python -m demo.web                 # terminal 1: the API on 127.0.0.1:8765
+cd frontend && npm ci && npm run dev      # terminal 2: the UI with hot reload; /api is proxied to 8765
+```
+
+Before committing a UI change, run the checks and rebuild — the build is part
+of the commit:
+
+```bash
+cd frontend
+npm run typecheck && npm run lint && npm test   # tsc --noEmit, eslint, vitest run
+npm run build                                   # writes ../demo/web/static/
+```
+
+UI conventions: every API call goes through `src/lib/api.ts`, which logs
+start, success and failure with the structured `logger` (`src/lib/logger.ts`)
+and throws the backend's error message unchanged; components log mount,
+unmount and user actions with context; route paths, modes and limits live in
+`src/lib/constants.ts`. The Score tab's presets come from
+`examples/score_precollected_samples.py`, imported at runtime, so edit the
+example, not the UI, to change them.
 
 ## Coding conventions
 
