@@ -49,8 +49,13 @@ eval = [
     "scikit-learn>=1.5",
     "scipy>=1.13",
 ]
+# Local web playground (demo/web): the API and the committed, prebuilt UI.
+web = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
 all = [
-    "hallucinations-math-lab[demo,judge,eval,deploy]",
+    "hallucinations-math-lab[demo,judge,eval,deploy,web]",
 ]
 dev = [
     "pytest>=8.2",
