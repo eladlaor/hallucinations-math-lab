@@ -26,6 +26,7 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
   1. Finish the method blockers (B2), test-first.
   2. Fix B3.
   3. Get the owner's decision on B1.
+  4. Train and publish the first SEP probe (see Major, high priority).
 
   Verify with `uv sync --locked --all-extras && uv run pytest -q && uv run mypy && uvx ruff@0.17.0 check . && uvx ruff@0.17.0 format --check .`
 
@@ -114,6 +115,12 @@ destructive before it.
 
 ## Major
 
+- [ ] **HIGH PRIORITY — publish a trained SEP probe on Hugging Face.** No probe has
+  been trained or published, so nobody can try SEP without a GPU run first. Ship
+  the weights, a backbone-pinned config, the training record, held-out metrics,
+  a model card, and the calibration dataset. Plan:
+  [`PUBLISHED_SEP_PROBE.md`](PUBLISHED_SEP_PROBE.md). Do it right after the SEP
+  recipe decision and the B2 label fixes.
 - [ ] **Library settings leak into consumers.** `config.py` has no `env_prefix`, so a
   consumer's `MAX_TOKENS=4096` breaks `NLIScorer()`.
   - Use `env_prefix="HML_"`.
