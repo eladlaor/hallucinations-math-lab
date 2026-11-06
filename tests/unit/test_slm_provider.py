@@ -30,9 +30,9 @@ from demo.slm_provider import (
     VLLMOpenAIProvider,
     build_answer_message,
     build_default_provider,
-    build_sweep_providers,
     raw_token_logprobs,
     stop_token_ids,
+    sweep_model_ids,
 )
 
 EOS_ID = 0
@@ -262,7 +262,7 @@ def test_build_default_provider_rejects_unknown_kind(monkeypatch):
         get_settings.cache_clear()
 
 
-def test_build_sweep_providers_rejects_unregistered_model(monkeypatch):
+def test_sweep_model_ids_rejects_unregistered_model(monkeypatch):
     from hallucinations_math_lab.config import get_settings
 
     get_settings.cache_clear()
@@ -270,7 +270,7 @@ def test_build_sweep_providers_rejects_unregistered_model(monkeypatch):
     monkeypatch.setenv("TARGET_MODEL_IDS", '["google/gemma-4-E4B-it", "acme/not-a-real-model"]')
     try:
         with pytest.raises(ValueError, match="not in the model registry"):
-            build_sweep_providers()
+            sweep_model_ids()
     finally:
         get_settings.cache_clear()
 

@@ -1,7 +1,9 @@
 """Load a reproducible slice of the TriviaQA validation set.
 
-The split is shuffled once with a fixed seed; `--offset` and `--n` then pick
-a contiguous slice of that order. Slices that do not overlap in
+The split lists most questions once per evidence source (17,944 rows, 9,960
+questions), so it is first reduced to one row per question. That set is
+shuffled once with a fixed seed; `--offset` and `--n` then pick a contiguous
+slice of that order. Slices that do not overlap in
 `[offset, offset + n)` share no questions, which is how a SEP calibration set
 is kept apart from the benchmark it is evaluated on:
 
@@ -23,7 +25,8 @@ from datasets import load_dataset
 
 from hallucinations_math_lab.constants import RANDOM_SEED
 
-DATASET_NAME: Final[str] = "trivia_qa"
+# Owner-qualified: current `datasets` releases reject the legacy bare name "trivia_qa".
+DATASET_NAME: Final[str] = "mandarjoshi/trivia_qa"
 DATASET_CONFIG: Final[str] = "rc.nocontext"
 DATASET_SPLIT: Final[str] = "validation"
 
@@ -39,10 +42,22 @@ def slice_bounds(offset: int, n: int, dataset_size: int) -> range:
     return range(offset, offset + n)
 
 
+def unique_question_indices(question_ids: list[str]) -> list[int]:
+    """Row indices keeping only the first row of each question, in order."""
+    seen: set[str] = set()
+    keep: list[int] = []
+    for i, qid in enumerate(question_ids):
+        if qid not in seen:
+            seen.add(qid)
+            keep.append(i)
+    return keep
+
+
 def load_triviaqa_subset(
     n: int = 1000, offset: int = 0, seed: int = RANDOM_SEED, out: Path | None = None
 ) -> list[dict]:
     ds = load_dataset(DATASET_NAME, DATASET_CONFIG, split=DATASET_SPLIT)
+    ds = ds.select(unique_question_indices(ds["question_id"]))
     ds = ds.shuffle(seed=seed).select(slice_bounds(offset, n, len(ds)))
     rows = [
         {

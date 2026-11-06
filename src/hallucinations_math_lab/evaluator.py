@@ -21,6 +21,7 @@ SE is not in the configured detector list, `clusters` is None.
 """
 
 import logging
+from pathlib import Path
 
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY, AnswerSource, DetectorName
@@ -183,11 +184,11 @@ def evaluate_responses(
     )
 
 
-def _build_default_detectors(enabled: list[DetectorName]) -> list[Detector]:
+def _build_default_detectors(enabled: list[DetectorName], model_id: str) -> list[Detector]:
     """Map config-enabled detector names to concrete instances.
 
     Kept inside the evaluator module so the public surface stays small.
-    SEP construction lazily resolves the probe path from settings."""
+    `model_id` is the model being evaluated; it picks SEP's default probe."""
     # Lazy import — these detectors pull in torch / nli machinery.
     from hallucinations_math_lab.services.predictive_entropy import PredictiveEntropyDetector
     from hallucinations_math_lab.services.semantic_entropy import (
@@ -205,7 +206,9 @@ def _build_default_detectors(enabled: list[DetectorName]) -> list[Detector]:
         elif name == DetectorName.DISCRETE_SEMANTIC_ENTROPY:
             detectors.append(DiscreteSemanticEntropyDetector())
         elif name == DetectorName.SEMANTIC_ENTROPY_PROBE:
-            detectors.append(SemanticEntropyProbeDetector(probe_path=_resolve_sep_probe_path()))
+            detectors.append(
+                SemanticEntropyProbeDetector(probe_path=_resolve_sep_probe_path(model_id))
+            )
         else:
             raise ValueError(
                 f"Detector {name!s} is in ENABLED_DETECTORS but unknown to the evaluator."
@@ -213,19 +216,18 @@ def _build_default_detectors(enabled: list[DetectorName]) -> list[Detector]:
     return detectors
 
 
-def _resolve_sep_probe_path():
-    """Resolve the SEP probe path from settings, defaulting to a per-model
-    slug under data/probes/. The detector itself raises FileNotFoundError on
-    construction if the file does not exist — the misconfiguration surfaces
-    before the first request."""
-    import re
-    from pathlib import Path
+def _resolve_sep_probe_path(model_id: str) -> Path:
+    """SEP_PROBE_PATH if set, else the default probe for `model_id` — the model
+    actually being evaluated, which in a multi-model sweep is not
+    VLLM_MODEL_ID. The detector raises FileNotFoundError on construction if
+    the file does not exist, so the misconfiguration surfaces before the
+    first request."""
+    from hallucinations_math_lab.services.semantic_entropy_probe import default_probe_path
 
     settings = get_settings()
     if settings.sep_probe_path:
         return Path(settings.sep_probe_path)
-    slug = re.sub(r"[^a-z0-9]+", "-", settings.vllm_model_id.lower()).strip("-")
-    return Path("data") / "probes" / f"{slug}.pt"
+    return default_probe_path(model_id)
 
 
 class ResponseEvaluator:
@@ -260,7 +262,7 @@ class ResponseEvaluator:
         self._detectors: list[Detector] = (
             detectors
             if detectors is not None
-            else _build_default_detectors(settings.enabled_detectors)
+            else _build_default_detectors(settings.enabled_detectors, slm.model_id)
         )
         self._escalation_detector = (
             escalation_detector if escalation_detector is not None else settings.escalation_detector

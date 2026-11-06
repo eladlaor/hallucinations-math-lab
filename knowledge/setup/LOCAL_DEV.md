@@ -21,8 +21,7 @@ want a real small model to generate answers, either in-process
 uv sync --all-extras
 cp .env.example .env
 uv run pytest -q
-uv run python examples/score_precollected_samples.py              # string-equality NLI, instant
-uv run python examples/score_precollected_samples.py --nli deberta # real NLI on CPU, ~1.6 GB download once
+uv run python examples/score_precollected_samples.py   # DeBERTa NLI on CPU, ~1.6 GB download once
 ```
 
 ## With a local model

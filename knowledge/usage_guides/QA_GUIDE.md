@@ -62,14 +62,14 @@ cross-validated Pearson r (mean ± std), logged by
 
 **Status: not yet measured on real hardware.** The scripts are unit-tested
 on hand-built rows; no GPU benchmark run has been recorded. Run
-[the benchmark](USER_GUIDE.md#how-do-i-run-a-benchmark) to produce the
+[the benchmark](../../README.md#how-do-i-evaluate-one-model) to produce the
 numbers.
 
 ### Why AUROC and not accuracy at a threshold?
 
 AUROC scores the *ranking* across every possible threshold, so it measures
 the detector itself; the threshold is a separate, deployment-specific choice
-(see the [User Guide](USER_GUIDE.md#how-do-i-tune-the-threshold)).
+(see the [README](../../README.md#when-does-it-escalate-and-how-do-i-tune-it)).
 
 ### Why do the comparative criteria need a significance test as well as a bar?
 
@@ -110,8 +110,11 @@ benchmark.
 ### What keeps the SEP probe from being scored on its own training data?
 
 Two things. `load_triviaqa --offset` builds non-overlapping slices of one
-fixed shuffle, so the calibration and benchmark sets can be disjoint by
-construction. And `train_sep_probe` writes `<probe>.train_ids.json` next to
+fixed shuffle of the *unique* questions (TriviaQA lists most questions once
+per evidence source, so slicing rows would repeat questions across slices),
+so the calibration and benchmark sets are disjoint by construction; the
+default slices (questions 0–499 for calibration, 500–699 for the benchmark)
+are. And `train_sep_probe` writes `<probe>.train_ids.json` next to
 the probe; `run_benchmark` refuses to start if any benchmark question id is
 in it, or if a probe in use has no such file. A probe evaluated on the
 questions it was fit to would report an optimistic AUROC.
@@ -176,13 +179,26 @@ New features follow test-first: write the failing test that defines
 | `test_escalation.py` | `SingleDetector`, `AnyAbove`, `AllAbove` decisions and validation |
 | `test_evaluator.py` | `evaluate_responses` / `ResponseEvaluator` dispatch, prerequisites, judge escalation |
 | `test_model_registry.py` | registry entries, single local/deployed default, vLLM flags per runner (raw logprobs for generate, unnormalized last-token pooling for embed), tensor parallelism per GPU count, L4 context cap, every machine type able to carry its accelerator type and count |
-| `test_slm_provider.py` | vLLM provider against a mocked OpenAI client (sampling, chat-shaped embedding request, `VLLM_AUTH` modes), HF logprob extraction (raw distribution, first EOS kept, padding dropped), provider selection, sweep validation |
+| `test_slm_provider.py` | vLLM provider against a mocked OpenAI client (sampling, chat-shaped embedding request, `VLLM_AUTH` modes), HF logprob extraction (raw distribution, first EOS kept, padding dropped), provider selection, sweep model-id validation |
 | `test_google_auth.py` | `GoogleAccessToken` reuse and refresh with fake credentials, plus a contract test against the **real** OpenAI client (fake HTTP transport) proving the token is refreshed on chat and embedding requests |
 | `test_serving_launch.py` | the container's `vllm serve` argv: default runner, Vertex port, fail-fast on missing model, unknown runner or unregistered model |
 | `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end; run config (incl. answer instruction) recorded per row; judge answer recorded on every row; SEP probe leakage guard (overlap and missing provenance refused) |
 | `test_eval_criteria.py` | statistics primitives (rank AUROC vs sklearn, deterministic bootstrap, exact McNemar); whole-token SQuAD-normalized correctness; each criterion met only with its significance or effect-size condition; escalation vs random escalation at the same rate, tie-averaged top-k, accuracy-vs-rate curve; answer-length distribution; run comparability; cross-validated SEP Pearson r; slice bounds; probe provenance |
+| `test_model_comparison.py` | `run_benchmark --sweep` (one file per model, one model at a time, registry and per-model SEP probe checked before any scoring); SEP's default probe follows the evaluated model; `compare_models` accuracy and AUROC per model, refusing different questions, different sampling or a repeated model |
 | `test_calibrate_threshold.py` | τ by Youden's J under the strict `score > τ` rule, ties to the higher τ, dev/test overlap refused |
 | `test_gemini_judge.py` | `GeminiJudge` request shape and verdict parsing against a fake `google-genai` client |
+| `web/test_web_shell.py` | playground status (provider, model, judge readiness with its reason), presets equal the example's `SCENARIOS`, the UI served at `/`, JSON 404 for unknown API routes, fail-fast without a built UI, `127.0.0.1:8765` binding |
+| `web/test_web_score.py` | `/api/score`: the three presets give the example's PE / SE / cluster counts, clusters and SE for typed answers, PE null unless every answer carries logprobs, 422 on empty or blank input, NLI failures surfaced with their message |
+| `web/test_web_ask.py` | `/api/ask`: detect vs chat, the judge called only by chat and only on escalation, chat refused (400) without `GCP_PROJECT_ID`, provider errors surfaced (500 with the message), the provider built once |
+| `web/test_web_results.py` | `/api/results` listing (runs and sweep directories), run report equal to `auroc_report`, sweep report equal to `comparison_report`, paths outside `eval/results/` refused (400), missing (404) and unscorable (422) files |
+| `web/test_web_static_build.py` | the Vite build is committed under `demo/web/static/` and every asset `index.html` loads exists |
+
+The playground UI has its own suite under `frontend/` (Vitest + React
+Testing Library, the API client mocked), covering the logger and API client,
+the Score tab (presets, cluster chips, the threshold slider flipping
+*escalate* with no request, the "needs token logprobs" state), the Ask tab
+(status strip, Chat disabled with its reason, progress, errors shown
+verbatim) and the Results tab (empty state, AUROC with CIs, comparison table).
 
 ## Running the suites
 
@@ -195,7 +211,14 @@ uv run pytest -x --lf                              # stop at first failure, reru
 
 `pyproject.toml` puts both `src/` and the repo root on the import path, so
 tests can import `hallucinations_math_lab`, `demo` and `eval` without
-installing them. `tests/integration/` is reserved for tests that need real
+installing them. The playground UI's checks run from `frontend/` (needs Node):
+
+```bash
+cd frontend && npm ci
+npm run typecheck && npm run lint && npm test   # tsc --noEmit, eslint, vitest run
+```
+
+`tests/integration/` is reserved for tests that need real
 services and is currently empty.
 
 ## GPU-gated tests
@@ -225,7 +248,9 @@ Today this is one smoke test that loads the local default model through
   forgetting the clear leaks configuration between tests.
 - Temporary files use pytest's `tmp_path`. Nothing writes into the repo.
 - Real data for manual runs: `eval/datasets/adversarial.jsonl` (committed)
-  and TriviaQA subsets generated by `eval/datasets/load_triviaqa.py`.
+  and TriviaQA slices built by `eval/datasets/load_triviaqa.py` — the two
+  defaults are built on first use into `data/questions/`
+  (`eval/datasets/default_question_sets.py`).
   Benchmark output goes under `eval/results/` and probes under `data/`,
   both gitignored.
 
@@ -257,12 +282,19 @@ A red `test` job that fails during install usually means `uv.lock` is stale
 3. `uv build` succeeds and the wheel contains only `hallucinations_math_lab/`
    plus `LICENSE`.
 4. Both playground scripts run and print the tables shown in the README:
-   `examples/score_precollected_samples.py` (with and without
-   `--nli deberta`) and `examples/custom_detector.py`.
+   `examples/score_precollected_samples.py` and `examples/custom_detector.py`.
 5. With a model available: `python -m demo.cli detect "Who wrote 1984?"`
    returns SE near 0, and a 10-question `python -m eval.run_benchmark --limit 10 --no-judge`
-   followed by `python -m eval.compute_auroc` completes.
-6. Every command in the README and the usage guides still matches the code.
+   followed by `python -m eval.compute_auroc` completes. With two small models
+   in `TARGET_MODEL_IDS`, the same with `--sweep` followed by
+   `python -m eval.compare_models` prints one row per model.
+6. The web playground: `npm run build` in `frontend/` leaves no diff in
+   `demo/web/static/` (the committed build is current); `uv run python -m demo.web`
+   serves `http://127.0.0.1:8765`; on the Score tab the *paraphrased* preset
+   gives PE 0.600, SE 0.000, 1 cluster and *divergent* PE 0.400, SE 1.834,
+   7 clusters; moving the threshold slider sends no request; and
+   `curl "http://127.0.0.1:8765/api/results/report?path=../../etc/passwd"` returns 400.
+7. Every command in the README and the usage guides still matches the code.
 
 ## Bug triage and reporting
 

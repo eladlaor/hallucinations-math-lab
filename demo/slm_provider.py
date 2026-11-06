@@ -502,7 +502,7 @@ def build_default_provider(model_id: str | None = None) -> SLMProvider:
     When `model_id` is None the active model from config.vllm_model_id is
     used (single-model commands like `python -m demo.cli chat`). When provided, the same
     config.slm_provider kind is built but bound to the requested model id —
-    this is the entry point the evaluation sweep uses to iterate over
+    this is how `eval.run_benchmark --sweep` builds each model in
     config.target_model_ids.
 
     For VLLMOpenAIProvider, the per-model base_url override (if any) is
@@ -523,12 +523,12 @@ def build_default_provider(model_id: str | None = None) -> SLMProvider:
     )
 
 
-def build_sweep_providers() -> list[SLMProvider]:
-    """Construct one SLMProvider per id in config.target_model_ids.
+def sweep_model_ids() -> list[str]:
+    """The ids in config.target_model_ids, after checking each is in the registry.
 
-    The evaluation harness iterates the returned list, running the full
-    detector pipeline once per provider so results are directly comparable
-    across the target SLMs.
+    Returns ids rather than providers so the sweep can build one provider at
+    a time (`build_default_provider(model_id=...)`) and let each model's
+    weights go before the next one loads.
     """
     settings = get_settings()
     known = set(list_model_ids())
@@ -538,4 +538,4 @@ def build_sweep_providers() -> list[SLMProvider]:
             f"TARGET_MODEL_IDS contains ids not in the model registry: {unknown!r}. "
             f"Known: {sorted(known)!r}. Add an entry in demo/model_registry.py first."
         )
-    return [build_default_provider(model_id=mid) for mid in settings.target_model_ids]
+    return list(settings.target_model_ids)

@@ -1,7 +1,9 @@
 """Run the configured detectors over a question set and write one JSONL row per question.
 
 Input: JSONL with a `question` field per line (eval/datasets/load_triviaqa.py
-output, or eval/datasets/adversarial.jsonl). Ground-truth fields
+output, or eval/datasets/adversarial.jsonl). Without `--in`, the default
+200-question TriviaQA slice is used, downloaded on first use
+(eval/datasets/default_question_sets.py). Ground-truth fields
 (`ground_truth_aliases`, `ground_truth_value`, `expected_behavior`) are copied
 through untouched so compute_auroc.py can label each row.
 
@@ -24,14 +26,24 @@ When a Semantic Entropy Probe is among the detectors, the run fails before
 scoring anything if a question was in the probe's training set (see
 eval/sep_probe_provenance.py).
 
-Downstream: compute_auroc.py, escalation_uplift.py, adversarial_separation.py.
+Two modes:
+  - one model (default): VLLM_MODEL_ID, `--out` is a results file.
+  - `--sweep`: every id in TARGET_MODEL_IDS, one after another, `--out` is a
+    directory that receives `<model slug>.jsonl` per model. Each model is
+    built, run and released before the next loads. Every model and its SEP
+    probe are checked before the first question is scored.
+
+Downstream: compute_auroc.py, escalation_uplift.py, adversarial_separation.py,
+compare_models.py (for a sweep).
 """
 
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -45,12 +57,26 @@ from eval.benchmark_results import (
     SAMPLE_TEMPERATURE_FIELD,
     RunConfig,
 )
+from eval.datasets.default_question_sets import (
+    BENCHMARK_SLICE,
+    QuestionLoader,
+    QuestionSlice,
+    ensure_question_set,
+)
 from eval.sep_probe_provenance import assert_disjoint
 from hallucinations_math_lab import ResponseEvaluator
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.constants import LOG_EXTRA_KEY, AnswerSource
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, AnswerSource, DetectorName
 from hallucinations_math_lab.custom_types.domain_types import DetectionResult
-from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
+from hallucinations_math_lab.services.semantic_entropy_probe import (
+    SemanticEntropyProbeDetector,
+    default_probe_path,
+    model_slug,
+)
+
+RESULTS_SUFFIX = ".jsonl"
+
+EvaluatorFactory = Callable[[str], ResponseEvaluator]
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +119,14 @@ def _judge_answer(evaluator: ResponseEvaluator, prompt: str, result: DetectionRe
     return answer
 
 
+def _judge_or_none(judge: bool):
+    if not judge:
+        return None
+    from hallucinations_math_lab.judges import GeminiJudge
+
+    return GeminiJudge()
+
+
 def run(
     in_path: Path,
     out_path: Path,
@@ -103,12 +137,7 @@ def run(
     """Score every question in `in_path`. Pass `evaluator` to bring your own
     SamplingProvider, detectors or judge; otherwise one is built from settings."""
     if evaluator is None:
-        judge_impl = None
-        if judge:
-            from hallucinations_math_lab.judges import GeminiJudge
-
-            judge_impl = GeminiJudge()
-        evaluator = ResponseEvaluator(judge=judge_impl)
+        evaluator = ResponseEvaluator(judge=_judge_or_none(judge))
 
     questions = _read_questions(in_path, limit)
     guard_probe_leakage(evaluator, questions)
@@ -179,12 +208,116 @@ def run(
     )
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+def _preflight_sweep_probes(model_ids: list[str], questions: list[dict[str, Any]]) -> None:
+    """With SEP enabled, every model needs its own probe that never saw these questions."""
+    settings = get_settings()
+    if DetectorName.SEMANTIC_ENTROPY_PROBE not in settings.enabled_detectors:
+        return
+    if settings.sep_probe_path:
+        raise ValueError(
+            f"SEP_PROBE_PATH={settings.sep_probe_path!r} names one probe, but a sweep runs "
+            f"{len(model_ids)} models and each needs its own. Unset SEP_PROBE_PATH so every "
+            "model uses data/probes/<model slug>.pt."
+        )
+    ids = [str(q[ID_FIELD]) for q in questions if q.get(ID_FIELD) is not None]
+    for model_id in model_ids:
+        probe_path = default_probe_path(model_id)
+        if not probe_path.is_file():
+            raise FileNotFoundError(
+                f"No SEP probe for {model_id} at {probe_path}. Train one with "
+                f"VLLM_MODEL_ID={model_id} uv run python -m eval.train_sep_probe, or drop "
+                "semantic_entropy_probe from ENABLED_DETECTORS."
+            )
+        assert_disjoint(probe_path, ids)
+
+
+def run_sweep(
+    in_path: Path,
+    out_dir: Path,
+    judge: bool = True,
+    limit: int | None = None,
+    evaluator_factory: EvaluatorFactory | None = None,
+) -> list[Path]:
+    """Run the benchmark once per model in TARGET_MODEL_IDS; return the results files.
+
+    `evaluator_factory(model_id)` builds the evaluator for one model; the
+    default wraps `build_default_provider(model_id=...)`. Only one evaluator
+    is alive at a time, so a local sweep holds one model's weights at once.
+    """
+    from demo.slm_provider import build_default_provider, sweep_model_ids
+
+    model_ids = sweep_model_ids()
+    _preflight_sweep_probes(model_ids, _read_questions(in_path, limit))
+    if evaluator_factory is None:
+        judge_impl = _judge_or_none(judge)
+
+        def evaluator_factory(model_id: str) -> ResponseEvaluator:
+            return ResponseEvaluator(
+                slm=build_default_provider(model_id=model_id), judge=judge_impl
+            )
+
+    out_paths: list[Path] = []
+    for position, model_id in enumerate(model_ids, start=1):
+        out_path = out_dir / f"{model_slug(model_id)}{RESULTS_SUFFIX}"
+        logger.info(
+            "Sweep: starting model.",
+            extra={
+                LOG_EXTRA_KEY: {
+                    "model_id": model_id,
+                    "position": position,
+                    "n_models": len(model_ids),
+                    "out_path": str(out_path),
+                }
+            },
+        )
+        evaluator = evaluator_factory(model_id)
+        run(in_path, out_path, judge=judge, limit=limit, evaluator=evaluator)
+        out_paths.append(out_path)
+        del evaluator
+        gc.collect()
+    return out_paths
+
+
+def resolve_questions_path(
+    in_path: Path | None,
+    loader: QuestionLoader | None = None,
+    slice_: QuestionSlice = BENCHMARK_SLICE,
+) -> Path:
+    """The given question file, or the default benchmark slice (built on first use)."""
+    return in_path if in_path is not None else ensure_question_set(slice_, loader=loader)
+
+
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Run the detectors over a question set.")
-    p.add_argument("--in", dest="in_path", type=Path, required=True)
-    p.add_argument("--out", dest="out_path", type=Path, required=True)
+    p.add_argument(
+        "--in",
+        dest="in_path",
+        type=Path,
+        default=None,
+        help=f"Question JSONL; default: {BENCHMARK_SLICE.path}, downloaded on first use.",
+    )
+    p.add_argument(
+        "--out",
+        dest="out_path",
+        type=Path,
+        required=True,
+        help="Results file; with --sweep, a directory for one file per model.",
+    )
     p.add_argument("--no-judge", action="store_true", help="Skip Gemini escalation.")
     p.add_argument("--limit", type=int, default=None, help="Stop after this many rows.")
-    args = p.parse_args()
-    run(args.in_path, args.out_path, judge=not args.no_judge, limit=args.limit)
+    p.add_argument(
+        "--sweep",
+        action="store_true",
+        help="Run every model in TARGET_MODEL_IDS instead of only VLLM_MODEL_ID.",
+    )
+    return p
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    args = build_parser().parse_args()
+    in_path = resolve_questions_path(args.in_path)
+    if args.sweep:
+        run_sweep(in_path, args.out_path, judge=not args.no_judge, limit=args.limit)
+    else:
+        run(in_path, args.out_path, judge=not args.no_judge, limit=args.limit)

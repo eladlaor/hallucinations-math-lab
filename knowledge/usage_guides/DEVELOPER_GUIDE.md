@@ -10,6 +10,7 @@
 - [How do I add a detector?](#how-do-i-add-a-detector)
 - [How do I add a model to the registry?](#how-do-i-add-a-model-to-the-registry)
 - [How do I plug in a different judge?](#how-do-i-plug-in-a-different-judge)
+- [How do I work on the web playground?](#how-do-i-work-on-the-web-playground)
 - [Coding conventions](#coding-conventions)
 - [Contribution workflow](#contribution-workflow)
 
@@ -24,7 +25,9 @@ uv run python examples/score_precollected_samples.py
 If these pass you have a working setup — no GPU, model or cloud account
 needed. The library lives in `src/hallucinations_math_lab/` and must never
 import `demo/`. New detectors implement the `Detector` protocol and are
-picked up by the benchmark and AUROC scripts automatically.
+picked up by the benchmark, AUROC and comparison scripts automatically.
+Using the project (models, demo, benchmark) is documented in the
+[README](../../README.md).
 
 ## Local setup
 
@@ -39,6 +42,7 @@ picked up by the benchmark and AUROC scripts automatically.
    | `judge` | `GeminiJudge` (`google-genai`) |
    | `eval` | the benchmark and scoring scripts (`datasets`, `scikit-learn`, `scipy`) |
    | `deploy` | `serving/vertex_deploy.py` (`google-cloud-aiplatform`), run by Terraform |
+   | `web` | the web playground server (`fastapi`, `uvicorn`) |
    | `dev` | `pytest`, `ruff`, `mypy` |
 3. `cp .env.example .env` — every setting is documented inline. List-valued
    settings are JSON (`ENABLED_DETECTORS=["predictive_entropy"]`).
@@ -72,9 +76,13 @@ demo/
   slm_provider.py          # VLLMOpenAIProvider, HFTransformersProvider, sweep builder
   google_auth.py           # refreshing Google access token for VLLM_AUTH=google
   model_registry.py        # per-model serving settings + vLLM flags per runner (Gemma 4 family)
+  web/                     # `python -m demo.web`: FastAPI app (app.py), presets, results reports,
+                           # and static/ — the committed UI build
+frontend/                  # the playground UI source: Vite, React, TypeScript, Tailwind, shadcn/ui
 eval/
   datasets/                # TriviaQA loader, adversarial prompts
-  run_benchmark.py         # questions -> JSONL of scores and answers
+  run_benchmark.py         # questions -> JSONL of scores and answers; --sweep: one file per model
+  compare_models.py        # several models' runs side by side: accuracy + AUROC per detector
   benchmark_results.py     # shared row schema, loading, correctness rule
   compute_auroc.py         # criteria 1-2: per-detector AUROC, SE-PE gap
   escalation_uplift.py     # criterion 3: accuracy gained by escalating
@@ -93,8 +101,10 @@ terraform/                 # see the DevOps Guide
 
 ## Why is the library separate from the demo?
 
-So that someone who already has an LLM stack can `pip install` the scorers
-without pulling in vLLM clients, Gemma settings or Google Cloud. The wheel
+So that someone who already has an LLM stack can install the scorers
+without pulling in vLLM clients, Gemma settings or Google Cloud. The package
+is not on PyPI; install it from Git
+(`uv add git+https://github.com/eladlaor/hallucinations-math-lab`). The wheel
 ships only `src/hallucinations_math_lab/`; `demo/`, `eval/` and `examples/`
 exist only in the repository.
 
@@ -107,7 +117,8 @@ makes sense inside the repo.
 
 1. `ResponseEvaluator.evaluate(prompt)` asks the provider for N samples (if
    any detector `requires_samples`), a greedy answer, and a pooled hidden
-   state (if any detector `requires_hidden_state`).
+   state — the last layer's vector at the final prompt token — (if any
+   detector `requires_hidden_state`).
 2. It calls `evaluate_responses(...)`, which validates that every detector's
    inputs are present (fail fast), builds one `DetectionContext`, and calls
    each detector's `score(ctx)`.
@@ -141,10 +152,11 @@ accelerator type and count). `vllm_flags(runner)` turns the entry into
 `vllm serve` flags for the `generate` or `embed` runner, including
 `--tensor-parallel-size` equal to the accelerator count. Size
 `max_model_len` to what the GPU's memory can hold next to the weights, not to
-the model's maximum context, or vLLM refuses to start. Exactly one entry may be `is_local_default` and one
-`is_deployed_default`; `tests/unit/test_model_registry.py` enforces this. A
+the model's maximum context, or vLLM refuses to start. Exactly one entry may
+be `is_local_default` and one `is_deployed_default`; `tests/unit/test_model_registry.py` enforces this. A
 model must be in the registry before it can appear in `VLLM_MODEL_ID` or
-`TARGET_MODEL_IDS`.
+`TARGET_MODEL_IDS`. Its SEP probe and its sweep results file are named by
+`model_slug(model_id)` (`services/semantic_entropy_probe.py`).
 
 ## How do I plug in a different judge?
 
@@ -154,6 +166,40 @@ reasoning) satisfies the `Judge` protocol. Pass it as `judge=` to
 reference; it calls Gemini on Vertex AI through `google-genai`, asks for JSON
 validated against `JudgeVerdict`, and imports the SDK lazily so the library
 loads without it.
+
+## How do I work on the web playground?
+
+The playground is two halves. `demo/web/` is a thin FastAPI layer: every
+endpoint calls existing code (`evaluate_responses`, `ResponseEvaluator`,
+`auroc_report`, `comparison_report`) and adds no scoring logic of its own.
+`create_app(...)` takes the NLI scorer, the provider and judge factories, the
+results directory and the settings as arguments, so the tests in
+`tests/unit/web/` pass fakes. `frontend/` is the UI; its production build is
+committed to `demo/web/static/` so users never need Node.
+
+The dev loop needs Node 22.12+ and two terminals:
+
+```bash
+uv run python -m demo.web                 # terminal 1: the API on 127.0.0.1:8765
+cd frontend && npm ci && npm run dev      # terminal 2: the UI with hot reload; /api is proxied to 8765
+```
+
+Before committing a UI change, run the checks and rebuild — the build is part
+of the commit:
+
+```bash
+cd frontend
+npm run typecheck && npm run lint && npm test   # tsc --noEmit, eslint, vitest run
+npm run build                                   # writes ../demo/web/static/
+```
+
+UI conventions: every API call goes through `src/lib/api.ts`, which logs
+start, success and failure with the structured `logger` (`src/lib/logger.ts`)
+and throws the backend's error message unchanged; components log mount,
+unmount and user actions with context; route paths, modes and limits live in
+`src/lib/constants.ts`. The Score tab's presets come from
+`examples/score_precollected_samples.py`, imported at runtime, so edit the
+example, not the UI, to change them.
 
 ## Coding conventions
 

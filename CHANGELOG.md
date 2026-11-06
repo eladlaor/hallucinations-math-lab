@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Local web playground (`uv run python -m demo.web`, http://127.0.0.1:8765): a
+  FastAPI app with a committed React UI, one tab per way in — score answers
+  with their meaning clusters, PE and a client-side escalation threshold; ask
+  the model (`detect` / `chat`); and view benchmark AUROCs with CIs or a
+  model comparison. New `web` optional extra (`fastapi`, `uvicorn`), included
+  in `all`.
+- README hardware tiers: what each model needs in GPU memory, Mac memory,
+  download and disk, and why.
+- `python -m demo.check_hardware` (Linux, macOS): measures memory, GPU, free
+  disk and download speed, and recommends the tier and `VLLM_MODEL_ID`;
+  `--json` for agents.
+- Model comparison: `eval.run_benchmark --sweep` runs the question set once per
+  model in `TARGET_MODEL_IDS` (one results file per model, one model loaded at a
+  time, registry and per-model SEP probes checked before any scoring), and
+  `eval.compare_models` reports accuracy and per-detector AUROC with CIs side by
+  side, refusing runs over different questions or sampling settings.
 - `eval/calibrate_threshold.py`: chooses `SE_THRESHOLD` on a dev slice by
   Youden's J and refuses a dev slice that overlaps the test slice. The
   default `1.0` is now documented as a placeholder.
@@ -30,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   active benchmark runs.
 - `examples/langrag_integration.py` reference integration.
 - Runnable no-GPU playground scripts: `examples/score_precollected_samples.py`
-  (PE and SE on hand-written samples, string-match vs. DeBERTa NLI) and
+  (PE and SE on hand-written samples, with DeBERTa NLI) and
   `examples/custom_detector.py` (a user-defined detector next to PE and SE).
 - Measurable research success criteria (QA Guide) with a script for each:
   `eval/compute_auroc.py` now reports the SE AUROC and SE-PE gap,
@@ -64,6 +80,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the real OpenAI client) and the HF logprob extraction.
 
 ### Changed
+- `eval.run_benchmark --in` and `eval.train_sep_probe --calibration-set` are
+  optional: without them, fixed non-overlapping TriviaQA slices (200
+  benchmark, 500 calibration questions) are downloaded once to
+  `data/questions/`.
+- The README is now the user guide; `knowledge/usage_guides/USER_GUIDE.md` is
+  folded into it, and it states up front which model is under test and how to
+  run one model or compare several.
+- `demo.slm_provider.build_sweep_providers` is replaced by `sweep_model_ids`,
+  which validates the ids so the sweep can build one provider at a time.
+- The playground's Score answers tab reports which SE estimator ran
+  (`se_estimator`): likelihood-weighted when every answer carries token
+  logprobs, discrete for typed or edited answers.
 - `semantic_entropy` now uses Farquhar et al.'s likelihood-weighted
   estimator: each cluster's probability is its samples' share of
   length-normalized sequence likelihood. The previous count-based estimator
@@ -71,6 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without finite token logprobs.
 - **Breaking:** the import package is renamed from `taste` to
   `hallucinations_math_lab`, matching the `hallucinations-math-lab` distribution.
+- The Terraform `name_prefix` default changes from `taste` to `hml`, renaming the
+  service account, Artifact Registry repo and Vertex display names.
 - **Breaking:** `GeminiJudge` uses the Google Gen AI SDK (`google-genai`)
   with schema-validated output instead of the deprecated
   `vertexai.generative_models`; the `judge` extra changed accordingly.
@@ -136,6 +166,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serving/deploy_vertex.sh` — replaced by the Terraform path.
 
 ### Fixed
+- `eval.datasets.load_triviaqa` loads `mandarjoshi/trivia_qa`; the bare
+  `trivia_qa` name is rejected by current `datasets` releases.
+- TriviaQA slices are cut from unique questions: the validation split repeats
+  most questions once per evidence source, which put the same question in
+  both the calibration and benchmark slices and twice within a slice.
+- The default SEP probe is resolved from the model being evaluated, not from
+  `VLLM_MODEL_ID`, so a provider built for another model no longer loads the
+  wrong model's probe.
 - Semantic Entropy added `1e-12` inside the log, so one cluster scored
   slightly below zero; one cluster now scores exactly 0.
 - Answer correctness used a raw substring match, so alias "2" matched "It was

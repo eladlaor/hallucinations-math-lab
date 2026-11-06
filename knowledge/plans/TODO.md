@@ -26,6 +26,7 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
   1. Finish the method blockers (B2), test-first.
   2. Fix B3.
   3. Get the owner's decision on B1.
+  4. Train and publish the first SEP probe (see Major, high priority).
 
   Verify with `uv sync --locked --all-extras && uv run pytest -q && uv run mypy && uvx ruff@0.17.0 check . && uvx ruff@0.17.0 format --check .`
 
@@ -93,7 +94,9 @@ destructive before it.
   - It uses unstandardized Ridge regression on raw last-layer SE, reported as Pearson
     r. The paper trains a logistic classifier on binarized SE, with a layer sweep,
     and reports AUROC.
-  - Implement the paper's recipe or drop the claim, and give SEP its own threshold.
+  - **Decided (2026-11-05): implement the paper's recipe.** Binarize SE at a
+    best-split threshold, fit logistic regression, sweep layers (and the token
+    position), report AUROC, and give SEP its own escalation threshold.
 - [x] **τ=1.0 is called "calibrated", but nothing was measured.** Done 2026-11-03: labeled a placeholder; `eval/calibrate_threshold.py`; bars justified in `eval/success_criteria.py`. Running the calibration needs a real dev run.
   - Label it a placeholder and calibrate it on a disjoint dev slice.
   - Justify each bar in `eval/success_criteria.py`.
@@ -114,6 +117,12 @@ destructive before it.
 
 ## Major
 
+- [ ] **HIGH PRIORITY — publish a trained SEP probe on Hugging Face.** No probe has
+  been trained or published, so nobody can try SEP without a GPU run first. Ship
+  the weights, a backbone-pinned config, the training record, held-out metrics,
+  a model card, and the calibration dataset. Plan:
+  [`PUBLISHED_SEP_PROBE.md`](PUBLISHED_SEP_PROBE.md). Do it right after switching
+  SEP to the classifier recipe and the B2 label fixes.
 - [ ] **Library settings leak into consumers.** `config.py` has no `env_prefix`, so a
   consumer's `MAX_TOKENS=4096` breaks `NLIScorer()`.
   - Use `env_prefix="HML_"`.
@@ -153,8 +162,8 @@ destructive before it.
   - Python 3.14 is excluded.
   - Add `py.typed`, `[project.urls]` and classifiers.
   - Fix the README links so they work on PyPI.
-- [ ] **Leftover old names.** The Terraform `name_prefix` defaults to `"taste"`, and
-  `detector_protocol.py` mentions `DetectorAgent`.
+- [x] **Leftover old names.** The Terraform `name_prefix` now defaults to `"hml"`;
+  `detector_protocol.py` no longer mentions `DetectorAgent`.
 - [ ] **Missing OSS files.**
   - CONTRIBUTING, SECURITY.md, CODE_OF_CONDUCT, issue and PR templates,
     `CITATION.cff`, badges.
@@ -195,7 +204,6 @@ destructive before it.
 | Decision | What it blocks |
 |---|---|
 | History cleanup: `filter-repo` plus force-push, or a fresh single-commit repo. | Going public (B1). Needs explicit owner approval. |
-| SEP: the Kossen recipe, or keep ridge regression and drop the claim. | The SEP docs and criterion 1. |
 | Correctness labeling: normalized token match, or an LLM judge. | Every AUROC number. |
 | Version: 0.2.0, or a re-cut clean 0.1.0. | The CHANGELOG release block and tag. |
 | Whether to run a real L4 benchmark before going public. | The README results story. |
@@ -215,6 +223,7 @@ destructive before it.
 | 2026-10 | Ruff pinned to 0.17.0 in CI. | An unpinned ruff broke CI. |
 | 2026-10-19 | SE conditions NLI on the question. | Matches the reference implementation; see [Recently done](#recently-done). |
 | 2026-10-19 | `SESSION_HANDOFF.md` replaced by this file. | One work queue instead of a narrative handoff. |
+| 2026-11-05 | SEP is a linear classifier (Kossen et al. recipe), not ridge regression. | The paper's standard practice; makes our numbers comparable to it. Unblocks [`PUBLISHED_SEP_PROBE.md`](PUBLISHED_SEP_PROBE.md). |
 
 ## Traps that will bite
 

@@ -702,13 +702,12 @@ the math work:
 uv run pytest tests/unit/test_semantic_entropy.py -v
 ```
 
-To watch string matching and a real NLI model cluster the *same* samples
-differently — the paraphrase failure from Step 3 — run both modes of the
-playground script:
+To watch the NLI model collapse ten paraphrases into one meaning cluster —
+the case from Step 3 — while PE still reads their wording as uncertainty, run
+the playground script:
 
 ```bash
 uv run python examples/score_precollected_samples.py
-uv run python examples/score_precollected_samples.py --nli deberta
 ```
 
 To compute the reference table above by hand:

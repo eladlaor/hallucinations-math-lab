@@ -1,4 +1,4 @@
-"""Playground: score hand-written sample sets with PE and SE — no GPU, no LLM.
+"""Playground: score hand-written sample sets with PE and SE — no GPU, no answer-generating LLM.
 
 Three toy prompts, each with N=10 "sampled" answers and made-up token
 logprobs, chosen to expose where the detectors agree and where they split:
@@ -9,22 +9,17 @@ logprobs, chosen to expose where the detectors agree and where they split:
 
 Run:
     uv run python examples/score_precollected_samples.py
-    uv run python examples/score_precollected_samples.py --nli deberta
 
-`--nli exact` (default) clusters by normalized string equality — instant, no
-download, but it cannot see that two paraphrases mean the same thing, so the
-"paraphrased" row gets a high SE. `--nli deberta` uses the real bidirectional
-NLI model (microsoft/deberta-large-mnli, ~1.6 GB download on first run, CPU
-is fine) and collapses those paraphrases into one meaning cluster. Comparing
-the two runs is the whole point of Semantic Entropy in one table.
+SE groups the samples by meaning with the NLI model the library uses by
+default (microsoft/deberta-large-mnli, ~1.6 GB download on first run; CPU is
+fine), so the paraphrases land in one cluster while PE still reads their
+varied wording as uncertainty.
 """
 
-import argparse
 import logging
 
 from hallucinations_math_lab import (
     DetectorName,
-    EntailmentScorer,
     NLIScorer,
     PredictiveEntropyDetector,
     Sample,
@@ -34,21 +29,7 @@ from hallucinations_math_lab import (
     evaluate_responses,
 )
 
-NLI_EXACT = "exact"
-NLI_DEBERTA = "deberta"
 SE_THRESHOLD_NATS = 1.0
-
-
-class ExactMatchNLI:
-    """Stand-in `EntailmentScorer`: two answers "entail each other" iff they are
-    the same string after case/whitespace/punctuation normalization."""
-
-    def bidirectional_entails(self, a: str, b: str) -> bool:
-        return _normalize(a) == _normalize(b)
-
-
-def _normalize(text: str) -> str:
-    return "".join(ch for ch in text.lower() if ch.isalnum() or ch.isspace()).strip()
 
 
 def _sample(text: str, logprob: float) -> Sample:
@@ -104,14 +85,9 @@ SCENARIOS: dict[str, tuple[str, list[Sample]]] = {
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--nli", choices=[NLI_EXACT, NLI_DEBERTA], default=NLI_EXACT)
-    args = parser.parse_args()
+    detectors = [PredictiveEntropyDetector(), SemanticEntropyDetector(scorer=NLIScorer())]
 
-    scorer: EntailmentScorer = ExactMatchNLI() if args.nli == NLI_EXACT else NLIScorer()
-    detectors = [PredictiveEntropyDetector(), SemanticEntropyDetector(scorer=scorer)]
-
-    print(f"NLI = {args.nli}   escalation: SE > {SE_THRESHOLD_NATS} nats\n")
+    print(f"escalation: SE > {SE_THRESHOLD_NATS} nats\n")
     print(f"{'scenario':<12} {'PE':>6} {'SE':>6} {'clusters':>9}  escalate")
     for label, (prompt, samples) in SCENARIOS.items():
         result = evaluate_responses(
