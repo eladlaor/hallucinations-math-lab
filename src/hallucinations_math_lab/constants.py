@@ -87,6 +87,29 @@ SEP_PROBE_SUFFIX: Final[str] = ".pt"
 MODEL_SLUG_PATTERN: Final[str] = r"[^a-z0-9]+"
 MODEL_SLUG_SEPARATOR: Final[str] = "-"
 
+# SEP classifier: the paper notebook's bare LogisticRegression() (Kossen et al.
+# 2024, train-latent-probe.ipynb). l1_ratio=0 is pure L2, scikit-learn >= 1.8's
+# spelling of penalty="l2".
+SEP_LOGREG_C: Final[float] = 1.0
+SEP_LOGREG_L1_RATIO: Final[float] = 0.0
+SEP_LOGREG_SOLVER: Final[str] = "lbfgs"
+SEP_LOGREG_MAX_ITER: Final[int] = 100
+# Pre-registered fallback when lbfgs does not converge at SEP_LOGREG_MAX_ITER (deviation D10).
+SEP_LOGREG_FALLBACK_MAX_ITER: Final[int] = 1000
+
+
+class SEPStandardization(StrEnum):
+    """Feature scaling inside a SEP probe.
+
+    NONE: the paper's setting; the probe reads raw hidden states.
+    FOLDED_INTO_WEIGHTS: a standard scaler fitted on the training rows, folded
+    into the linear weights so the probe is still one linear layer (deviation D12).
+    """
+
+    NONE = "none"
+    FOLDED_INTO_WEIGHTS = "folded_into_weights"
+
+
 # Reproducibility
 RANDOM_SEED: Final[int] = 42
 

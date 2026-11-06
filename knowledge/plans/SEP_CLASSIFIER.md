@@ -187,6 +187,11 @@ soft labels, and the 55–80% quantile filtering (App. A, App. B.3).
 random_state=RANDOM_SEED)`, with **no** standardization. That is the notebook's bare
 `LogisticRegression()` (cells 14 and 32; a grep finds no scaler; verified).
 
+*Implementation note (item 3):* scikit-learn 1.8 deprecated `penalty` (removed in 1.10), so
+the code spells pure L2 as `l1_ratio=0.0` and leaves `penalty` at its default. The fit is
+identical (verified: max |Δcoef| = 0). The `scikit-learn` floor in the `eval` extra rises to
+`>=1.8`, where `l1_ratio=0` means L2. `probe_config.classifier.penalty` still records `"l2"`.
+
 **The misconception to head off:** that we *know* this fails on Gemma's large unscaled
 hidden states. We don't; it has never been run. So we start with the paper's settings and use
 a **pre-registered fallback**:
@@ -196,13 +201,16 @@ a **pre-registered fallback**:
 2. Fallback step 1: refit **on CPU** from the stored dataset with `--max-iter 1000`. This needs
    no new GPU run. It is recorded in `classifier.max_iter` and as deviation D10.
 3. Fallback step 2, only if step 1 still fails: `--standardize`. The scaler is **folded into the
-   linear weights** (w' = w/σ, b' = b − Σ w·μ/σ; a column with σ = 0 gets w' = 0), so the
-   artifact stays one linear layer. It is recorded as D12.
+   linear weights** (w' = w/σ, b' = b − Σ w·μ/σ), so the artifact stays one linear layer. It
+   is recorded as D12. A column with σ = 0 scales to near-zeros rather than exact zeros, since
+   its mean carries rounding error; the L2 fit leaves its w' at (near-)0, and no mask is applied.
 
 The same `--standardize` flag can also be run as a **reported ablation** on the CPU refit
 (`metrics.json["ablations"]`). It is never the default.
 
-Constants (in `constants.py`): `SEP_LOGREG_C = 1.0`, `SEP_LOGREG_MAX_ITER = 100`,
+Constants (in `constants.py`): `SEP_LOGREG_C = 1.0`, `SEP_LOGREG_L1_RATIO = 0.0`,
+`SEP_LOGREG_SOLVER = "lbfgs"`, `SEP_LOGREG_MAX_ITER = 100`, `SEP_LOGREG_FALLBACK_MAX_ITER = 1000`,
+the `SEPStandardization` StrEnum (`none`, `folded_into_weights`),
 `SEP_LAYER_WINDOW = 5`, `SEP_CV_FOLDS = 5`.
 
 ### How do we number layers?

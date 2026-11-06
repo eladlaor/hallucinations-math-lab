@@ -46,7 +46,7 @@ deploy = [
 # Eval / benchmarking harness (eval/*.py, not shipped in the wheel).
 eval = [
     "datasets>=2.20",
-    "scikit-learn>=1.5",
+    "scikit-learn>=1.8",
     "scipy>=1.13",
 ]
 # Local web playground (demo/web): the API and the committed, prebuilt UI.
