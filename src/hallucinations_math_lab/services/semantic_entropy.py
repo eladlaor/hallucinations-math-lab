@@ -50,6 +50,14 @@ class SemanticEntropyResult:
     clusters: list[Cluster]
 
 
+@dataclass(frozen=True)
+class SemanticEntropiesResult:
+    """SE under several estimators, all computed from the same clustering."""
+
+    entropies: dict[SemanticEntropyEstimator, float]
+    clusters: list[Cluster]
+
+
 def cluster_by_bidirectional_entailment(
     answers: list[str],
     scorer: EntailmentScorer | None = None,
@@ -131,35 +139,49 @@ def _cluster_probs(
     return cluster_w / cluster_w.sum()
 
 
-def compute_semantic_entropy(
+def _entropy_nats(probs: np.ndarray) -> float:
+    # Natural-log entropy (nats), as in the paper. Every p(c) > 0, so no epsilon
+    # is needed, and a single cluster scores exactly 0.
+    return float(-np.sum(probs * np.log(probs))) if len(probs) > 1 else 0.0
+
+
+def compute_semantic_entropies(
     sample_set: SampleSet,
+    estimators: tuple[SemanticEntropyEstimator, ...],
     scorer: EntailmentScorer | None = None,
-    estimator: SemanticEntropyEstimator = SemanticEntropyEstimator.LIKELIHOOD_WEIGHTED,
-) -> SemanticEntropyResult:
-    """Compute SE for a sample set. Raises if the sample set is empty, or if the
-    likelihood-weighted estimator gets samples without finite logprobs."""
+) -> SemanticEntropiesResult:
+    """Cluster the samples once and score every requested estimator on those clusters.
+
+    The NLI clustering is the expensive part, so asking for several estimators costs
+    no extra NLI calls. Raises if the sample set or `estimators` is empty, or if the
+    likelihood-weighted estimator is requested for samples without finite logprobs
+    (checked before any NLI call).
+    """
     if not sample_set.samples:
         raise ValueError(
             f"Cannot compute SE: empty sample set for prompt={sample_set.prompt[:80]!r}"
         )
-    if estimator is SemanticEntropyEstimator.LIKELIHOOD_WEIGHTED:
+    if not estimators:
+        raise ValueError(
+            f"Cannot compute SE: no estimators requested for prompt={sample_set.prompt[:80]!r}"
+        )
+    if SemanticEntropyEstimator.LIKELIHOOD_WEIGHTED in estimators:
         _sample_log_weights(sample_set)  # validate before paying for NLI calls
 
     answers = [s.text.strip() for s in sample_set.samples]
     clusters = cluster_by_bidirectional_entailment(
         answers, scorer=scorer, question=sample_set.prompt
     )
-    probs = _cluster_probs(clusters, sample_set, estimator)
-    # Natural-log entropy (nats), as in the paper. Every p(c) > 0, so no epsilon
-    # is needed, and a single cluster scores exactly 0.
-    se = float(-np.sum(probs * np.log(probs))) if len(clusters) > 1 else 0.0
+    entropies = {
+        estimator: _entropy_nats(_cluster_probs(clusters, sample_set, estimator))
+        for estimator in estimators
+    }
 
     logger.info(
         "Computed semantic entropy.",
         extra={
             LOG_EXTRA_KEY: {
-                "se_nats": round(se, 4),
-                "estimator": str(estimator),
+                "se_nats": {str(e): round(se, 4) for e, se in entropies.items()},
                 "n_clusters": len(clusters),
                 "n_samples": len(answers),
                 "prompt": sample_set.prompt[:80],
@@ -167,7 +189,20 @@ def compute_semantic_entropy(
         },
     )
 
-    return SemanticEntropyResult(semantic_entropy=se, clusters=clusters)
+    return SemanticEntropiesResult(entropies=entropies, clusters=clusters)
+
+
+def compute_semantic_entropy(
+    sample_set: SampleSet,
+    scorer: EntailmentScorer | None = None,
+    estimator: SemanticEntropyEstimator = SemanticEntropyEstimator.LIKELIHOOD_WEIGHTED,
+) -> SemanticEntropyResult:
+    """Compute SE for a sample set with one estimator. Raises if the sample set is
+    empty, or if the likelihood-weighted estimator gets samples without finite logprobs."""
+    result = compute_semantic_entropies(sample_set, (estimator,), scorer=scorer)
+    return SemanticEntropyResult(
+        semantic_entropy=result.entropies[estimator], clusters=result.clusters
+    )
 
 
 class SemanticEntropyDetector(Detector):
