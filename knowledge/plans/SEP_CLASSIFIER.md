@@ -160,6 +160,15 @@ We instead search **exhaustively over the midpoints between consecutive distinct
 - No sample can sit on γ, so the −1 case disappears.
 - The search is exact and deterministic.
 - When several γ give equal error, the lower γ wins.
+- SE is rounded to `SE_SPLIT_DECIMALS` (10) before the search and before labeling. The
+  collector sums cluster entropies in discovery order, so one partition (e.g. [7, 2, 1]) or
+  two partitions with equal entropy (e.g. [4, 2, 1, 1, 1, 1] and [2] × 5) give SE values a
+  few ulp apart. Without rounding they would count as distinct levels that γ could fall
+  between, and values exactly 1 ulp apart would have no midpoint at all. For N = 10 (the collector's fixed N), distinct discrete levels are at least
+  2.9 × 10⁻³ apart; even pooled over N ≤ 10 they are at least 10⁻⁴ apart, so rounding never
+  merges genuinely different levels.
+- If two distinct rounded SE values are still adjacent floats (only possible far beyond any
+  entropy of N samples), fitting raises instead of returning a γ equal to a data value.
 
 A test checks that on data where the paper's grid has no tie, our split's error is **≤** the
 paper's (`best_split` is copied from notebook cell 16 into the test).
@@ -655,7 +664,7 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Failing tests first:
   - `test_best_split_minimizes_sse_over_all_midpoints` (brute force)
   - `test_best_split_never_ties_with_data`, including many rows at ln 10
-  - `test_best_split_sse_not_worse_than_paper_grid`, against a verbatim copy of notebook cell 16
+  - `test_best_split_sse_not_worse_than_paper_grid`, against a copy of notebook cell 16 (renamed, plotting line dropped)
   - `test_binarize_strictly_greater`
   - `test_best_split_raises_on_fewer_than_two_distinct_values`
 - Files: `eval/sep_recipe.py` (new; pure numpy/sklearn), `tests/unit/test_sep_recipe.py`.
