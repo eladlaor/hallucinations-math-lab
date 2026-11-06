@@ -293,9 +293,11 @@ model error (cell 31). We rank by the probe's own training target for two reason
 - With a fixed choice, the outer CV still runs, but there is no inner selection.
 - Recorded as `classifier.layer_selection = "nested_cv" | "fixed"`.
 
-**Cost (unverified).** All on CPU. For E2B: 31 windows × 25 inner fits × 5 outer folds per
-position, on 500 rows × 7680 features, plus 35 × 5 single-layer fits. This is estimated at
-minutes to tens of minutes. It must be measured; `--n-jobs` is offered.
+**Cost (unverified).** All on CPU. For E2B, per position: 31 windows × 5 inner folds × 5 outer
+folds (775 fits) on 500 rows × 7680 features, plus the 5 outer fits, plus 31 × 5 for the final
+window choice on all rows, plus 35 × 5 single-layer sweep fits. This is estimated at minutes to
+tens of minutes. It must be measured; a `--n-jobs` flag is added in item 10 only if that
+measurement calls for it.
 
 ### Which token positions are collected, and which one is served?
 
@@ -705,8 +707,23 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
   - `test_pure_noise_nested_auroc_near_half`
   - `test_recommended_threshold_is_youden_on_oof_probs`, which must give output identical to
     `youden_threshold`
-- Files: `eval/sep_recipe.py`, `tests/unit/test_sep_recipe.py`.
-- Done when: the tests pass, and the outputs match the `metrics.json` schema.
+- Files: `eval/sep_layer_selection.py` (new; pure, built on `eval/sep_recipe.py`),
+  `tests/unit/test_sep_layer_selection.py`, `constants.py` (`SEP_LAYER_WINDOW`,
+  `SEP_CV_FOLDS`, the `SEPLayerSelection` and `SEPThresholdSource` StrEnums).
+- *Implementation note:* the selection code lives in its own module rather than in
+  `sep_recipe.py`, which would otherwise pass 500 lines; `sep_recipe.py` keeps binarization
+  and the logistic fit. The module works on one position's `[rows, L+1, d]` array; item 10
+  keys its outputs by position (`layer_sweep`, `nested_cv`, `choose_window`,
+  `fit_window_probe`, `recommend_threshold`). It is sequential: `--n-jobs` is left to item 10
+  if the measured CPU cost calls for it.
+- *Schema note:* the module returns dataclasses, not the `metrics.json` shape; item 10
+  serializes them. The mapping: `NestedCVResult.auroc_vs_binarized_se` and `.auroc_vs_error`
+  become `selection[position].nested_cv_auroc_vs_binarized_se` and
+  `.nested_cv_auroc_vs_error`; `window_per_fold` moves under the binarized-SE AUROC block;
+  `WindowChoice.window` and `.inner_cv_auroc` fill `selection[position].window` and
+  `.inner_cv_auroc`; `layer_sweep` entries drop `per_fold`, keeping `{mean, std}`.
+- Done when: the tests pass, and the outputs carry every field the `metrics.json` schema
+  needs (item 10 maps them, per the schema note).
 
 **5. Discrete and weighted SE from one clustering.**
 
@@ -779,6 +796,7 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
   - `test_refit_from_export_reproduces_weights` (allclose, same seed)
   - `test_layers_final_gives_L_and_fixed_selection`
   - `test_records_repo_commit_and_dirty`
+  - `test_metrics_json_matches_schema` (the item-4 schema note's field mapping)
 - Files: `eval/train_sep_probe.py` (rewritten as orchestration; Ridge, Pearson and
   `--ridge-alpha` removed), `custom_types/sep_probe_types.py` (new).
 - Done when: the tests pass. PSP 3's open question ("the `.pt` path keeps working or is

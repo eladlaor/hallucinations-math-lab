@@ -110,6 +110,33 @@ class SEPStandardization(StrEnum):
     FOLDED_INTO_WEIGHTS = "folded_into_weights"
 
 
+# SEP layer selection (Kossen et al. 2024, App. B.3): a window of this many
+# consecutive layers, concatenated, chosen by nested cross-validation with this
+# many folds in both the outer and the inner loop.
+SEP_LAYER_WINDOW: Final[int] = 5
+SEP_CV_FOLDS: Final[int] = 5
+
+
+class SEPLayerSelection(StrEnum):
+    """How a SEP probe's layers were chosen.
+
+    NESTED_CV: the window was picked by an inner CV on training rows only.
+    FIXED: the layers were given (e.g. `--layers final`); no inner selection ran.
+    """
+
+    NESTED_CV = "nested_cv"
+    FIXED = "fixed"
+
+
+class SEPThresholdSource(StrEnum):
+    """Where a SEP probe's recommended threshold came from.
+
+    OOF_YOUDEN: Youden's J on the out-of-fold scores of the outer CV.
+    """
+
+    OOF_YOUDEN = "oof_youden"
+
+
 # Reproducibility
 RANDOM_SEED: Final[int] = 42
 
