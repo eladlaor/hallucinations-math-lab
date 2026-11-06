@@ -14,6 +14,12 @@ predictive entropy) must never be used as a gate placed IN FRONT OF
 semantic entropy (do NOT require it via `AllAbove`). It may only be an
 additive OR trigger (`AnyAbove`) so it can raise escalation but never
 suppress an SE-driven escalation.
+
+A note on scales: each threshold must be on its detector's own score scale.
+SE, discrete SE and PE score in nats; SEP scores p(high SE), a probability
+in [0, 1]. Settings keeps one threshold per scale (SE_THRESHOLD,
+SEP_THRESHOLD) and `Settings.escalation_threshold_for` routes between them;
+a multi-detector policy here must likewise give each detector its own.
 """
 
 from dataclasses import dataclass

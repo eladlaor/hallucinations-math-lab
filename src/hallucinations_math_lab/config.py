@@ -5,7 +5,12 @@ from functools import lru_cache
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from hallucinations_math_lab.constants import DetectorName, JudgeThinkingLevel, VLLMAuthMode
+from hallucinations_math_lab.constants import (
+    NATS_SCORED_DETECTORS,
+    DetectorName,
+    JudgeThinkingLevel,
+    VLLMAuthMode,
+)
 
 _DEFAULT_TARGET_MODEL_IDS: list[str] = [
     "google/gemma-4-E2B-it",
@@ -78,10 +83,17 @@ class Settings(BaseSettings):
     nli_model_id: str = Field(default="microsoft/deberta-large-mnli")
 
     # Detection
-    # Escalate when the escalation detector's score exceeds this, in nats.
-    # 1.0 is a placeholder, not a measured value: calibrate it on a dev
-    # slice disjoint from the test slice with eval/calibrate_threshold.py.
+    # Escalation thresholds, one per score scale; escalation_threshold_for
+    # picks the one matching the escalation detector. Escalate when its
+    # score exceeds the threshold.
+    # SE, discrete SE and PE score in nats. 1.0 is a placeholder, not a
+    # measured value: calibrate it on a dev slice disjoint from the test
+    # slice with eval/calibrate_threshold.py.
     se_threshold: float = Field(default=1.0, ge=0.0)
+    # SEP scores p(high SE), a probability. 0.5 is the classifier's own
+    # decision boundary: a placeholder, uncalibrated for escalation.
+    # Calibrate it the same way, with eval/calibrate_threshold.py.
+    sep_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     sample_n: int = Field(default=10, ge=2, le=50)
     sample_temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     top_logprobs: int = Field(default=5, ge=1, le=20)
@@ -136,6 +148,42 @@ class Settings(BaseSettings):
                 f"sweep or remove the override."
             )
         return self
+
+    @model_validator(mode="after")
+    def _validate_sep_escalation_is_enabled(self) -> "Settings":
+        sep = DetectorName.SEMANTIC_ENTROPY_PROBE
+        if self.escalation_detector == sep and sep not in self.enabled_detectors:
+            raise ValueError(
+                f"escalation_detector={sep!s} but it is not in enabled_detectors "
+                f"{[str(d) for d in self.enabled_detectors]!r}. Add {sep!s} to "
+                "ENABLED_DETECTORS or pick another ESCALATION_DETECTOR."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_escalation_detector_has_threshold(self) -> "Settings":
+        # Fail at config load rather than at the first /status or evaluator
+        # build: a detector with no routable threshold cannot drive escalation.
+        self.escalation_threshold_for(self.escalation_detector)
+        return self
+
+    def escalation_threshold_for(self, detector: DetectorName) -> float:
+        """The escalation threshold on `detector`'s score scale.
+
+        SEP scores a probability and uses sep_threshold; the nats-scored
+        detectors use se_threshold. Raises ValueError for any other detector,
+        which has no configured threshold.
+        """
+        if detector == DetectorName.SEMANTIC_ENTROPY_PROBE:
+            return self.sep_threshold
+        if detector in NATS_SCORED_DETECTORS:
+            return self.se_threshold
+        raise ValueError(
+            f"No escalation threshold is configured for detector {detector!s}. "
+            f"SE_THRESHOLD covers {sorted(str(d) for d in NATS_SCORED_DETECTORS)!r} and "
+            f"SEP_THRESHOLD covers {DetectorName.SEMANTIC_ENTROPY_PROBE!s}. Escalate on one of "
+            "those, or pass an explicit escalation_threshold to the evaluator."
+        )
 
 
 @lru_cache(maxsize=1)

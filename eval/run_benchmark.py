@@ -8,9 +8,10 @@ output, or eval/datasets/adversarial.jsonl). Without `--in`, the default
 through untouched so compute_auroc.py can label each row.
 
 Detectors and the escalation rule come from settings (ENABLED_DETECTORS,
-ESCALATION_DETECTOR, SE_THRESHOLD); the SLM comes from SLM_PROVIDER /
-VLLM_MODEL_ID. Every row records all detector scores under `detector_scores`,
-so adding a detector needs no change here or in compute_auroc.py.
+ESCALATION_DETECTOR, and SE_THRESHOLD or, for SEP, SEP_THRESHOLD); the SLM
+comes from SLM_PROVIDER / VLLM_MODEL_ID. Every row records all detector
+scores under `detector_scores`, so adding a detector needs no change here or
+in compute_auroc.py.
 
 With a judge, every row records the judge's answer as `judge_answer`, not
 only the escalated rows, so escalation_uplift.py can compare the detector's

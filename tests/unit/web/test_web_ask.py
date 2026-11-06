@@ -1,8 +1,18 @@
 """POST /api/ask — the Ask the model tab (way in 3), mirroring `demo.cli detect` / `chat`."""
 
+from dataclasses import dataclass
+
 import pytest
 
+from hallucinations_math_lab import DetectorName
 from hallucinations_math_lab.config import Settings
+from hallucinations_math_lab.constants import DetectorCategory
+from hallucinations_math_lab.services.detector_protocol import (
+    DetectionContext,
+    Detector,
+    DetectorMetadata,
+    DetectorScore,
+)
 from tests.unit.web.conftest import (
     FAKE_GREEDY,
     FAKE_JUDGE_ANSWER,
@@ -122,3 +132,45 @@ def test_the_provider_is_built_once(
 )
 def test_invalid_ask_requests_are_422(make_client: ClientFactory, payload: dict) -> None:
     assert make_client().post("/api/ask", json=payload).status_code == 422
+
+
+SEP_SCORE = 0.8
+_TEST_METADATA = DetectorMetadata(
+    signal="test double",
+    assumption="for test isolation only",
+    failure_modes=("never run in production",),
+    category=DetectorCategory.UNCERTAINTY,
+)
+
+
+@dataclass
+class _FixedSEP(Detector):
+    """Stands in for a trained probe: no hidden state, a fixed p(high SE)."""
+
+    name: DetectorName = DetectorName.SEMANTIC_ENTROPY_PROBE
+    requires_samples: bool = False
+    requires_hidden_state: bool = False
+    metadata: DetectorMetadata = _TEST_METADATA
+
+    def score(self, ctx: DetectionContext) -> DetectorScore:
+        return DetectorScore(name=self.name, score=SEP_SCORE, cost_usd=0.0, latency_ms=0.0)
+
+
+def test_detect_compares_sep_against_sep_threshold(
+    make_client: ClientFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: /ask passed SE_THRESHOLD (nats) for every escalation detector,
+    so a SEP probability of 0.8 never crossed SE_THRESHOLD=1.0."""
+    monkeypatch.setattr("demo.web.app._build_default_detectors", lambda names, mid: [_FixedSEP()])
+    settings = Settings(
+        gcp_project_id="",
+        se_threshold=1.0,
+        sep_threshold=0.5,
+        enabled_detectors=[DetectorName.SEMANTIC_ENTROPY_PROBE],
+        escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
+    )
+    body = _ask(make_client(settings=settings), "detect").json()
+
+    assert body["detector_scores"] == {"semantic_entropy_probe": SEP_SCORE}
+    assert body["escalation_threshold"] == 0.5
+    assert body["escalated"] is True

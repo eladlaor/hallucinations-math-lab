@@ -63,7 +63,9 @@ def evaluate_responses(
         with requires_hidden_state=True (e.g. SEP).
       escalation_detector: which detector's score drives the escalation
         decision. Must appear in the `detectors` list.
-      escalation_threshold: the score above which escalation fires.
+      escalation_threshold: the score above which escalation fires, on
+        escalation_detector's own scale (nats for SE / PE, a probability for
+        SEP). `Settings.escalation_threshold_for` picks the configured one.
       judge: optional Judge implementation. When supplied and escalation
         fires, the judge re-answers the prompt and the result's
         final_answer is replaced.
@@ -267,8 +269,13 @@ class ResponseEvaluator:
         self._escalation_detector = (
             escalation_detector if escalation_detector is not None else settings.escalation_detector
         )
+        # Resolved even when a policy decides escalation: the result always
+        # records this baseline, and it must be on the detector's own scale.
+        # A detector with no configured threshold therefore needs an explicit one.
         self._escalation_threshold = (
-            escalation_threshold if escalation_threshold is not None else settings.se_threshold
+            escalation_threshold
+            if escalation_threshold is not None
+            else settings.escalation_threshold_for(self._escalation_detector)
         )
         self._judge = judge
         self._escalation_policy = escalation_policy

@@ -141,6 +141,8 @@ def _api_router(
             judge_configured=reason is None,
             judge_unavailable_reason=reason,
             se_threshold=settings.se_threshold,
+            sep_threshold=settings.sep_threshold,
+            escalation_threshold=settings.escalation_threshold_for(settings.escalation_detector),
             nli_model_id=settings.nli_model_id,
         )
 
@@ -180,7 +182,7 @@ def _api_router(
                 samples=SampleSet(prompt=request.question, samples=samples),
                 detectors=detectors,
                 escalation_detector=se.name,
-                escalation_threshold=settings.se_threshold,
+                escalation_threshold=settings.escalation_threshold_for(se.name),
                 greedy_answer=samples[0].text,
             )
         except Exception as e:
@@ -224,7 +226,9 @@ def _api_router(
                     slm=slm,
                     detectors=build_ask_detectors(settings.enabled_detectors, slm.model_id, scorer),
                     escalation_detector=settings.escalation_detector,
-                    escalation_threshold=settings.se_threshold,
+                    escalation_threshold=settings.escalation_threshold_for(
+                        settings.escalation_detector
+                    ),
                     judge=judge.get() if request.mode == AskMode.CHAT else None,
                 )
                 result = evaluator.evaluate(request.question)

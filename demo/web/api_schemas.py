@@ -10,13 +10,20 @@ from hallucinations_math_lab.constants import SemanticEntropyEstimator
 
 
 class StatusResponse(BaseModel):
-    """What the Ask tab needs to know before it lets the user press a button."""
+    """What the Ask tab needs to know before it lets the user press a button.
+
+    `se_threshold` is in nats (SE, discrete SE, PE); `sep_threshold` is on
+    SEP's p(high SE) scale. `escalation_threshold` is the one `/ask` applies
+    to the configured escalation detector.
+    """
 
     provider: str
     model_id: str
     judge_configured: bool
     judge_unavailable_reason: str | None
     se_threshold: float
+    sep_threshold: float
+    escalation_threshold: float
     nli_model_id: str
 
 

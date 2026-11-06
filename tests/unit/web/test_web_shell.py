@@ -7,6 +7,7 @@ import pytest
 
 from demo.web.app import create_app
 from demo.web.constants import DEFAULT_HOST, DEFAULT_PORT
+from hallucinations_math_lab import DetectorName
 from hallucinations_math_lab.config import Settings
 from tests.unit.web.conftest import TEST_PROJECT, ClientFactory, KeywordNLI
 
@@ -21,6 +22,7 @@ def test_status_reports_provider_model_judge_and_threshold(make_client: ClientFa
         slm_provider="vllm",
         vllm_model_id="google/gemma-4-E4B-it",
         se_threshold=0.7,
+        sep_threshold=0.3,
     )
     body = make_client(settings=settings).get("/api/status").json()
 
@@ -30,8 +32,24 @@ def test_status_reports_provider_model_judge_and_threshold(make_client: ClientFa
         "judge_configured": True,
         "judge_unavailable_reason": None,
         "se_threshold": 0.7,
+        "sep_threshold": 0.3,
+        "escalation_threshold": 0.7,
         "nli_model_id": settings.nli_model_id,
     }
+
+
+def test_status_escalation_threshold_follows_the_escalation_detector(
+    make_client: ClientFactory,
+) -> None:
+    settings = Settings(
+        se_threshold=0.7,
+        sep_threshold=0.3,
+        enabled_detectors=[DetectorName.SEMANTIC_ENTROPY_PROBE],
+        escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
+    )
+    body = make_client(settings=settings).get("/api/status").json()
+
+    assert body["escalation_threshold"] == 0.3
 
 
 def test_status_explains_why_the_judge_is_unavailable(make_client: ClientFactory) -> None:

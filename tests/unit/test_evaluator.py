@@ -23,6 +23,7 @@ from unittest.mock import patch
 import pytest
 
 from hallucinations_math_lab import (
+    AnyAbove,
     DetectorName,
     PredictiveEntropyDetector,
     ResponseEvaluator,
@@ -32,6 +33,7 @@ from hallucinations_math_lab import (
     TokenLogprob,
     evaluate_responses,
 )
+from hallucinations_math_lab.config import Settings
 from hallucinations_math_lab.constants import DetectorCategory
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
@@ -257,6 +259,73 @@ def test_hidden_state_detector_receives_tensor_when_provider_supplies_one():
     assert captured["hidden_state"] is fake_tensor
     assert slm.hidden_state_calls == 1
     assert res.detector_scores[DetectorName.SEMANTIC_ENTROPY_PROBE] == pytest.approx(0.42)
+
+
+def test_response_evaluator_sep_escalates_above_sep_threshold(monkeypatch):
+    """Regression: the evaluator used SE_THRESHOLD (nats) for every detector.
+    SEP scores a probability, so with SE_THRESHOLD=1.0 it could never escalate.
+    With no explicit threshold, SEP must be compared against SEP_THRESHOLD."""
+    settings = Settings(
+        se_threshold=1.0,
+        sep_threshold=0.5,
+        enabled_detectors=[DetectorName.SEMANTIC_ENTROPY_PROBE],
+        escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
+    )
+    monkeypatch.setattr("hallucinations_math_lab.evaluator.get_settings", lambda: settings)
+    sep = _ConstScoreDetector(
+        name=DetectorName.SEMANTIC_ENTROPY_PROBE,
+        requires_samples=False,
+        requires_hidden_state=False,
+        fixed_score=0.8,
+    )
+    res = ResponseEvaluator(slm=FakeSLM(["x"]), detectors=[sep]).evaluate("q")
+    assert res.escalation_threshold == 0.5
+    assert res.escalated is True
+
+
+def test_response_evaluator_explicit_threshold_overrides_routing(monkeypatch):
+    settings = Settings(sep_threshold=0.5)
+    monkeypatch.setattr("hallucinations_math_lab.evaluator.get_settings", lambda: settings)
+    sep = _ConstScoreDetector(
+        name=DetectorName.SEMANTIC_ENTROPY_PROBE,
+        requires_samples=False,
+        requires_hidden_state=False,
+        fixed_score=0.8,
+    )
+    res = _make_evaluator(
+        FakeSLM(["x"]), [sep], threshold=0.9, escalation=DetectorName.SEMANTIC_ENTROPY_PROBE
+    ).evaluate("q")
+    assert res.escalation_threshold == 0.9
+    assert res.escalated is False
+
+
+def test_unroutable_escalation_detector_needs_an_explicit_threshold():
+    """Every result records a scalar escalation_threshold for its escalation
+    detector, even when a policy decides escalation. A detector with no
+    configured threshold has no honest value to record (SE_THRESHOLD is in
+    nats, a different scale), so the caller must supply one."""
+    judge_qa = _ConstScoreDetector(
+        name=DetectorName.LLAMA_JUDGE_QA,
+        requires_samples=False,
+        requires_hidden_state=False,
+        fixed_score=0.8,
+    )
+    policy = AnyAbove({DetectorName.LLAMA_JUDGE_QA: 0.5})
+    with pytest.raises(ValueError, match="pass an explicit escalation_threshold"):
+        ResponseEvaluator(
+            slm=FakeSLM(["x"]),
+            detectors=[judge_qa],
+            escalation_detector=DetectorName.LLAMA_JUDGE_QA,
+            escalation_policy=policy,
+        )
+    res = ResponseEvaluator(
+        slm=FakeSLM(["x"]),
+        detectors=[judge_qa],
+        escalation_detector=DetectorName.LLAMA_JUDGE_QA,
+        escalation_threshold=0.5,
+        escalation_policy=policy,
+    ).evaluate("q")
+    assert res.escalated is True
 
 
 def test_escalation_detector_must_be_enabled():

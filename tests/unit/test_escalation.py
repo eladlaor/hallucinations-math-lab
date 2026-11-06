@@ -9,6 +9,8 @@ detector math, plus the precedence + validation contract of how
   - describe() is deterministic.
   - A supplied policy takes precedence over the scalar escalation pair.
   - A policy referencing an unscored detector fails fast.
+  - Settings routes each escalation detector to the threshold on its own
+    score scale (SEP -> SEP_THRESHOLD; SE, discrete SE, PE -> SE_THRESHOLD).
 """
 
 from dataclasses import dataclass
@@ -25,6 +27,7 @@ from hallucinations_math_lab import (
     TokenLogprob,
     evaluate_responses,
 )
+from hallucinations_math_lab.config import Settings
 from hallucinations_math_lab.constants import DetectorCategory
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
@@ -219,3 +222,68 @@ def test_legacy_path_leaves_policy_desc_none():
     )
     assert result.escalation_policy_desc is None
     assert result.escalated is False
+
+
+# --- Settings: per-detector threshold routing ---
+
+
+def test_escalation_threshold_for_routes_per_detector():
+    """SEP outputs p(high SE), not nats, so it has its own threshold. SE,
+    discrete SE and PE stay on SE_THRESHOLD. Anything else has no threshold."""
+    settings = Settings(se_threshold=1.3, sep_threshold=0.25)
+
+    assert settings.escalation_threshold_for(DetectorName.SEMANTIC_ENTROPY_PROBE) == 0.25
+    for nats_detector in (
+        DetectorName.SEMANTIC_ENTROPY,
+        DetectorName.DISCRETE_SEMANTIC_ENTROPY,
+        DetectorName.PREDICTIVE_ENTROPY,
+    ):
+        assert settings.escalation_threshold_for(nats_detector) == 1.3
+    for unroutable in (DetectorName.LLAMA_JUDGE_QA, DetectorName.LLAMA_JUDGE_QA_SAMPLES):
+        with pytest.raises(ValueError, match=str(unroutable)):
+            settings.escalation_threshold_for(unroutable)
+
+
+def test_sep_threshold_defaults_to_half():
+    assert Settings.model_fields["sep_threshold"].default == 0.5
+
+
+@pytest.mark.parametrize("bad", [-0.01, 1.01])
+def test_sep_threshold_bounds(bad: float):
+    """SEP's score is a probability, so its threshold must lie in [0, 1]."""
+    with pytest.raises(ValueError, match="sep_threshold"):
+        Settings(sep_threshold=bad)
+
+
+@pytest.mark.parametrize("edge", [0.0, 1.0])
+def test_sep_threshold_accepts_closed_unit_interval(edge: float):
+    assert Settings(sep_threshold=edge).sep_threshold == edge
+
+
+def test_settings_rejects_sep_escalation_without_sep_enabled():
+    with pytest.raises(ValueError, match="semantic_entropy_probe"):
+        Settings(
+            enabled_detectors=[DetectorName.PREDICTIVE_ENTROPY, DetectorName.SEMANTIC_ENTROPY],
+            escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
+        )
+
+
+def test_settings_accepts_sep_escalation_with_sep_enabled():
+    settings = Settings(
+        enabled_detectors=[DetectorName.SEMANTIC_ENTROPY_PROBE],
+        escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
+    )
+    assert settings.escalation_detector == DetectorName.SEMANTIC_ENTROPY_PROBE
+
+
+@pytest.mark.parametrize(
+    "unroutable", [DetectorName.LLAMA_JUDGE_QA, DetectorName.LLAMA_JUDGE_QA_SAMPLES]
+)
+def test_settings_rejects_escalation_detector_without_threshold(unroutable: DetectorName):
+    """A detector with no routable threshold fails at config load, not at the
+    first /status call or evaluator build."""
+    with pytest.raises(ValueError, match=f"No escalation threshold .* detector {unroutable!s}"):
+        Settings(
+            enabled_detectors=[DetectorName.SEMANTIC_ENTROPY, unroutable],
+            escalation_detector=unroutable,
+        )

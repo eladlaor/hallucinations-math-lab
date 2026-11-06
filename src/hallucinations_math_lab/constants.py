@@ -29,6 +29,17 @@ class DetectorName(StrEnum):
     LLAMA_JUDGE_QA_SAMPLES = "llama_judge_qa_samples"
 
 
+# Detectors whose score is an entropy in nats, so SE_THRESHOLD is on their
+# scale. SEP scores p(high SE) and has its own threshold (SEP_THRESHOLD).
+NATS_SCORED_DETECTORS: Final[frozenset[DetectorName]] = frozenset(
+    {
+        DetectorName.SEMANTIC_ENTROPY,
+        DetectorName.DISCRETE_SEMANTIC_ENTROPY,
+        DetectorName.PREDICTIVE_ENTROPY,
+    }
+)
+
+
 class SemanticEntropyEstimator(StrEnum):
     """How Semantic Entropy turns clusters into a probability distribution.
 
