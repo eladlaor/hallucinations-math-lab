@@ -1,0 +1,122 @@
+@import 'tailwindcss';
+
+/*
+ * Calm, minimal tokens in the shadcn/ui naming. Light and dark are each chosen,
+ * not flipped: dark mode follows the OS setting.
+ */
+:root {
+  color-scheme: light;
+  --background: #f9f9f7;
+  --foreground: #0b0b0b;
+  --card: #fcfcfb;
+  --card-foreground: #0b0b0b;
+  --muted: #f0efec;
+  --muted-foreground: #52514e;
+  --subtle-foreground: #6e6d68;
+  --border: #e1e0d9;
+  --input: #c3c2b7;
+  --primary: #1c5cab;
+  --primary-foreground: #ffffff;
+  --ring: #2a78d6;
+  --destructive: #b42318;
+  --destructive-surface: #fdf0ee;
+  --good: #006300;
+  --warn: #8a5a00;
+
+  /* Categorical cluster colours, fixed order (CVD-validated on adjacent pairs). */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+  --series-other: #898781;
+
+  /* Chart chrome. */
+  --chart-grid: #e1e0d9;
+  --chart-axis: #c3c2b7;
+  --chart-mark: #2a78d6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --background: #0d0d0d;
+    --foreground: #f0efec;
+    --card: #1a1a19;
+    --card-foreground: #f0efec;
+    --muted: #262624;
+    --muted-foreground: #c3c2b7;
+    --subtle-foreground: #a3a29b;
+    --border: #2c2c2a;
+    --input: #4a4a46;
+    --primary: #5598e7;
+    --primary-foreground: #0b0b0b;
+    --ring: #6da7ec;
+    --destructive: #f2867a;
+    --destructive-surface: #2a1513;
+    --good: #0ca30c;
+    --warn: #fab219;
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+    --series-other: #898781;
+
+    --chart-grid: #2c2c2a;
+    --chart-axis: #383835;
+    --chart-mark: #3987e5;
+  }
+}
+
+@theme inline {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-surface: var(--destructive-surface);
+  --color-good: var(--good);
+  --color-warn: var(--warn);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  body {
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition-duration: 0s !important;
+      animation-duration: 0s !important;
+    }
+  }
+}
