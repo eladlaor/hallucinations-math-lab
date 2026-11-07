@@ -14,13 +14,14 @@ Contract pinned here:
 """
 
 import json
+from dataclasses import fields
 
 import numpy as np
 import pytest
 from sklearn.metrics import roc_auc_score
 
 from eval.adversarial_separation import separation_report
-from eval.benchmark_results import is_correct, run_config
+from eval.benchmark_results import SEP_PROBE_IDENTITY_FIELDS, is_correct, run_config
 from eval.compute_auroc import auroc_report
 from eval.datasets.load_triviaqa import slice_bounds
 from eval.escalation_uplift import (
@@ -29,8 +30,10 @@ from eval.escalation_uplift import (
     uplift_report,
 )
 from eval.inference_stats import auroc, mcnemar_exact_p, paired_bootstrap
-from eval.sep_probe_provenance import assert_disjoint, training_ids_path, write_training_ids
-from hallucinations_math_lab.constants import SEP_TRAIN_IDS_FILE, AnswerSource, DetectorName
+from eval.sep_probe_provenance import SEPProbeRunRecord, assert_disjoint
+from hallucinations_math_lab.constants import AnswerSource, DetectorName
+from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
+from tests.unit.sep_probe_fixtures import write_probe_dir, write_train_ids
 
 SE = str(DetectorName.SEMANTIC_ENTROPY)
 PE = str(DetectorName.PREDICTIVE_ENTROPY)
@@ -42,6 +45,7 @@ RUN = {
     "sample_temperature": 1.0,
     "max_tokens": 64,
     "answer_instruction": "Answer the following question as briefly as possible.",
+    "sep_probe": None,
 }
 
 
@@ -343,6 +347,36 @@ def test_separation_report_refuses_runs_from_different_models():
         separation_report(adversarial, reference, detector=SE)
 
 
+def _probe_record(ref: str, revision: str | None, weights: str = "w" * 64) -> dict:
+    return {"ref": ref, "revision": revision, "weights_sha256": weights, "config_sha256": "c" * 64}
+
+
+def test_separation_report_accepts_the_same_probe_named_two_ways():
+    # The same probe bytes loaded from a local directory and from the Hub.
+    local = {**RUN, "sep_probe": _probe_record("data/probes/m", None)}
+    hub = {**RUN, "sep_probe": _probe_record("hf://o/r@v1", "a" * 40)}
+    adversarial = [_row("x", se=2.0, pe=0.0, aliases=[], run=local)]
+    reference = [_row("Paris", se=0.1, pe=0.0, run=hub)]
+    separation_report(adversarial, reference, detector=SE)
+
+
+def test_separation_report_refuses_runs_with_different_probe_weights():
+    adversarial_run = {**RUN, "sep_probe": _probe_record("data/probes/m", None)}
+    reference_run = {**RUN, "sep_probe": _probe_record("data/probes/m", None, weights="v" * 64)}
+    adversarial = [_row("x", se=2.0, pe=0.0, aliases=[], run=adversarial_run)]
+    reference = [_row("Paris", se=0.1, pe=0.0, run=reference_run)]
+    with pytest.raises(RuntimeError, match="not comparable.*SEP probe"):
+        separation_report(adversarial, reference, detector=SE)
+
+
+def test_separation_report_refuses_a_probe_run_against_a_run_without_one():
+    adversarial_run = {**RUN, "sep_probe": _probe_record("data/probes/m", None)}
+    adversarial = [_row("x", se=2.0, pe=0.0, aliases=[], run=adversarial_run)]
+    reference = [_row("Paris", se=0.1, pe=0.0)]
+    with pytest.raises(RuntimeError, match="not comparable"):
+        separation_report(adversarial, reference, detector=SE)
+
+
 # --- run comparability -----------------------------------------------------
 
 
@@ -374,9 +408,9 @@ def test_slice_bounds_are_checked():
 
 
 def test_provenance_rejects_overlap_and_accepts_disjoint_ids(tmp_path):
-    probe = tmp_path / "probe"
-    probe.mkdir()
-    write_training_ids(probe, ["q1", "q2"], "m", tmp_path / "calib.jsonl")
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["q1", "q2"])
+    probe = SemanticEntropyProbeDetector(probe_dir)
 
     assert_disjoint(probe, ["q3", "q4"])
     with pytest.raises(RuntimeError, match="1 benchmark questions were used"):
@@ -386,11 +420,25 @@ def test_provenance_rejects_overlap_and_accepts_disjoint_ids(tmp_path):
 def test_provenance_ignores_a_stale_sidecar_beside_the_probe_dir(tmp_path):
     # The pre-classifier `<probe>.train_ids.json` sat beside the probe. A
     # leftover one must not stand in for the directory probe's own ids.
-    probe = tmp_path / "probe"
-    probe.mkdir()
-    write_training_ids(probe, ["q1"], "m", tmp_path / "calib.jsonl")
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["q1"])
     (tmp_path / "probe.train_ids.json").write_text(json.dumps({"question_ids": ["other"]}))
 
-    assert training_ids_path(probe) == probe / SEP_TRAIN_IDS_FILE
+    with pytest.raises(RuntimeError, match="1 benchmark questions were used"):
+        assert_disjoint(SemanticEntropyProbeDetector(probe_dir), ["q1"])
+
+
+def test_provenance_checks_the_ids_loaded_with_the_weights(tmp_path):
+    """Rewriting train_ids.json after the probe was loaded does not hide an overlap:
+    the run scores the loaded weights, so it is checked against the loaded ids."""
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["q1"])
+    probe = SemanticEntropyProbeDetector(probe_dir)
+    write_train_ids(probe_dir, ["other"])
+
     with pytest.raises(RuntimeError, match="1 benchmark questions were used"):
         assert_disjoint(probe, ["q1"])
+
+
+def test_probe_identity_fields_are_recorded_by_every_run():
+    assert set(SEP_PROBE_IDENTITY_FIELDS) <= {f.name for f in fields(SEPProbeRunRecord)}

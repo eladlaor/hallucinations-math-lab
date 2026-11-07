@@ -19,6 +19,7 @@ RUN = {
     "sample_temperature": 1.0,
     "max_tokens": 64,
     "answer_instruction": "Answer briefly.",
+    "sep_probe": None,
 }
 
 

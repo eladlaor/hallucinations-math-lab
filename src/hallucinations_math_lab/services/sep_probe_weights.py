@@ -11,14 +11,15 @@ a probe downloaded from the Hub is safe to open.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
 import numpy as np
 import numpy.typing as npt
-from safetensors import SafetensorError, safe_open
-from safetensors.numpy import save_file
+from safetensors import SafetensorError
+from safetensors.numpy import load, save_file
 
 from hallucinations_math_lab.constants import (
     SEP_PROBE_BIAS_TENSOR,
@@ -30,7 +31,12 @@ from hallucinations_math_lab.constants import (
 )
 
 PROBE_DTYPE: Final = np.float32
-_TENSOR_FRAMEWORK: Final[str] = "numpy"
+# The safetensors layout: an unsigned 64-bit little-endian header length, then a JSON
+# header whose `__metadata__` holds the string metadata (`safetensors.numpy.load`
+# validates the file but drops the metadata).
+_HEADER_LEN_BYTES: Final[int] = 8
+_HEADER_LEN_BYTEORDER: Final = "little"
+_SAFETENSORS_METADATA_KEY: Final[str] = "__metadata__"
 _HEADER: Final[dict[str, str]] = {
     SEP_PROBE_FORMAT_KEY: SEP_PROBE_FORMAT,
     SEP_PROBE_SCHEMA_VERSION_KEY: str(SEP_PROBE_SCHEMA_VERSION),
@@ -76,10 +82,28 @@ def read_probe_weights(path: Path) -> ProbeWeights:
     """Read a probe written by `write_probe_weights`; raises ValueError on anything
     else, including a file with other tensors or another format header."""
     try:
-        with safe_open(path, framework=_TENSOR_FRAMEWORK) as f:
-            header = f.metadata() or {}
-            tensors = {name: f.get_tensor(name) for name in f.keys()}  # noqa: SIM118 (not a dict)
-    except (OSError, SafetensorError) as e:
+        raw = path.read_bytes()
+    except OSError as e:
+        raise ValueError(f"Cannot read SEP probe weights {path}: {e!s}") from e
+    return parse_probe_weights(raw, path)
+
+
+def _header_metadata(raw: bytes) -> dict[str, str]:
+    """The `__metadata__` of a safetensors file already validated by `load`: an
+    8-byte little-endian header length, then the JSON header."""
+    header_len = int.from_bytes(raw[:_HEADER_LEN_BYTES], _HEADER_LEN_BYTEORDER)
+    header = json.loads(raw[_HEADER_LEN_BYTES : _HEADER_LEN_BYTES + header_len])
+    metadata: dict[str, str] = header.get(_SAFETENSORS_METADATA_KEY, {})
+    return metadata
+
+
+def parse_probe_weights(raw: bytes, path: Path) -> ProbeWeights:
+    """Parse the bytes of a `probe.safetensors` (read from `path`, named in errors), so a
+    caller that hashes those bytes holds the hash of exactly what was parsed."""
+    try:
+        tensors = load(raw)
+        header = _header_metadata(raw)
+    except (SafetensorError, ValueError) as e:
         raise ValueError(f"Cannot read SEP probe weights {path}: {e!s}") from e
     if header != _HEADER:
         raise ValueError(

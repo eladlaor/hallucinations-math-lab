@@ -34,12 +34,19 @@ SAMPLE_N_FIELD: Final[str] = "sample_n"
 SAMPLE_TEMPERATURE_FIELD: Final[str] = "sample_temperature"
 MAX_TOKENS_FIELD: Final[str] = "max_tokens"
 ANSWER_INSTRUCTION_FIELD: Final[str] = "answer_instruction"
+# The SEP probe in use (eval/sep_probe_provenance.py's SEPProbeRunRecord), or null.
+SEP_PROBE_FIELD: Final[str] = "sep_probe"
+# The SEPProbeRunRecord fields that identify the probe scored. Its `ref` and
+# `revision` say only how it was named and fetched, so two runs that scored the
+# same probe bytes from a local directory and from the Hub stay comparable.
+SEP_PROBE_IDENTITY_FIELDS: Final[tuple[str, ...]] = ("weights_sha256", "config_sha256")
 RUN_CONFIG_FIELDS: Final[tuple[str, ...]] = (
     MODEL_ID_FIELD,
     SAMPLE_N_FIELD,
     SAMPLE_TEMPERATURE_FIELD,
     MAX_TOKENS_FIELD,
     ANSWER_INSTRUCTION_FIELD,
+    SEP_PROBE_FIELD,
 )
 
 _PUNCTUATION: Final[frozenset[str]] = frozenset(string.punctuation)
@@ -66,10 +73,10 @@ def load_rows(path: Path) -> list[BenchmarkRow]:
 
 
 def run_config(rows: list[BenchmarkRow], source: str) -> RunConfig:
-    """The model and sampling settings behind a run; fails fast if rows disagree.
+    """The model, sampling and SEP probe settings behind a run; fails fast if rows disagree.
 
-    Mixing rows from different models or sampling settings would make every
-    statistic computed over them meaningless, so a file must be one run.
+    Mixing rows from different models, sampling settings or SEP probes would make
+    every statistic computed over them meaningless, so a file must be one run.
     """
     config: RunConfig | None = None
     for row_no, row in enumerate(rows, start=1):
@@ -77,7 +84,7 @@ def run_config(rows: list[BenchmarkRow], source: str) -> RunConfig:
         if missing:
             raise RuntimeError(
                 f"{source} row {row_no} lacks {missing}; it was written before runs recorded "
-                "their model and sampling settings. Re-run eval.run_benchmark."
+                "their model, sampling and SEP probe settings. Re-run eval.run_benchmark."
             )
         row_config = {field: row[field] for field in RUN_CONFIG_FIELDS}
         if config is None:
@@ -92,12 +99,26 @@ def run_config(rows: list[BenchmarkRow], source: str) -> RunConfig:
     return config
 
 
+def _comparable_fields(config: RunConfig) -> RunConfig:
+    """The run config with its SEP probe narrowed to the hashes of the files scored."""
+    probe = config[SEP_PROBE_FIELD]
+    if probe is None:
+        return config
+    return {
+        **config,
+        SEP_PROBE_FIELD: {field: probe[field] for field in SEP_PROBE_IDENTITY_FIELDS},
+    }
+
+
 def assert_same_run_config(first: RunConfig, second: RunConfig, what: str) -> None:
-    """Fail fast when two runs being compared used different models or sampling."""
-    if first != second:
+    """Fail fast when two runs being compared used different models, sampling or SEP
+    probes. Probes match by the hashes of their weights and config, not by how
+    SEP_PROBE_PATH named them."""
+    if _comparable_fields(first) != _comparable_fields(second):
         raise RuntimeError(
             f"{what}: the runs are not comparable — {first} vs {second}. Benchmark both "
-            "question sets with the same model and sampling settings."
+            "question sets with the same model, sampling settings and SEP probe "
+            "(the same weights_sha256 and config_sha256, or no SEP probe in either)."
         )
 
 

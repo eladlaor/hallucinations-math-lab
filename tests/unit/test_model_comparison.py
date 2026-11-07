@@ -13,11 +13,11 @@ from pathlib import Path
 import pytest
 import torch
 
+from demo.model_registry import get_model_entry
 from eval.compare_models import comparison_report
 from eval.compare_models import main as compare_models
 from eval.run_benchmark import run as run_benchmark
 from eval.run_benchmark import run_sweep
-from eval.sep_probe_provenance import write_training_ids
 from hallucinations_math_lab import (
     DetectorName,
     PredictiveEntropyDetector,
@@ -28,12 +28,20 @@ from hallucinations_math_lab import (
     TokenLogprob,
 )
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.services.semantic_entropy_probe import default_probe_dir
+from hallucinations_math_lab.constants import LEGACY_SEP_PROBE_SUFFIX
+from hallucinations_math_lab.custom_types.sep_probe_types import SEPProbeConfig
+from hallucinations_math_lab.services.semantic_entropy_probe import (
+    ObsoleteSEPProbeError,
+    SEPProbeMismatchError,
+    default_probe_dir,
+    model_slug,
+)
 from tests.unit.sep_probe_fixtures import (
     PROBE_HIDDEN_SIZE,
     ProbeBackboneProvider,
     probe_config,
     write_probe_dir,
+    write_train_ids,
 )
 
 SMALL_MODEL = "google/gemma-4-E2B-it"
@@ -148,13 +156,32 @@ def test_sweep_refuses_one_explicit_probe_path_for_several_models(tmp_path, sett
         )
 
 
+def _registry_probe_config(model_id: str) -> SEPProbeConfig:
+    """A probe config matching `model_id`'s registry entry, as a real probe would."""
+    entry = get_model_entry(model_id)
+    return probe_config(
+        model_id=model_id,
+        revision=entry.revision,
+        num_hidden_layers=entry.num_hidden_layers,
+        hidden_size=entry.hidden_size,
+        layers=(entry.num_hidden_layers,),
+    )
+
+
+def _write_sweep_probe(model_id: str, config: SEPProbeConfig | None = None) -> Path:
+    probe = write_probe_dir(default_probe_dir(model_id), config or _registry_probe_config(model_id))
+    write_train_ids(probe, ["other"], model_id)
+    return probe
+
+
+def _refusing_factory(model_id: str) -> ResponseEvaluator:
+    raise AssertionError(f"the sweep built an evaluator for {model_id} despite a bad probe")
+
+
 def test_sweep_checks_every_models_probe_before_running_anything(tmp_path, settings_env):
     settings_env.setenv("ENABLED_DETECTORS", '["semantic_entropy_probe","semantic_entropy"]')
     settings_env.chdir(tmp_path)
-    small_probe = write_probe_dir(
-        default_probe_dir(SMALL_MODEL), probe_config(model_id=SMALL_MODEL)
-    )
-    write_training_ids(small_probe, ["other"], SMALL_MODEL, tmp_path / "calib.jsonl")
+    _write_sweep_probe(SMALL_MODEL)
     # No probe for MID_MODEL: the sweep must fail before scoring SMALL_MODEL.
 
     with pytest.raises(FileNotFoundError, match="gemma-4-e4b-it") as excinfo:
@@ -167,6 +194,67 @@ def test_sweep_checks_every_models_probe_before_running_anything(tmp_path, setti
     assert "ENABLED_DETECTORS" in message
     # A sweep refuses SEP_PROBE_PATH, so the hint must not suggest it.
     assert "SEP_PROBE_PATH" not in message
+
+
+def test_preflight_expects_probe_dir_and_gives_pt_message(tmp_path, settings_env):
+    """A legacy `.pt` probe where the default directory belongs is refused with the
+    Ridge explanation, before any model is built."""
+    settings_env.setenv("ENABLED_DETECTORS", '["semantic_entropy_probe","semantic_entropy"]')
+    settings_env.chdir(tmp_path)
+    _write_sweep_probe(SMALL_MODEL)
+    legacy = (
+        default_probe_dir(MID_MODEL).parent / f"{model_slug(MID_MODEL)}{LEGACY_SEP_PROBE_SUFFIX}"
+    )
+    legacy.write_bytes(b"pickled ridge")
+
+    with pytest.raises(ObsoleteSEPProbeError, match=r"Ridge.*p\(high SE\)") as excinfo:
+        run_sweep(
+            _questions_file(tmp_path),
+            tmp_path / "out",
+            judge=False,
+            evaluator_factory=_refusing_factory,
+        )
+    assert str(legacy) in str(excinfo.value)
+    assert not (tmp_path / "out").exists()
+
+
+def test_run_benchmark_preflight_fails_before_scoring_on_mismatch(tmp_path, settings_env):
+    """A probe trained on another revision of the second model fails the sweep
+    before the first model is scored, naming both values."""
+    settings_env.setenv("ENABLED_DETECTORS", '["semantic_entropy_probe","semantic_entropy"]')
+    settings_env.chdir(tmp_path)
+    _write_sweep_probe(SMALL_MODEL)
+    stale_revision = "f" * 40
+    config = _registry_probe_config(MID_MODEL)
+    stale_backbone = config.backbone.model_copy(update={"revision": stale_revision})
+    _write_sweep_probe(MID_MODEL, config.model_copy(update={"backbone": stale_backbone}))
+
+    with pytest.raises(SEPProbeMismatchError, match="revision") as excinfo:
+        run_sweep(
+            _questions_file(tmp_path),
+            tmp_path / "out",
+            judge=False,
+            evaluator_factory=_refusing_factory,
+        )
+    message = str(excinfo.value)
+    assert stale_revision in message
+    assert get_model_entry(MID_MODEL).revision in message
+    # A sweep refuses SEP_PROBE_PATH, so the hint must not suggest it.
+    assert "SEP_PROBE_PATH" not in message
+    assert f"VLLM_MODEL_ID={MID_MODEL}" in message
+    assert not (tmp_path / "out").exists()
+
+
+def test_sweep_preflight_accepts_registry_matching_probes(tmp_path, settings_env):
+    settings_env.setenv("ENABLED_DETECTORS", '["semantic_entropy_probe","semantic_entropy"]')
+    settings_env.chdir(tmp_path)
+    _write_sweep_probe(SMALL_MODEL)
+    _write_sweep_probe(MID_MODEL)
+
+    paths = run_sweep(
+        _questions_file(tmp_path), tmp_path / "out", judge=False, evaluator_factory=_evaluator
+    )
+    assert len(paths) == 2
 
 
 def test_default_sep_probe_follows_the_providers_model_not_vllm_model_id(tmp_path, settings_env):

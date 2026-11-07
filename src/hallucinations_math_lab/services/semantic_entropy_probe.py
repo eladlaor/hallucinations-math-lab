@@ -25,6 +25,7 @@ forward pass instead of N generations plus O(N) NLI calls.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import time
@@ -51,10 +52,11 @@ from hallucinations_math_lab.constants import (
     SEP_PROBE_DIR_FILES,
     SEP_PROBE_WEIGHTS_FILE,
     SEP_SERVED_TOKEN_POSITION,
+    SEP_TRAIN_IDS_FILE,
     DetectorCategory,
     DetectorName,
 )
-from hallucinations_math_lab.custom_types.sep_probe_types import SEPProbeConfig
+from hallucinations_math_lab.custom_types.sep_probe_types import SEPProbeConfig, SEPTrainIds
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     DetectorMetadata,
@@ -62,7 +64,7 @@ from hallucinations_math_lab.services.detector_protocol import (
     DetectorScore,
     HiddenStateDetector,
 )
-from hallucinations_math_lab.services.sep_probe_weights import ProbeWeights, read_probe_weights
+from hallucinations_math_lab.services.sep_probe_weights import ProbeWeights, parse_probe_weights
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +85,19 @@ class ObsoleteSEPProbeError(ValueError):
 
 
 class SEPProbeMismatchError(ValueError):
-    """The probe was trained on another backbone or prompt than the one under test."""
+    """The probe was trained on another backbone or prompt than the one under test.
+
+    Carries the probe directory and the mismatch descriptions, so a caller can
+    re-raise them with a remedy that fits its context (`hint`)."""
+
+    def __init__(self, probe_dir: Path, mismatches: list[str], hint: str = _TRAIN_HINT) -> None:
+        self.probe_dir = probe_dir
+        self.mismatches = mismatches
+        super().__init__(
+            f"SEP probe {probe_dir} does not fit the model under test "
+            f"({'; '.join(mismatches)}). A probe works only with the backbone and prompt "
+            f"it was trained on. {hint}"
+        )
 
 
 def model_slug(model_id: str) -> str:
@@ -160,10 +174,29 @@ def parse_hf_probe_uri(uri: str) -> HubProbeRef:
     return HubProbeRef(repo_id=repo_id, revision=revision or None)
 
 
-def download_probe(ref: HubProbeRef) -> Path:
-    """Fetch the probe directory's files from the Hub; returns the local snapshot.
+@dataclass(frozen=True)
+class ProbeSource:
+    """A local probe directory and where it came from: the reference it was resolved
+    from (the path as given or an `hf://` URI) and, for a Hub probe, the commit downloaded."""
 
-    The snapshot folder is named after the commit it holds, which is logged. If the Hub
+    directory: Path
+    ref: str
+    revision: str | None = None
+
+    @classmethod
+    def local(cls, directory: Path) -> ProbeSource:
+        """A probe directory given as a path, with no Hub commit. The ref is the path as
+        given (SEP_PROBE_PATH, or the relative `data/probes/<slug>` default), never resolved,
+        so a published run config carries no machine-specific absolute path."""
+        return cls(directory=directory, ref=str(directory))
+
+
+def download_probe(ref: HubProbeRef) -> ProbeSource:
+    """Fetch the probe directory's files from the Hub; returns a ProbeSource for the
+    local snapshot, with `ref.uri` as its ref.
+
+    The snapshot folder is named after the commit it holds, which is logged and
+    returned as the source's revision. If the Hub
     cannot be reached, `snapshot_download` serves the cached snapshot of `ref.revision`
     (or of the default branch when unpinned) without raising, so an unpinned reference may
     then load an older probe; pin `@<revision>` for reproducible runs."""
@@ -185,11 +218,12 @@ def download_probe(ref: HubProbeRef) -> Path:
             }
         },
     )
-    return Path(local)
+    return ProbeSource(directory=Path(local), ref=ref.uri, revision=Path(local).name)
 
 
-def resolve_probe_source(sep_probe_path: str, model_id: str) -> Path:
-    """The local probe directory for SEP_PROBE_PATH (empty = the default for `model_id`).
+def resolve_probe_source(sep_probe_path: str, model_id: str) -> ProbeSource:
+    """The ProbeSource SEP_PROBE_PATH names (empty = the default for `model_id`): the
+    local directory, the reference it was resolved from and, from the Hub, the commit.
 
     An `hf://` reference is downloaded (see download_probe for its offline behaviour).
     There is no fallback between sources: a missing directory raises, and a legacy `.pt`
@@ -208,24 +242,46 @@ def resolve_probe_source(sep_probe_path: str, model_id: str) -> Path:
         raise FileNotFoundError(
             f"No SEP probe directory for {model_id} at {directory}. {_TRAIN_HINT}"
         )
-    return directory
+    return ProbeSource.local(directory)
 
 
 @dataclass(frozen=True)
 class LoadedSEPProbe:
-    """A probe directory's config and weights, checked against each other."""
+    """A probe directory's config and weights, checked against each other, with the
+    SHA-256 of the two files and the training ids, all as they were when loaded.
+
+    `train_ids` is None when the directory has no `train_ids.json`: serving does not
+    need it, but a benchmark refuses such a probe (eval.sep_probe_provenance)."""
 
     config: SEPProbeConfig
     weights: ProbeWeights
+    config_sha256: str
+    weights_sha256: str
+    train_ids: SEPTrainIds | None
 
 
-def _read_probe_config(path: Path) -> SEPProbeConfig:
+def _read_probe_file(path: Path) -> bytes:
     try:
-        return SEPProbeConfig.model_validate_json(path.read_text())
+        return path.read_bytes()
     except OSError as e:
-        raise RuntimeError(f"Cannot read SEP probe config {path}: {e!s}") from e
+        raise RuntimeError(f"Cannot read SEP probe file {path}: {e!s}") from e
+
+
+def _parse_probe_config(path: Path, raw: bytes) -> SEPProbeConfig:
+    try:
+        return SEPProbeConfig.model_validate_json(raw)
     except ValidationError as e:
         raise ValueError(f"SEP probe config {path} is invalid: {e!s}") from e
+
+
+def _load_train_ids(directory: Path) -> SEPTrainIds | None:
+    path = directory / SEP_TRAIN_IDS_FILE
+    if not path.is_file():
+        return None
+    try:
+        return SEPTrainIds.model_validate_json(_read_probe_file(path))
+    except ValidationError as e:
+        raise ValueError(f"Malformed SEP probe training-id file {path}: {e!s}") from e
 
 
 def load_probe_dir(directory: Path) -> LoadedSEPProbe:
@@ -234,14 +290,16 @@ def load_probe_dir(directory: Path) -> LoadedSEPProbe:
     for name in (SEP_PROBE_CONFIG_FILE, SEP_PROBE_WEIGHTS_FILE):
         if not (directory / name).is_file():
             raise FileNotFoundError(f"SEP probe directory {directory} has no {name}. {_TRAIN_HINT}")
-    config = _read_probe_config(directory / SEP_PROBE_CONFIG_FILE)
+    config_bytes = _read_probe_file(directory / SEP_PROBE_CONFIG_FILE)
+    config = _parse_probe_config(directory / SEP_PROBE_CONFIG_FILE, config_bytes)
     position = config.features.token_position
     if position != SEP_SERVED_TOKEN_POSITION:
         raise ValueError(
             f"SEP probe {directory} reads token position {position!s}; only "
             f"{SEP_SERVED_TOKEN_POSITION!s} probes are served (SLT serving is a follow-up)."
         )
-    weights = read_probe_weights(directory / SEP_PROBE_WEIGHTS_FILE)
+    weights_bytes = _read_probe_file(directory / SEP_PROBE_WEIGHTS_FILE)
+    weights = parse_probe_weights(weights_bytes, directory / SEP_PROBE_WEIGHTS_FILE)
     n_features = len(config.features.layers) * config.backbone.hidden_size
     if weights.weight.size != n_features:
         raise ValueError(
@@ -249,13 +307,20 @@ def load_probe_dir(directory: Path) -> LoadedSEPProbe:
             f"{n_features} features ({len(config.features.layers)} layers x hidden size "
             f"{config.backbone.hidden_size})."
         )
-    return LoadedSEPProbe(config=config, weights=weights)
+    return LoadedSEPProbe(
+        config=config,
+        weights=weights,
+        config_sha256=hashlib.sha256(config_bytes).hexdigest(),
+        weights_sha256=hashlib.sha256(weights_bytes).hexdigest(),
+        train_ids=_load_train_ids(directory),
+    )
 
 
 class SemanticEntropyProbeDetector(HiddenStateDetector):
     """SEP detector implementing the `HiddenStateDetector` protocol.
 
-    `probe_dir` is a local probe directory (see `resolve_probe_source`). The
+    `probe` is a local probe directory, or the `ProbeSource` that
+    `resolve_probe_source` returns, which also records where it came from. The
     caller must pass the hidden states of `hidden_state_layers`, one row per
     layer, and should call `check_compatible` with the model under test."""
 
@@ -273,17 +338,23 @@ class SemanticEntropyProbeDetector(HiddenStateDetector):
         category=DetectorCategory.UNCERTAINTY,
     )
 
-    def __init__(self, probe_dir: str | Path) -> None:
-        self._probe_dir = Path(probe_dir)
-        probe = load_probe_dir(self._probe_dir)
-        self._config = probe.config
-        self._weight = torch.from_numpy(probe.weights.weight)
-        self._bias = float(probe.weights.bias[0])
+    def __init__(self, probe: ProbeSource | str | Path) -> None:
+        self._source = probe if isinstance(probe, ProbeSource) else ProbeSource.local(Path(probe))
+        self._probe_dir = self._source.directory
+        loaded = load_probe_dir(self._probe_dir)
+        self._config = loaded.config
+        self._config_sha256 = loaded.config_sha256
+        self._weights_sha256 = loaded.weights_sha256
+        self._train_ids = loaded.train_ids
+        self._weight = torch.from_numpy(loaded.weights.weight)
+        self._bias = float(loaded.weights.bias[0])
         logger.info(
             "Loaded SEP probe.",
             extra={
                 LOG_EXTRA_KEY: {
                     "probe_dir": str(self._probe_dir),
+                    "probe_ref": self._source.ref,
+                    "probe_revision": self._source.revision,
                     "model_id": self._config.backbone.model_id,
                     "layers": list(self._config.features.layers),
                 }
@@ -296,9 +367,29 @@ class SemanticEntropyProbeDetector(HiddenStateDetector):
         return self._probe_dir
 
     @property
+    def source(self) -> ProbeSource:
+        """Where the probe directory came from (reference and Hub commit)."""
+        return self._source
+
+    @property
     def config(self) -> SEPProbeConfig:
         """The probe's `probe_config.json`."""
         return self._config
+
+    @property
+    def config_sha256(self) -> str:
+        """SHA-256 of the `probe_config.json` bytes this detector loaded."""
+        return self._config_sha256
+
+    @property
+    def weights_sha256(self) -> str:
+        """SHA-256 of the `probe.safetensors` bytes this detector loaded."""
+        return self._weights_sha256
+
+    @property
+    def train_ids(self) -> SEPTrainIds | None:
+        """The `train_ids.json` this detector loaded, None if the directory had none."""
+        return self._train_ids
 
     @property
     def hidden_state_layers(self) -> tuple[int, ...]:
@@ -317,26 +408,59 @@ class SemanticEntropyProbeDetector(HiddenStateDetector):
     ) -> None:
         """Raise SEPProbeMismatchError, naming both values, for every field in
         which the model under test differs from the one the probe was trained on."""
-        backbone, prompt = self._config.backbone, self._config.prompt
-        pairs: dict[str, tuple[object, object]] = {
+        pairs = self._backbone_pairs(
+            model_id, revision, num_hidden_layers, hidden_size, answer_instruction
+        )
+        pairs["chat_template_sha256"] = (
+            self._config.prompt.chat_template_sha256,
+            chat_template_sha256,
+        )
+        self._raise_on_mismatch(pairs)
+
+    def check_backbone(
+        self,
+        *,
+        model_id: str,
+        revision: str,
+        num_hidden_layers: int,
+        hidden_size: int,
+        answer_instruction: str,
+    ) -> None:
+        """`check_compatible` without the chat template: the fields known from the
+        model registry and settings alone, before any model or tokenizer is loaded.
+        The full check still runs once the model is built."""
+        self._raise_on_mismatch(
+            self._backbone_pairs(
+                model_id, revision, num_hidden_layers, hidden_size, answer_instruction
+            )
+        )
+
+    def _backbone_pairs(
+        self,
+        model_id: str,
+        revision: str,
+        num_hidden_layers: int,
+        hidden_size: int,
+        answer_instruction: str,
+    ) -> dict[str, tuple[object, object]]:
+        """(trained, under test) for each field known without loading the model."""
+        backbone = self._config.backbone
+        return {
             "model_id": (backbone.model_id, model_id),
             "revision": (backbone.revision, revision),
             "num_hidden_layers": (backbone.num_hidden_layers, num_hidden_layers),
             "hidden_size": (backbone.hidden_size, hidden_size),
-            "answer_instruction": (prompt.answer_instruction, answer_instruction),
-            "chat_template_sha256": (prompt.chat_template_sha256, chat_template_sha256),
+            "answer_instruction": (self._config.prompt.answer_instruction, answer_instruction),
         }
+
+    def _raise_on_mismatch(self, pairs: dict[str, tuple[object, object]]) -> None:
         mismatches = [
             f"{field}: probe {trained!r}, model under test {actual!r}"
             for field, (trained, actual) in pairs.items()
             if trained != actual
         ]
         if mismatches:
-            raise SEPProbeMismatchError(
-                f"SEP probe {self._probe_dir} does not fit the model under test "
-                f"({'; '.join(mismatches)}). A probe works only with the backbone and prompt "
-                f"it was trained on. {_TRAIN_HINT}"
-            )
+            raise SEPProbeMismatchError(self._probe_dir, mismatches)
 
     def score(self, ctx: DetectionContext) -> DetectorScore:
         if ctx.pooled_hidden_state is None:

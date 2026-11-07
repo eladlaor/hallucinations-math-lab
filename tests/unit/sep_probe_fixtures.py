@@ -1,6 +1,7 @@
 """Builders for small, valid SEP probe directories, shared by the detector,
 evaluator and benchmark tests. A probe written here loads exactly like one
-eval.train_sep_probe writes: `probe.safetensors` plus `probe_config.json`.
+eval.train_sep_probe writes: `probe.safetensors` plus `probe_config.json`, and
+`write_train_ids` adds its `train_ids.json`.
 `ProbeBackboneProvider` gives a fake sampling provider the backbone these
 probes were trained on, so the evaluator's compatibility check passes."""
 
@@ -15,6 +16,7 @@ from hallucinations_math_lab.config import Settings
 from hallucinations_math_lab.constants import (
     SEP_PROBE_CONFIG_FILE,
     SEP_PROBE_WEIGHTS_FILE,
+    SEP_TRAIN_IDS_FILE,
     SEPLayerSelection,
     SEPPaperDeviation,
     SEPStandardization,
@@ -28,6 +30,7 @@ from hallucinations_math_lab.custom_types.sep_probe_types import (
     SEPProbeConfig,
     SEPProbeLabels,
     SEPPromptSpec,
+    SEPTrainIds,
     SEPTrainingRecord,
 )
 from hallucinations_math_lab.services.sampling_provider import check_layers
@@ -62,6 +65,7 @@ class ProbeBackboneProvider:
 def probe_config(
     *,
     model_id: str = PROBE_MODEL_ID,
+    revision: str = PROBE_REVISION,
     num_hidden_layers: int = PROBE_NUM_HIDDEN_LAYERS,
     hidden_size: int = PROBE_HIDDEN_SIZE,
     layers: tuple[int, ...] = (PROBE_NUM_HIDDEN_LAYERS,),
@@ -71,7 +75,7 @@ def probe_config(
     return SEPProbeConfig(
         backbone=SEPBackbone(
             model_id=model_id,
-            revision=PROBE_REVISION,
+            revision=revision,
             num_hidden_layers=num_hidden_layers,
             hidden_size=hidden_size,
             dtype="bfloat16",
@@ -141,3 +145,15 @@ def write_probe_dir(
     )
     (directory / SEP_PROBE_CONFIG_FILE).write_text(config.model_dump_json(indent=2) + "\n")
     return directory
+
+
+def write_train_ids(
+    directory: Path, question_ids: list[str], model_id: str = PROBE_MODEL_ID
+) -> Path:
+    """Write the probe directory's `train_ids.json`, as eval.train_sep_probe does."""
+    path = directory / SEP_TRAIN_IDS_FILE
+    train_ids = SEPTrainIds(
+        model_id=model_id, calibration_set="calib.jsonl", question_ids=tuple(question_ids)
+    )
+    path.write_text(train_ids.model_dump_json(indent=2) + "\n")
+    return path

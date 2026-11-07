@@ -5,18 +5,20 @@ in milliseconds. The SLM answers consistently for questions it "knows" and
 scatters for the ones it doesn't, so SE should rank perfectly (AUROC 1.0).
 
 Also pins the leakage guard: a SEP probe may not be evaluated on questions
-listed in its training-id file, and a probe without one is refused.
+listed in its `train_ids.json`, and a probe without one is refused; and the
+provenance every row records for the probe in use.
 """
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 import torch
 
+from eval.benchmark_results import run_config
 from eval.compute_auroc import main as compute_auroc
 from eval.run_benchmark import run as run_benchmark
-from eval.sep_probe_provenance import write_training_ids
 from hallucinations_math_lab import (
     DetectorName,
     PredictiveEntropyDetector,
@@ -26,12 +28,21 @@ from hallucinations_math_lab import (
     SemanticEntropyDetector,
     TokenLogprob,
 )
-from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
+from hallucinations_math_lab.constants import (
+    SEP_PROBE_CONFIG_FILE,
+    SEP_PROBE_WEIGHTS_FILE,
+    SEP_TRAIN_IDS_FILE,
+)
+from hallucinations_math_lab.services.semantic_entropy_probe import (
+    ProbeSource,
+    SemanticEntropyProbeDetector,
+)
 from tests.unit.sep_probe_fixtures import (
     PROBE_HIDDEN_SIZE,
     PROBE_MODEL_ID,
     ProbeBackboneProvider,
     write_probe_dir,
+    write_train_ids,
 )
 
 KNOWN_ANSWERS = {"Capital of France?": "Paris", "Author of 1984?": "Orwell"}
@@ -107,6 +118,7 @@ def test_benchmark_then_auroc(tmp_path, capsys):
     assert rows[0]["model_id"] == "fake-slm"
     assert {"sample_n", "sample_temperature", "max_tokens", "answer_instruction"} <= set(rows[0])
     assert rows[0]["answer_instruction"]  # the brief-answer prompt is part of the run
+    assert rows[0]["sep_probe"] is None  # no SEP detector, no probe
 
     compute_auroc(results)
     report = json.loads(capsys.readouterr().out)
@@ -164,10 +176,10 @@ def test_benchmark_without_a_judge_records_no_judge_answer(tmp_path):
     assert all(row["judge_answer"] is None for row in rows)
 
 
-def _probe_evaluator(probe_dir: Path) -> ResponseEvaluator:
+def _probe_evaluator(probe: Path | ProbeSource) -> ResponseEvaluator:
     return ResponseEvaluator(
         slm=HiddenStateSLM(),
-        detectors=[SemanticEntropyProbeDetector(write_probe_dir(probe_dir))],
+        detectors=[SemanticEntropyProbeDetector(probe)],
         escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
         escalation_threshold=1.0,
     )
@@ -176,30 +188,144 @@ def _probe_evaluator(probe_dir: Path) -> ResponseEvaluator:
 def test_benchmark_refuses_questions_the_probe_was_trained_on(tmp_path):
     questions = tmp_path / "questions.jsonl"
     _write_questions(questions)
-    probe_dir = tmp_path / "probe"
-    evaluator = _probe_evaluator(probe_dir)
-    write_training_ids(probe_dir, ["q2", "unrelated"], PROBE_MODEL_ID, tmp_path / "calib.jsonl")
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["q2", "unrelated"])
 
     with pytest.raises(RuntimeError, match="used to train the SEP probe"):
-        run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator)
+        run_benchmark(
+            questions, tmp_path / "out.jsonl", judge=False, evaluator=_probe_evaluator(probe_dir)
+        )
     assert not (tmp_path / "out.jsonl").exists()
 
 
 def test_benchmark_accepts_a_probe_trained_on_other_questions(tmp_path):
     questions = tmp_path / "questions.jsonl"
     _write_questions(questions)
-    probe_dir = tmp_path / "probe"
-    evaluator = _probe_evaluator(probe_dir)
-    write_training_ids(probe_dir, ["other-1", "other-2"], PROBE_MODEL_ID, tmp_path / "calib.jsonl")
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["other-1", "other-2"])
 
-    run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator, limit=1)
+    run_benchmark(
+        questions,
+        tmp_path / "out.jsonl",
+        judge=False,
+        evaluator=_probe_evaluator(probe_dir),
+        limit=1,
+    )
     assert len((tmp_path / "out.jsonl").read_text().splitlines()) == 1
 
 
 def test_benchmark_refuses_a_probe_without_provenance(tmp_path):
     questions = tmp_path / "questions.jsonl"
     _write_questions(questions)
-    evaluator = _probe_evaluator(tmp_path / "probe")
+    evaluator = _probe_evaluator(write_probe_dir(tmp_path / "probe"))
 
     with pytest.raises(RuntimeError, match="no training-id file"):
         run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator)
+
+
+def test_train_ids_inside_probe_dir(tmp_path):
+    """The guard reads `<probe dir>/train_ids.json`, validated as SEPTrainIds; a
+    stale sidecar beside the directory (the old `.pt` layout) does not count."""
+    questions = tmp_path / "questions.jsonl"
+    _write_questions(questions)
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    stale = tmp_path / f"probe.{SEP_TRAIN_IDS_FILE}"
+    stale.write_text(json.dumps({"model_id": PROBE_MODEL_ID, "question_ids": ["other"]}))
+
+    with pytest.raises(RuntimeError, match="no training-id file"):
+        run_benchmark(
+            questions, tmp_path / "out.jsonl", judge=False, evaluator=_probe_evaluator(probe_dir)
+        )
+
+    # Keys alone are not enough: the file must be a whole SEPTrainIds, checked at load.
+    (probe_dir / SEP_TRAIN_IDS_FILE).write_text(json.dumps({"question_ids": ["other"]}))
+    with pytest.raises(ValueError, match="Malformed SEP probe training-id file"):
+        _probe_evaluator(probe_dir)
+
+
+def test_benchmark_checks_the_train_ids_the_evaluator_loaded(tmp_path):
+    """A probe trained on the benchmark is refused even if its train_ids.json is
+    rewritten after the evaluator was built: the run scores the loaded weights."""
+    questions = tmp_path / "questions.jsonl"
+    _write_questions(questions)
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["q1", "q2", "q3", "adv"])
+    evaluator = _probe_evaluator(probe_dir)
+    write_train_ids(probe_dir, ["other"])
+
+    with pytest.raises(RuntimeError, match="used to train the SEP probe"):
+        run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator)
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_run_config_records_probe_ref_revision_and_sha256(tmp_path):
+    questions = tmp_path / "questions.jsonl"
+    _write_questions(questions)
+    commit = "c" * 40
+    probe_dir = write_probe_dir(tmp_path / "snapshots" / commit)
+    write_train_ids(probe_dir, ["other"])
+    source = ProbeSource(directory=probe_dir, ref="hf://owner/sep-probe@v1", revision=commit)
+    results = tmp_path / "out.jsonl"
+
+    run_benchmark(questions, results, judge=False, evaluator=_probe_evaluator(source))
+
+    rows = [json.loads(line) for line in results.read_text().splitlines()]
+    expected = {
+        "ref": "hf://owner/sep-probe@v1",
+        "revision": commit,
+        "weights_sha256": _sha256(probe_dir / SEP_PROBE_WEIGHTS_FILE),
+        "config_sha256": _sha256(probe_dir / SEP_PROBE_CONFIG_FILE),
+    }
+    assert all(row["sep_probe"] == expected for row in rows)
+    # Part of the run config, so the scoring scripts carry it and refuse to mix probes.
+    assert run_config(rows, str(results))["sep_probe"] == expected
+
+
+def test_run_config_records_a_local_probe_without_revision(tmp_path):
+    questions = tmp_path / "questions.jsonl"
+    _write_questions(questions)
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["other"])
+    results = tmp_path / "out.jsonl"
+
+    run_benchmark(questions, results, judge=False, evaluator=_probe_evaluator(probe_dir), limit=1)
+
+    (row,) = [json.loads(line) for line in results.read_text().splitlines()]
+    assert row["sep_probe"]["ref"] == str(probe_dir)
+    assert row["sep_probe"]["revision"] is None
+
+
+def test_run_config_hashes_the_probe_the_evaluator_loaded(tmp_path):
+    """A directory retrained after the evaluator was built does not change the record."""
+    questions = tmp_path / "questions.jsonl"
+    _write_questions(questions)
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["other"])
+    loaded_weights = _sha256(probe_dir / SEP_PROBE_WEIGHTS_FILE)
+    loaded_config = _sha256(probe_dir / SEP_PROBE_CONFIG_FILE)
+    evaluator = _probe_evaluator(probe_dir)
+    (probe_dir / SEP_PROBE_WEIGHTS_FILE).write_bytes(b"retrained")
+    (probe_dir / SEP_PROBE_CONFIG_FILE).write_text("retrained")
+    results = tmp_path / "out.jsonl"
+
+    run_benchmark(questions, results, judge=False, evaluator=evaluator, limit=1)
+
+    (row,) = [json.loads(line) for line in results.read_text().splitlines()]
+    assert row["sep_probe"]["weights_sha256"] == loaded_weights
+    assert row["sep_probe"]["config_sha256"] == loaded_config
+
+
+def test_sep_run_refuses_a_question_without_an_id(tmp_path):
+    """Without an id a question cannot be checked against the probe's training set."""
+    questions = tmp_path / "questions.jsonl"
+    questions.write_text(json.dumps({"question": "Who walked on Mars?"}) + "\n")
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    write_train_ids(probe_dir, ["other"])
+    results = tmp_path / "out.jsonl"
+
+    with pytest.raises(ValueError, match=r"Question 1 \('Who walked on Mars\?'\) has no 'id'"):
+        run_benchmark(questions, results, judge=False, evaluator=_probe_evaluator(probe_dir))
+    assert not results.exists()

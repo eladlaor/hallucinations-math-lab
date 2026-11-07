@@ -8,6 +8,7 @@ Pin the probe's contract end to end:
   - The score is p(high SE) = sigmoid(w·x + b) over the concatenated layers.
 """
 
+import hashlib
 import json
 import logging
 from pathlib import Path
@@ -35,6 +36,7 @@ from hallucinations_math_lab.services.detector_protocol import (
 from hallucinations_math_lab.services.semantic_entropy_probe import (
     HubProbeRef,
     ObsoleteSEPProbeError,
+    ProbeSource,
     SemanticEntropyProbeDetector,
     SEPProbeMismatchError,
     default_probe_dir,
@@ -102,8 +104,8 @@ def test_hub_download_mocked_loads_matching_probe(
 
     monkeypatch.setattr(semantic_entropy_probe, "snapshot_download", fake_snapshot_download)
 
-    directory = resolve_probe_source("hf://owner/sep-probe@v1", PROBE_MODEL_ID)
-    detector = SemanticEntropyProbeDetector(directory)
+    source = resolve_probe_source("hf://owner/sep-probe@v1", PROBE_MODEL_ID)
+    detector = SemanticEntropyProbeDetector(source)
     detector.check_compatible(**_MATCHING_BACKBONE)
 
     (call,) = calls
@@ -111,6 +113,7 @@ def test_hub_download_mocked_loads_matching_probe(
     assert call["revision"] == "v1"
     assert sorted(call["allow_patterns"]) == sorted(SEP_PROBE_DIR_FILES)
     assert detector.probe_dir == tmp_path / "hub-cache"
+    assert detector.source == source
 
 
 def test_hub_download_logs_the_resolved_commit(
@@ -123,7 +126,9 @@ def test_hub_download_logs_the_resolved_commit(
 
     monkeypatch.setattr(semantic_entropy_probe, "snapshot_download", fake_snapshot_download)
     with caplog.at_level(logging.INFO, logger=semantic_entropy_probe.logger.name):
-        resolve_probe_source("hf://owner/sep-probe", PROBE_MODEL_ID)
+        source = resolve_probe_source("hf://owner/sep-probe", PROBE_MODEL_ID)
+    assert source.ref == "hf://owner/sep-probe"
+    assert source.revision == commit
 
     (record,) = [r for r in caplog.records if r.name == semantic_entropy_probe.logger.name]
     context = getattr(record, LOG_EXTRA_KEY)
@@ -141,7 +146,19 @@ def test_hub_download_failure_names_the_reference(monkeypatch: pytest.MonkeyPatc
 
 
 def test_explicit_directory_is_used_as_is(probe_dir: Path) -> None:
-    assert resolve_probe_source(str(probe_dir), "any/model") == probe_dir
+    assert resolve_probe_source(str(probe_dir), "any/model") == ProbeSource(
+        directory=probe_dir, ref=str(probe_dir), revision=None
+    )
+
+
+def test_a_relative_directory_is_recorded_as_given(
+    probe_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never resolved: a published run config must not carry this machine's absolute path."""
+    monkeypatch.chdir(probe_dir.parent)
+    source = resolve_probe_source(probe_dir.name, "any/model")
+    assert source.directory == Path(probe_dir.name)
+    assert source.ref == probe_dir.name
 
 
 def test_missing_explicit_directory_raises_with_training_hint(tmp_path: Path) -> None:
@@ -158,7 +175,9 @@ def test_default_directory_follows_the_model(
     with pytest.raises(FileNotFoundError, match="google-gemma-4-e2b-it"):
         resolve_probe_source("", "google/gemma-4-E2B-it")
     write_probe_dir(expected)
-    assert resolve_probe_source("", "google/gemma-4-E2B-it") == expected
+    source = resolve_probe_source("", "google/gemma-4-E2B-it")
+    assert source.directory == expected
+    assert source.ref == f"{SEP_PROBE_DIR}/google-gemma-4-e2b-it"
 
 
 def test_pt_file_raises_obsolete_with_retrain_hint(tmp_path: Path) -> None:
@@ -205,6 +224,17 @@ def test_loads_config_and_weights(probe_dir: Path) -> None:
     probe = load_probe_dir(probe_dir)
     assert probe.config == probe_config()
     assert probe.weights.weight.shape == (PROBE_HIDDEN_SIZE,)
+
+
+def test_detector_hashes_the_bytes_it_loaded(probe_dir: Path) -> None:
+    """Hashes come from load time, so rewriting the directory later does not change them."""
+    weights_sha256 = hashlib.sha256((probe_dir / SEP_PROBE_WEIGHTS_FILE).read_bytes()).hexdigest()
+    config_sha256 = hashlib.sha256((probe_dir / SEP_PROBE_CONFIG_FILE).read_bytes()).hexdigest()
+    detector = SemanticEntropyProbeDetector(probe_dir)
+    (probe_dir / SEP_PROBE_CONFIG_FILE).write_text("retrained")
+    (probe_dir / SEP_PROBE_WEIGHTS_FILE).write_bytes(b"retrained")
+    assert detector.weights_sha256 == weights_sha256
+    assert detector.config_sha256 == config_sha256
 
 
 def test_missing_probe_file_raises_naming_it(probe_dir: Path) -> None:

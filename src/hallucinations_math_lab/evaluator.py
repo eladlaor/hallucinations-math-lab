@@ -21,7 +21,6 @@ SE is not in the configured detector list, `clusters` is None.
 """
 
 import logging
-from pathlib import Path
 
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY, AnswerSource, DetectorName
@@ -35,6 +34,7 @@ from hallucinations_math_lab.services.detector_protocol import (
 )
 from hallucinations_math_lab.services.sampling_provider import SamplingProvider
 from hallucinations_math_lab.services.semantic_entropy_probe import (
+    ProbeSource,
     SemanticEntropyProbeDetector,
     resolve_probe_source,
 )
@@ -215,7 +215,7 @@ def _build_default_detectors(enabled: list[DetectorName], model_id: str) -> list
         elif name == DetectorName.DISCRETE_SEMANTIC_ENTROPY:
             detectors.append(DiscreteSemanticEntropyDetector())
         elif name == DetectorName.SEMANTIC_ENTROPY_PROBE:
-            detectors.append(SemanticEntropyProbeDetector(_resolve_sep_probe_dir(model_id)))
+            detectors.append(SemanticEntropyProbeDetector(_resolve_sep_probe_source(model_id)))
         else:
             raise ValueError(
                 f"Detector {name!s} is in ENABLED_DETECTORS but unknown to the evaluator."
@@ -223,8 +223,8 @@ def _build_default_detectors(enabled: list[DetectorName], model_id: str) -> list
     return detectors
 
 
-def _resolve_sep_probe_dir(model_id: str) -> Path:
-    """The probe directory SEP_PROBE_PATH names (a path or an `hf://` repo), else
+def _resolve_sep_probe_source(model_id: str) -> ProbeSource:
+    """The ProbeSource SEP_PROBE_PATH names (a path or an `hf://` repo), else
     the default for `model_id` — the model actually being evaluated, which in a
     multi-model sweep is not VLLM_MODEL_ID. A missing or legacy `.pt` probe
     raises here, so the misconfiguration surfaces before the first request."""

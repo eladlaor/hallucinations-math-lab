@@ -103,6 +103,7 @@ def benchmark_row(
         "sample_temperature": 1.0,
         "max_tokens": 64,
         "answer_instruction": "Answer the following question as briefly as possible.",
+        "sep_probe": None,
     }
 
 

@@ -462,9 +462,11 @@ USE
    → escalate if p > SEP_THRESHOLD   (when ESCALATION_DETECTOR=semantic_entropy_probe)
 
 HELD-OUT + PUBLISH
-  run_benchmark on the disjoint test slice (records the probe sha256 per row)
-   → compute_auroc --json-out → publish_sep_probe (checks the sha, merges heldout, renders
-     the card) → Hub model repo + dataset repo, tag v1
+  run_benchmark on the disjoint test slice (records the probe's weights_sha256 and
+  config_sha256 per row)
+   → compute_auroc --json-out → publish_sep_probe (checks both hashes against the probe
+     being published, merges heldout, renders the card) → Hub model repo + dataset repo,
+     tag v1
 ```
 
 ## Artifact format
@@ -520,7 +522,7 @@ disk and on the Hub**.
 - **`threshold`**: `{recommended, tpr, fpr, escalation_rate, source: "oof_youden"}`
 - **`converged`**, **`n_iter`**
 - **`ablations`**: optional.
-- **`heldout_benchmark`**: added at publish time; holds compute_auroc's output for SEP, PE, SE and discrete SE with bootstrap CIs, the run config, and the probe sha256.
+- **`heldout_benchmark`**: added at publish time; holds compute_auroc's output for SEP, PE, SE and discrete SE with bootstrap CIs, and the run config, whose `sep_probe` holds the probe's `weights_sha256` (of `probe.safetensors`) and `config_sha256` (of `probe_config.json`); publish_sep_probe checks both against the directory it publishes.
 
 ### The dataset directory (companion Hub dataset repo)
 
@@ -596,6 +598,8 @@ with the probe's.
 | A custom `SamplingProvider` | Also implement `hidden_size`, `chat_template_sha256` and `check_hidden_state_request(layers)`. |
 | A custom detector with `requires_hidden_state=True` | Implement `HiddenStateDetector.hidden_state_layers`; otherwise building the evaluator raises `TypeError`. |
 | SEP on `SLM_PROVIDER=vllm` without `VLLM_EMBED_BASE_URL` | Building the evaluator now fails with `UnsupportedHiddenStateRequest`, instead of at the first request. Set `VLLM_EMBED_BASE_URL` or use `hf_transformers`. |
+| Results files from an earlier `eval.run_benchmark` | Re-run `eval.run_benchmark`: every scoring script now refuses rows without the `sep_probe` field it records. |
+| A benchmark question without an `id`, run with SEP enabled | Give every question an `id`: a SEP run refuses an id-less question (it cannot be checked against the probe's training ids) instead of skipping it. |
 
 ## Backward compatibility for old probes
 
@@ -673,6 +677,8 @@ All of these are done in work item 18.
 - **[`TODO.md`](TODO.md)**: tick the SEP item and add the [deferred follow-ups](#deferred-follow-ups).
 - **CHANGELOG `[Unreleased]`**
   - Changed (breaking): SEP outputs p(high SE); probes are directories; provider protocol.
+  - Changed (breaking): scoring scripts refuse results files without `sep_probe` (re-run
+    `eval.run_benchmark`); a SEP run refuses a question without an `id` instead of skipping it.
   - Added: `SEP_THRESHOLD`, the layer and position sweep, the dataset export, `hf://` probes,
     the publish script, `compute_auroc --json-out`, registry revisions.
   - Removed: Ridge `.pt` probes and `--ridge-alpha`.
@@ -1116,6 +1122,53 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Files: `eval/sep_probe_provenance.py`, `eval/run_benchmark.py`,
   `tests/unit/test_benchmark_pipeline.py`.
 - Done when: the tests pass.
+- *As implemented:*
+  - **`ProbeSource`.** `resolve_probe_source` now returns a `ProbeSource(directory, ref,
+    revision)`: `ref` is the `hf://` URI or the local directory as given, `revision` the downloaded
+    snapshot's commit (None for a local directory). `SemanticEntropyProbeDetector` accepts a
+    `ProbeSource` or a plain path and exposes it as `.source`, so a run records where the
+    probe it actually scored came from, also for an evaluator passed in by the caller.
+  - **Run config.** Every row gains `sep_probe`, part of `RUN_CONFIG_FIELDS`: null without
+    SEP, else `{ref, revision, weights_sha256, config_sha256}`. **Two hashes, not one**: the
+    config decides the layers and token position as much as the weights decide the score, so
+    `probe.safetensors` and `probe_config.json` are each hashed (each checkable with
+    `sha256sum`). The hashes are taken when the detector loads the probe and read from it, so
+    an evaluator built before its directory was retrained still records the bytes it scores;
+    the weights are parsed from the very bytes hashed. `train_ids.json` is read at the same
+    moment (`detector.train_ids`), and the overlap guard checks those loaded ids, never the
+    directory at run time, so a retrain cannot slip a leaked probe past it. Results files written before this lack the field and are refused by the
+    scoring scripts with the existing "re-run" message. compute_auroc's `run_config` carries
+    it, which is what item 15's `heldout_benchmark` needs.
+  - **Comparability.** Within one results file every row must carry the same `sep_probe`.
+    Across runs (`assert_same_run_config`, used by adversarial_separation) the probe is
+    compared by its two hashes only (`SEP_PROBE_IDENTITY_FIELDS`), so the same probe bytes
+    loaded from `data/probes/<slug>` and from `hf://…@<sha>` stay comparable; the refusal
+    message names the SEP probe. A local `ref` is the path as given (SEP_PROBE_PATH, or the
+    relative `data/probes/<slug>` default), never resolved, because item 15 publishes this run
+    config in `heldout_benchmark` and an absolute path would leak a machine-specific location.
+    Identity across spellings comes from the hashes. Item 15 must still refuse to publish a
+    `sep_probe.ref` that is an absolute path (an absolute SEP_PROBE_PATH is recorded as given).
+  - **Leakage guard is strict.** With a SEP probe, a question without an `id` is refused
+    (naming its row) instead of being skipped, since it cannot be checked against the
+    probe's training ids.
+  - **Training ids** are read as `SEPTrainIds` (malformed or partial files are refused);
+    `write_training_ids` is removed, since the trainer writes `SEPTrainIds` itself. Tests
+    use `write_train_ids` in `tests/unit/sep_probe_fixtures.py`. The overlap tests in
+    `test_eval_criteria.py` and the benchmark tests are ported to it.
+  - **Sweep preflight** now loads each model's probe (validating its files) and calls the
+    detector's new `check_backbone`: `check_compatible` without the chat template, checked
+    against the model's registry entry and `ANSWER_INSTRUCTION`. A probe for the wrong
+    revision, layer count or hidden size thus fails the sweep before any model is scored;
+    the template is still checked when each model is built. The single-model run needed no
+    change: the evaluator's constructor already runs the full check before any sample.
+  - The two preflight tests live in `tests/unit/test_model_comparison.py`, beside the other
+    sweep tests and their fixtures. `test_preflight_expects_probe_dir_and_gives_pt_message`
+    passed on first run: item 11 had already routed the preflight through the loader's
+    `.pt` refusal; it now pins that behaviour.
+  - A sweep's backbone mismatch is re-raised with a sweep-specific remedy (replace
+    `data/probes/<slug>/` with a probe trained for that model), since the generic hint
+    suggests SEP_PROBE_PATH, which a sweep refuses. `SEPProbeMismatchError` carries the probe
+    directory and the mismatches for that purpose.
 
 **14. compute_auroc JSON output and calibrate_threshold env hint.**
 
@@ -1131,7 +1184,8 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Failing tests first:
   - `test_model_card_snapshot` (golden file `tests/unit/fixtures/sep_model_card.golden.md`)
   - `test_publish_refuses_without_heldout`
-  - `test_heldout_refuses_probe_sha_mismatch`
+  - `test_heldout_refuses_probe_sha_mismatch` (parametrized over `weights_sha256` and
+    `config_sha256`: either differing from the published directory's files is refused)
   - `test_publish_refuses_model_id_mismatch`
   - `test_publish_refuses_repo_dirty`
   - `test_publish_has_no_token_arg`
