@@ -76,8 +76,8 @@ Also run the frontend's `npm test` for item 17.
 independently:
 
 - **Token position** is *which token's* vector we read. TBG ("token before generation") is
-  the last token of the prompt. SLT ("second-last token") is the second-last token of the
-  generated answer.
+  the last token of the prompt. SLT ("second-last token") is a token near the end of the
+  generated answer (exact index below).
 - **Layer** is *how deep* in the network we read that vector.
 
 The README's sentence "the hidden state at the last token of the chat-formatted prompt"
@@ -307,14 +307,23 @@ main setting (Sec. 4, "Probing Locations").
 
 - **TBG** = the last token of the chat-formatted prompt with `add_generation_prompt=True`. The
   input is unchanged.
-- **SLT** reproduces `huggingface_models.py`, which takes generation step n_gen − 2 (EOS
-  included). Our teacher-forced equivalent:
-  1. Run one forward pass over the prompt plus the greedy answer tokens plus EOS.
-  2. Let m be the number of non-EOS answer tokens. Read the position of answer token a[m−2],
-     whose output predicts the last content token.
-  3. If m = 1, read the last prompt token.
+- **SLT** reproduces the index `huggingface_models.py` computes: generate step
+  `hidden[n_generated − 2]`, stored as `emb_tok_before_eos`. There n_generated = m counts
+  content tokens only, because EOS is dropped at decode and a trailing stop word is cut before
+  re-tokenizing. Generate step j's input is generated token j − 1. Our teacher-forced
+  equivalent:
+  1. Run one forward pass over the prompt plus the greedy answer tokens a[0..m−1] plus EOS.
+  2. Read the position of answer token a[m−3], whose output predicts a[m−2].
+  3. If m = 2, that is the last prompt token (the authors' `hidden[0]`), the same as TBG.
+  4. If m = 1, read a[0]. The authors' index is −1 there, so Python selects the last generate
+     step, which is a[0] when one stop token ends the answer. We reproduce that rather than
+     invent a rule.
 
-  That this matches generate-time states is likely, not verified (a GPU check).
+  **Caveat for comparisons with the paper:** the name `emb_tok_before_eos` and the paper text
+  suggest the state one token later, a[m−2] (the authors' `last_token_embedding` index). The
+  published SEP results were trained on the computed index, so we read that one. This is not
+  a deviation from the authors' code, but it is one token earlier than the text implies.
+  That teacher-forced states match generate-time states is likely, not verified (a GPU check).
 - **Answer used for SLT:** our greedy answer (T = 0), which is what the paper's text says. The
   paper's code samples at T = 0.1 (D7).
 - **Served position:** v1 loads only TBG probes. `TokenPosition` is a StrEnum with
@@ -820,11 +829,31 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 
 - A fake tokenizer and model echo the position index as the hidden value.
 - Failing tests first:
-  - `test_slt_is_position_of_a_m_minus_2`
-  - `test_slt_single_token_answer_falls_back_to_last_prompt_token`
+  - `test_slt_is_position_of_a_m_minus_2` (renamed `..._a_m_minus_3`; see below)
+  - `test_slt_single_token_answer_falls_back_to_last_prompt_token` (replaced; see below)
   - `test_slt_token_construction_includes_eos`
 - Files: `demo/slm_provider.py`, `tests/unit/test_slm_provider.py`.
 - Done when: the tests pass.
+- *As implemented:*
+  - **The signature is `hidden_states_all_layers(prompt, position, answer=None)`.** `position` is
+    required, so every caller names TBG or SLT. `TokenPosition` moved into `constants.py` here,
+    not in item 10. SLT needs `answer`, and TBG refuses one. Both are checked before the model
+    runs (`test_position_and_answer_must_agree`).
+  - **`answer` is the greedy answer text, re-tokenized** with `add_special_tokens=False`. The
+    collector gets that text from `greedy()`, and the generated token ids are not kept. A
+    re-tokenization can differ from the generated ids. This adds to why the SLT match is "likely,
+    not verified" (a GPU check). An answer that encodes to no tokens raises.
+  - **EOS is `tokenizer.eos_token_id`.** The model's actual stop token may be a different one,
+    such as an end-of-turn token. That cannot change the state that is read: a causal model's
+    state never sees later tokens.
+  - **The read index is prompt_len + m − 3 for m ≥ 2** (the last prompt token when m = 2),
+    and prompt_len (a[0]) for m = 1. A review against the authors' repository found the first
+    draft one token late: it read prompt_len + m − 2, their `last_token_embedding` index, on
+    the false premise that their n_gen counts EOS. The tests are
+    `test_slt_is_position_of_a_m_minus_3`, `test_slt_two_token_answer_reads_last_prompt_token`
+    and `test_slt_single_token_answer_reads_the_answer_token`.
+  - Teacher forcing extends only `input_ids` and `attention_mask`. A prompt encoding with any
+    other key raises.
 
 **9. Dataset collection and export (PSP 5, changed: always written).**
 

@@ -42,6 +42,7 @@ from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import (
     ANSWER_MESSAGE_TEMPLATE,
     LOG_EXTRA_KEY,
+    TokenPosition,
     VLLMAuthMode,
 )
 from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
@@ -274,8 +275,9 @@ class HFTransformersProvider:
     Hosts the SLM in-process. Supports both generation (with per-token
     logprobs from the raw `output_logits`, see `raw_token_logprobs`) and
     hidden states (a separate forward pass with the boolean
-    `output_hidden_states=True`, read at the final prompt token for every
-    layer 0..L; `pooled_hidden_state` selects rows from that).
+    `output_hidden_states=True`, read for every layer 0..L at the final
+    prompt token, or for dataset collection at a teacher-forced answer
+    token; `pooled_hidden_state` selects rows from the former).
 
     Two forward passes per query (one for sampling, one for the hidden
     states) is intentional — keeps responsibilities separate. The
@@ -439,17 +441,40 @@ class HFTransformersProvider:
         _, model = self._ensure_loaded()
         return _text_config_num_hidden_layers(model)
 
-    def hidden_states_all_layers(self, prompt: str) -> torch.Tensor:
-        """Every layer's hidden state at the last prompt token (TBG).
+    def hidden_states_all_layers(
+        self, prompt: str, position: TokenPosition, answer: str | None = None
+    ) -> torch.Tensor:
+        """Every layer's hidden state at one token `position`.
 
         Returns float32 `[L+1, hidden_size]` on CPU, row k being the state
         after k decoder layers: HF's boolean `output_hidden_states` tuple,
         whose index L already has the final norm applied. The prompt is
-        chat-formatted with the generation prompt appended, so its last token
-        is the one just before the model's answer."""
+        chat-formatted with the generation prompt appended.
+
+        TBG reads the prompt's last token, the one just before the model's
+        answer; `answer` must be None. SLT teacher-forces `answer` (the
+        greedy answer text, required): one forward pass over the prompt, the
+        answer's tokens and EOS, read at the position the authors' code
+        reads (see `_teacher_forced_inputs`)."""
+        # Coerce first: a plain string that skipped enum conversion must not
+        # pass an identity check by accident and silently read TBG.
+        try:
+            token_position = TokenPosition(position)
+        except ValueError as e:
+            raise ValueError(
+                f"position={position!r} is not one of {[str(p) for p in TokenPosition]}."
+            ) from e
+        if (token_position is TokenPosition.SLT) != (answer is not None):
+            raise ValueError(
+                f"position={token_position} needs the answer text for SLT and takes no answer "
+                f"for TBG; got answer={answer!r}."
+            )
         tokenizer, model = self._ensure_loaded()
         try:
             inputs = self._encode(tokenizer, model, prompt)
+            read_index = inputs["input_ids"].shape[1] - 1
+            if answer is not None:
+                inputs, read_index = _teacher_forced_inputs(tokenizer, inputs, answer)
             with torch.no_grad():
                 out = model(**inputs, output_hidden_states=True)
             hidden_states: tuple[torch.Tensor, ...] = out.hidden_states
@@ -459,24 +484,73 @@ class HFTransformersProvider:
                     f"model returned {len(hidden_states)} hidden-state tensors, expected "
                     f"{expected} (the embeddings plus one per decoder layer)."
                 )
-            last_prompt_token = inputs["input_ids"].shape[1] - 1
             # Move each row to CPU before stacking: with device_map="auto" a
             # sharded model keeps each layer's state on that layer's device.
             return torch.stack(
                 [
-                    layer[0, last_prompt_token].detach().to(device="cpu", dtype=torch.float32)
+                    layer[0, read_index].detach().to(device="cpu", dtype=torch.float32)
                     for layer in hidden_states
                 ]
             )
         except Exception as e:
             raise RuntimeError(
                 f"HFTransformersProvider.hidden_states_all_layers failed for "
-                f"prompt={prompt[:80]!r} model={self.model_id!r}: {e!s}"
+                f"prompt={prompt[:80]!r} position={token_position} model={self.model_id!r}: {e!s}"
             ) from e
 
     def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor:
         check_layers(layers, self.num_hidden_layers)
-        return self.hidden_states_all_layers(prompt)[list(layers)]
+        return self.hidden_states_all_layers(prompt, TokenPosition.TBG)[list(layers)]
+
+
+# The keys a chat-templated text prompt encodes to; teacher forcing extends both.
+_TEXT_ENCODING_KEYS = frozenset({"input_ids", "attention_mask"})
+# SLT reads answer token a[m - 3] for m >= 2 (see `_teacher_forced_inputs`).
+_SLT_ANSWER_OFFSET_FROM_END = 3
+
+
+def _teacher_forced_inputs(
+    tokenizer: PreTrainedTokenizerBase, prompt_inputs: BatchEncoding, answer: str
+) -> tuple[BatchEncoding, int]:
+    """The SLT forward pass's inputs, and the token index to read.
+
+    The sequence is the prompt, then the answer's m tokens a[0..m-1], then
+    EOS: the sequence greedy generation produced, with the answer text
+    re-tokenized. The read index reproduces what the authors' code computes
+    (`huggingface_models.py` in github.com/OATML/semantic-entropy-probes):
+    it reads generate step `hidden[n_generated - 2]`, where n_generated = m
+    counts content tokens only (EOS and stop words are stripped first) and
+    step j's input is the generated token j - 1. That is a[m-3], whose
+    output predicts a[m-2]; for m = 2 it is the last prompt token. For m = 1,
+    n_generated - 2 = -1 selects the last generate step, which for an answer
+    ended by one stop token reads a[0]. This is one token earlier than the
+    paper text's "token before EOS". A causal model's state never sees later
+    tokens; EOS is appended so the pass mirrors the generated sequence."""
+    from transformers import BatchEncoding
+
+    if set(prompt_inputs.keys()) != _TEXT_ENCODING_KEYS:
+        raise ValueError(
+            f"teacher forcing extends only {sorted(_TEXT_ENCODING_KEYS)}; the prompt encoded "
+            f"to {sorted(prompt_inputs.keys())}."
+        )
+    eos_id = tokenizer.eos_token_id
+    if not isinstance(eos_id, int):
+        raise TypeError(f"tokenizer eos_token_id is {eos_id!r}; SLT needs one EOS token id.")
+    answer_ids = tokenizer.encode(answer, add_special_tokens=False)
+    if not answer_ids:
+        raise ValueError(f"answer {answer!r} encodes to no tokens; SLT needs at least one.")
+    prompt_ids: torch.Tensor = prompt_inputs["input_ids"]
+    suffix = torch.tensor([[*answer_ids, eos_id]], dtype=prompt_ids.dtype, device=prompt_ids.device)
+    input_ids = torch.cat([prompt_ids, suffix], dim=1)
+    # a[k] sits at prompt_len + k, so a[-1] (m = 2) is the last prompt token;
+    # m = 1 reads a[0], the authors' negative-index case.
+    m = len(answer_ids)
+    answer_index = m - _SLT_ANSWER_OFFSET_FROM_END if m > 1 else 0
+    read_index = prompt_ids.shape[1] + answer_index
+    teacher_forced = BatchEncoding(
+        {"input_ids": input_ids, "attention_mask": torch.ones_like(input_ids)}
+    )
+    return teacher_forced, read_index
 
 
 def _generate(model: CausalLM, inputs: BatchEncoding, **kwargs: Any) -> GenerateDecoderOnlyOutput:

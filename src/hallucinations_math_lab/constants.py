@@ -137,6 +137,20 @@ class SEPThresholdSource(StrEnum):
     OOF_YOUDEN = "oof_youden"
 
 
+class TokenPosition(StrEnum):
+    """Which token's hidden state a SEP probe reads (Kossen et al. 2024, Sec. 4).
+
+    TBG: the last token of the chat-formatted prompt, before any generation.
+    SLT: the "second-last token" as the authors' code computes it, read by
+    teacher-forcing the greedy answer's m tokens a[0..m-1]: the state at
+    a[m-3], whose output predicts a[m-2]. For m = 2 that is the last prompt
+    token (TBG's position); for m = 1 it is the answer's only token.
+    """
+
+    TBG = "tbg"
+    SLT = "slt"
+
+
 # Reproducibility
 RANDOM_SEED: Final[int] = 42
 

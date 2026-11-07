@@ -41,6 +41,7 @@ from demo.slm_provider import (
     stop_token_ids,
     sweep_model_ids,
 )
+from hallucinations_math_lab.constants import TokenPosition
 from hallucinations_math_lab.services.sampling_provider import (
     UnsupportedHiddenStateRequest,
     final_norm_applied,
@@ -238,10 +239,19 @@ PROMPT_TOKENS = 4
 # value, so a read-back shows both which layer and which token it came from.
 POSITION_SCALE = 0.01
 TBG_POSITION = PROMPT_TOKENS - 1
+# The fake tokenizer gives each answer word one id, counting up from here, so
+# answer ids never collide with the prompt's 0..PROMPT_TOKENS-1 or with EOS.
+ANSWER_ID_BASE = 100
+FAKE_EOS_ID = 99
 
 
 class _FakeTokenizer:
     chat_template = "fake-template"
+    eos_token_id = FAKE_EOS_ID
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        assert add_special_tokens is False, "an answer must not get BOS or other special tokens"
+        return [ANSWER_ID_BASE + i for i, _ in enumerate(text.split())]
 
     def apply_chat_template(self, messages: list[dict[str, str]], **kwargs: Any) -> BatchEncoding:
         return BatchEncoding(
@@ -293,7 +303,7 @@ def _expected_row(layer: int, position: int = TBG_POSITION) -> list[float]:
 def test_hf_hidden_states_index_k_is_after_k_layers():
     """Row k is HF's boolean `output_hidden_states` entry k: 0 = embeddings,
     L = after the last decoder layer."""
-    rows = _hf_provider(_FakeHFModel()).hidden_states_all_layers("q")
+    rows = _hf_provider(_FakeHFModel()).hidden_states_all_layers("q", TokenPosition.TBG)
 
     assert rows.shape == (HF_NUM_LAYERS + 1, HF_HIDDEN_SIZE)
     assert rows.dtype == torch.float32
@@ -314,7 +324,7 @@ def test_hf_rows_move_to_cpu_float32_before_stacking(monkeypatch):
     model = _FakeHFModel()
     provider = _hf_provider(model)
     monkeypatch.setattr(torch, "stack", spy_stack)
-    provider.hidden_states_all_layers("q")
+    provider.hidden_states_all_layers("q", TokenPosition.TBG)
 
     [rows] = stacked
     assert all(row.device.type == "cpu" and row.dtype == torch.float32 for row in rows)
@@ -335,7 +345,7 @@ def test_output_hidden_states_is_boolean_true():
     """The boolean form includes the embeddings at index 0; the list form
     would shift every index by one."""
     model = _FakeHFModel()
-    _hf_provider(model).hidden_states_all_layers("q")
+    _hf_provider(model).hidden_states_all_layers("q", TokenPosition.TBG)
 
     [kwargs] = model.calls
     assert kwargs["output_hidden_states"] is True
@@ -344,7 +354,7 @@ def test_output_hidden_states_is_boolean_true():
 def test_wrong_tuple_length_raises():
     provider = _hf_provider(_FakeHFModel(extra_states=1))
     with pytest.raises(RuntimeError, match=f"expected {HF_NUM_LAYERS + 1}"):
-        provider.hidden_states_all_layers("q")
+        provider.hidden_states_all_layers("q", TokenPosition.TBG)
 
 
 def test_pooled_hidden_state_stacks_requested_layers():
@@ -364,9 +374,83 @@ def test_pooled_hidden_state_rejects_invalid_layers(layers):
 def test_tbg_is_last_prompt_token():
     """TBG reads the last token of the chat-formatted prompt with the
     generation prompt appended: no answer token is involved."""
-    last_layer = _hf_provider(_FakeHFModel()).hidden_states_all_layers("q")[HF_NUM_LAYERS]
+    provider = _hf_provider(_FakeHFModel())
+    last_layer = provider.hidden_states_all_layers("q", TokenPosition.TBG)[HF_NUM_LAYERS]
     assert last_layer.tolist() == _expected_row(HF_NUM_LAYERS, PROMPT_TOKENS - 1)
     assert last_layer.tolist() != _expected_row(HF_NUM_LAYERS, PROMPT_TOKENS - 2)
+
+
+def test_slt_is_position_of_a_m_minus_3():
+    """SLT reproduces the authors' computed read, generate step
+    `hidden[n_generated - 2]` with n_generated = m content tokens: the state
+    at answer token a[m-3], whose output predicts a[m-2]."""
+    answer = "the capital is Paris"  # m = 4 answer tokens
+    rows = _hf_provider(_FakeHFModel()).hidden_states_all_layers(
+        "q", TokenPosition.SLT, answer=answer
+    )
+
+    a_m_minus_3 = PROMPT_TOKENS + len(answer.split()) - 3
+    assert rows.shape == (HF_NUM_LAYERS + 1, HF_HIDDEN_SIZE)
+    assert rows.tolist() == [_expected_row(k, a_m_minus_3) for k in range(HF_NUM_LAYERS + 1)]
+
+
+def test_slt_two_token_answer_reads_last_prompt_token():
+    """With m = 2, a[m-3] is a[-1]: the last prompt token, TBG's position
+    (the authors' `hidden[0]`)."""
+    provider = _hf_provider(_FakeHFModel())
+    slt = provider.hidden_states_all_layers("q", TokenPosition.SLT, answer="Paris France")
+    tbg = provider.hidden_states_all_layers("q", TokenPosition.TBG)
+
+    assert slt.tolist() == [_expected_row(k, TBG_POSITION) for k in range(HF_NUM_LAYERS + 1)]
+    assert torch.equal(slt, tbg)
+
+
+def test_slt_single_token_answer_reads_the_answer_token():
+    """With m = 1 the authors' index n_generated - 2 = -1 selects the last
+    generate step; for an answer ended by one stop token that reads a[0]."""
+    rows = _hf_provider(_FakeHFModel()).hidden_states_all_layers(
+        "q", TokenPosition.SLT, answer="Paris"
+    )
+
+    assert rows.tolist() == [_expected_row(k, PROMPT_TOKENS) for k in range(HF_NUM_LAYERS + 1)]
+
+
+def test_slt_token_construction_includes_eos():
+    """One forward pass over prompt + answer tokens + EOS, all attended."""
+    model = _FakeHFModel()
+    _hf_provider(model).hidden_states_all_layers("q", TokenPosition.SLT, answer="Paris France")
+
+    [kwargs] = model.calls
+    expected_ids = [*range(PROMPT_TOKENS), ANSWER_ID_BASE, ANSWER_ID_BASE + 1, FAKE_EOS_ID]
+    assert kwargs["input_ids"].tolist() == [expected_ids]
+    assert kwargs["attention_mask"].tolist() == [[1] * len(expected_ids)]
+    assert kwargs["output_hidden_states"] is True
+
+
+@pytest.mark.parametrize(
+    ("position", "answer", "match"),
+    [
+        (TokenPosition.SLT, None, "needs the answer"),
+        (TokenPosition.TBG, "Paris", "takes no answer"),
+        # A plain string that was never converted to the enum is still checked.
+        ("slt", None, "needs the answer"),
+        ("middle", None, "not one of"),
+    ],
+)
+def test_position_and_answer_must_agree(position, answer, match):
+    model = _FakeHFModel()
+    with pytest.raises(ValueError, match=match):
+        _hf_provider(model).hidden_states_all_layers("q", position, answer=answer)
+    assert model.calls == []
+
+
+def test_slt_failure_names_prompt_position_and_model():
+    """A teacher-forcing failure carries the call's context, like any other
+    failure in the forward pass."""
+    model = _FakeHFModel()
+    with pytest.raises(RuntimeError, match=r"prompt='q' position=slt model=.*no tokens"):
+        _hf_provider(model).hidden_states_all_layers("q", TokenPosition.SLT, answer="   ")
+    assert model.calls == []
 
 
 def test_hf_provider_reads_depth_from_the_loaded_config():
