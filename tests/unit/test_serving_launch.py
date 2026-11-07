@@ -44,3 +44,13 @@ def test_unknown_runner_fails_fast():
 def test_unregistered_model_fails_fast():
     with pytest.raises(KeyError, match="not in the model registry"):
         build_argv({"MODEL_ID": "acme/imaginary-model"})
+
+
+@pytest.mark.parametrize("runner", list(ServingRunner))
+def test_vllm_flags_include_revision(runner):
+    """Both runners load the registry's pinned commit, for the weights and the
+    tokenizer (whose chat template moves the TBG state) alike."""
+    entry = get_model_entry(MODEL_ID)
+    argv = build_argv({"MODEL_ID": MODEL_ID, "VLLM_RUNNER": str(runner)})
+    assert argv[argv.index("--revision") + 1] == entry.revision
+    assert argv[argv.index("--tokenizer-revision") + 1] == entry.revision

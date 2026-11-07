@@ -66,6 +66,10 @@ class SamplingProvider(Protocol):
     surfaced in results (the library does not parse this string — it is
     propagated verbatim into logs and result metadata).
 
+    `model_revision` names the exact checkpoint behind `model_id` (for a Hub
+    model, the full commit sha it was loaded at), so a hidden-state probe can
+    be tied to the weights and tokenizer it was trained on.
+
     `num_hidden_layers` is the backbone's decoder depth L, the index of its
     last layer under the convention in this module's docstring.
 
@@ -80,6 +84,9 @@ class SamplingProvider(Protocol):
 
     @property
     def model_id(self) -> str: ...
+
+    @property
+    def model_revision(self) -> str: ...
 
     @property
     def num_hidden_layers(self) -> int: ...

@@ -53,6 +53,7 @@ class FakeSLM:
 
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
+        self.model_revision = "fake-revision"
         self.num_hidden_layers = 2
         self._known = KNOWLEDGE.get(model_id, {})
 

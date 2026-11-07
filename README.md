@@ -695,7 +695,8 @@ result.final_answer  # greedy answer, or the judge's if it escalated
 [`examples/langrag_integration.py`](examples/langrag_integration.py) shows the
 translation layer for an existing RAG stack. If you would rather plug in a
 model and let the library drive sampling, implement the `SamplingProvider`
-protocol (`model_id`, `sample`, `greedy`, `pooled_hidden_state`) and use
+protocol (`model_id`, `model_revision`, `num_hidden_layers`, `sample`, `greedy`,
+`pooled_hidden_state`) and use
 `ResponseEvaluator(slm=...).evaluate(prompt)`.
 
 ## How do I add my own detector?

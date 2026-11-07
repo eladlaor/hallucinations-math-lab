@@ -56,6 +56,7 @@ class FakeSLM:
     simulate a SEP-capable provider."""
 
     model_id = "fake-slm"
+    model_revision = "fake-revision"
     num_hidden_layers = 2
 
     def __init__(self, answers: list[str], hidden_state=None) -> None:

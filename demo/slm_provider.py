@@ -37,7 +37,7 @@ from openai.types import CreateEmbeddingResponse
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from demo.google_auth import GoogleAccessToken
-from demo.model_registry import ProviderKind, get_model_entry, list_model_ids
+from demo.model_registry import ModelEntry, ProviderKind, get_model_entry, list_model_ids
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import (
     ANSWER_MESSAGE_TEMPLATE,
@@ -93,6 +93,9 @@ class SLMProvider(Protocol):
 
     @property
     def model_id(self) -> str: ...
+
+    @property
+    def model_revision(self) -> str: ...
 
     @property
     def num_hidden_layers(self) -> int: ...
@@ -212,6 +215,12 @@ class VLLMOpenAIProvider:
             ) from e
 
     @property
+    def model_revision(self) -> str:
+        """The pinned Hub commit, from the model registry. The server echoes
+        nothing back; its `--revision` launch flag comes from the same entry."""
+        return get_model_entry(self.model_id).revision
+
+    @property
     def num_hidden_layers(self) -> int:
         """Decoder depth L, from the model registry (the server is not asked).
 
@@ -305,19 +314,25 @@ class HFTransformersProvider:
             if entry.dtype == "float16"
             else "auto"
         )
+        # A full commit sha is immutable, so passing it as `revision` pins the
+        # files themselves; transformers 5 keeps no commit hash on the loaded
+        # config to check afterwards.
         try:
-            tokenizer = AutoTokenizer.from_pretrained(self.model_id)
+            tokenizer = AutoTokenizer.from_pretrained(self.model_id, revision=entry.revision)
             model = AutoModelForCausalLM.from_pretrained(
-                self.model_id, dtype=dtype, device_map="auto"
+                self.model_id, revision=entry.revision, dtype=dtype, device_map="auto"
             )
             model.eval()
         except Exception as e:
-            raise RuntimeError(f"Failed to load HF model {self.model_id!r}: {e!s}") from e
+            raise RuntimeError(
+                f"Failed to load HF model {self.model_id!r} at revision {entry.revision!r}: {e!s}"
+            ) from e
         if not isinstance(model, GenerationMixin):
             raise TypeError(
                 f"{self.model_id!r} loaded as {type(model).__name__}, which cannot generate."
             )
         causal_lm = cast("CausalLM", model)
+        _check_registry_dimensions(causal_lm, entry)
         self._tokenizer, self._model = tokenizer, causal_lm
         return tokenizer, causal_lm
 
@@ -413,6 +428,12 @@ class HFTransformersProvider:
             ) from e
 
     @property
+    def model_revision(self) -> str:
+        """The pinned Hub commit, from the model registry; the loader loads
+        exactly this commit, so reading it needs no model in memory."""
+        return get_model_entry(self.model_id).revision
+
+    @property
     def num_hidden_layers(self) -> int:
         """Decoder depth L, read from the loaded model's text config."""
         _, model = self._ensure_loaded()
@@ -473,14 +494,33 @@ def _generate(model: CausalLM, inputs: BatchEncoding, **kwargs: Any) -> Generate
     return out
 
 
+def _require_int_field(value: object, field: str) -> int:
+    """Fail fast with the field's name when a text-config field is not an int."""
+    if not isinstance(value, int):
+        raise TypeError(f"text config {field} is {type(value).__name__}, expected int.")
+    return value
+
+
 def _text_config_num_hidden_layers(model: CausalLM) -> int:
     """Decoder depth L of the text backbone (multimodal configs nest it)."""
-    num_hidden_layers = model.config.get_text_config().num_hidden_layers
-    if not isinstance(num_hidden_layers, int):
-        raise TypeError(
-            f"text config num_hidden_layers is {type(num_hidden_layers).__name__}, expected int."
+    return _require_int_field(model.config.get_text_config().num_hidden_layers, "num_hidden_layers")
+
+
+def _check_registry_dimensions(model: CausalLM, entry: ModelEntry) -> None:
+    """Fail fast unless the loaded text backbone has the registry's depth and
+    width: the registry is what probes are checked against, and the vLLM
+    provider reads L from it without loading anything."""
+    loaded = (
+        _text_config_num_hidden_layers(model),
+        _require_int_field(model.config.get_text_config().hidden_size, "hidden_size"),
+    )
+    registered = (entry.num_hidden_layers, entry.hidden_size)
+    if loaded != registered:
+        raise ValueError(
+            f"{entry.model_id!r} at revision {entry.revision!r} loaded with "
+            f"(num_hidden_layers, hidden_size)={loaded}, but the model registry says "
+            f"{registered}. Correct the entry in demo/model_registry.py."
         )
-    return num_hidden_layers
 
 
 def _require_logits(out: GenerateDecoderOnlyOutput) -> tuple[torch.Tensor, ...]:

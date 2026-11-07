@@ -6,7 +6,8 @@ Each entry pins everything that varies per SLM:
   - Deployment hints: required GPU SKU, accelerator count, recommended
     `accelerator_type` value for Vertex (NVIDIA_L4 / NVIDIA_A100 / etc).
   - Default provider for the SLMProvider abstraction (vllm vs hf_transformers).
-  - SEP probe weight path under data/probes/, when one has been trained.
+  - The checkpoint itself: the Hub commit both providers load, and the text
+    backbone's depth and width, which a SEP probe is checked against.
 
 Two distinct concepts both deserve to be defaults here, and they're not the
 same default:
@@ -80,13 +81,17 @@ class ModelEntry:
     accelerator_count: int  # how many of them
     machine_type: str  # GCE machine type that pairs with the accelerator
     default_provider: ProviderKind
+    # Full 40-hex Hub commit sha. Immutable, unlike a branch or tag, so the
+    # weights and the tokenizer (chat template included) cannot move under a
+    # trained probe. Both providers load exactly this commit.
+    revision: str
     # Decoder depth L (text_config.num_hidden_layers in the checkpoint's
-    # config.json): the index of the last layer under the layer convention in
-    # hallucinations_math_lab.services.sampling_provider.
+    # config.json at `revision`): the index of the last layer under the layer
+    # convention in hallucinations_math_lab.services.sampling_provider.
     num_hidden_layers: int
+    hidden_size: int  # text_config.hidden_size at `revision`: one hidden-state row's width
     is_deployed_default: bool = False
     is_local_default: bool = False
-    sep_probe_path: str | None = None  # relative to repo root, once a probe is trained
 
     def vllm_flags(self, runner: ServingRunner) -> list[str]:
         """`vllm serve <model_id>` engine flags for this entry and runner.
@@ -104,6 +109,10 @@ class ModelEntry:
             # Gemma 4 is multimodal; this lab is text-only. Skipping the
             # vision/audio towers frees their memory and startup profiling.
             "--language-model-only",
+            "--revision",
+            self.revision,
+            "--tokenizer-revision",
+            self.revision,
         ]
         if self.quantization:
             flags += ["--quantization", self.quantization]
@@ -134,6 +143,11 @@ class ModelEntry:
 # 24 GB L4 the bf16 weights leave room for only a few GB of KV cache, and vLLM
 # refuses to start if the configured context cannot fit. Short-answer QA
 # prompts plus SAMPLE_N completions need far less than 8K tokens.
+#
+# Each `revision` is the repo's `main` commit as read from the Hub API on
+# 2026-11-07, and `num_hidden_layers` / `hidden_size` come from config.json's
+# text_config at that commit. Moving a revision invalidates every probe
+# trained on the old one.
 _L4_MAX_MODEL_LEN: Final[int] = 8192
 _REGISTRY: Final[dict[str, ModelEntry]] = {
     "google/gemma-4-E2B-it": ModelEntry(
@@ -145,7 +159,9 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         accelerator_count=1,
         machine_type="g2-standard-12",
         default_provider=ProviderKind.HF_TRANSFORMERS,
+        revision="4adf15748de9e1a0097b6274cee9c15836c41c37",
         num_hidden_layers=35,
+        hidden_size=1536,
         is_local_default=True,
     ),
     "google/gemma-4-E4B-it": ModelEntry(
@@ -157,7 +173,9 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         accelerator_count=1,
         machine_type="g2-standard-12",
         default_provider=ProviderKind.VLLM,
+        revision="4ecc2ba63bcac23ba4a767fc87025b1450f84c9c",
         num_hidden_layers=42,
+        hidden_size=2560,
         is_deployed_default=True,
     ),
     "google/gemma-4-26B-A4B-it": ModelEntry(
@@ -169,7 +187,9 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         accelerator_count=1,
         machine_type="a2-ultragpu-1g",
         default_provider=ProviderKind.VLLM,
+        revision="4d7ae4984b7db7de8f8457170b3f1a419ee76d52",
         num_hidden_layers=30,
+        hidden_size=2816,
     ),
     "google/gemma-4-31B-it": ModelEntry(
         model_id="google/gemma-4-31B-it",
@@ -180,7 +200,9 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         accelerator_count=2,
         machine_type="a2-ultragpu-2g",
         default_provider=ProviderKind.VLLM,
+        revision="842da3794eaa0b77d5f08bae87a17459d91ff475",
         num_hidden_layers=60,
+        hidden_size=5376,
     ),
 }
 

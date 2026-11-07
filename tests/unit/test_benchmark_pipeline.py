@@ -39,6 +39,7 @@ class ScatteringSLM:
     """Repeats the right answer for known questions, invents one per sample otherwise."""
 
     model_id = "fake-slm"
+    model_revision = "fake-revision"
     num_hidden_layers = 2
 
     def _answers(self, prompt: str) -> list[str]:

@@ -374,16 +374,20 @@ vectors match HF's within tolerance is unverified until the first GPU run."
 
 **The registry is the single source of truth.** `ModelEntry` gains:
 
-- `revision`: a 40-hex commit sha, read from the Hub once per entry. This needs network access,
-  not a GPU.
-- `num_hidden_layers`: verified E2B = 35 and E4B = 42; larger models are read from their
-  config.json.
-- `hidden_size`: verified E2B = 1536 and E4B = 2560.
+- `revision`: a 40-hex commit sha, read from the Hub once per entry (each repo's `main` sha as
+  of 2026-11-07). This needs network access, not a GPU.
+- `num_hidden_layers` and `hidden_size`: read from each SKU's config.json `text_config` at its
+  pinned revision and verified for all four: E2B 35/1536, E4B 42/2560, 26B-A4B 30/2816,
+  31B 60/5376.
 
 **Both providers use it.** HF calls `from_pretrained(revision=entry.revision)` for the
-tokenizer and the model, then asserts `model.config._commit_hash == entry.revision`.
-`serving/model_flags.py` adds `--revision`. The vLLM server echoes nothing back, so the launch
-flag is what we trust.
+tokenizer and the model. A full commit sha is immutable, so this pins the files themselves.
+There is no post-load hash check: transformers 5.19 drops `config._commit_hash` on load
+(`configuration_utils.py:363-366`, `modeling_utils.py:4081`; verified). Instead, the loader
+checks that the loaded text config's `num_hidden_layers` and `hidden_size` match the registry.
+`ModelEntry.vllm_flags` adds `--revision` and `--tokenizer-revision` (the chat template comes
+from the tokenizer), so `serving/launch.py` and `serving/model_flags.py` both get them. The vLLM
+server echoes nothing back, so the launch flag is what we trust.
 
 **`detector.check_compatible(model_id, revision, num_hidden_layers, hidden_size,
 answer_instruction, chat_template_sha256)`** raises on any mismatch, naming **both** values.
@@ -536,7 +540,7 @@ by construction.
 | `ModelEntry.sep_probe_path` | **Removed** (unused). |
 | `constants.py` | Adds `TokenPosition` StrEnum (TBG, SLT), the recipe constants, file-name constants (`SEP_PROBE_WEIGHTS_FILE`, `SEP_PROBE_CONFIG_FILE`, `SEP_TRAIN_IDS_FILE`, `SEP_TRAINING_LOG_FILE`, `SEP_METRICS_FILE`, `SEP_DATASET_ROWS_FILE`, `SEP_DATASET_TENSORS_FILE`, `SEP_COLLECTION_CONFIG_FILE`), `HF_PROBE_URI_PREFIX = "hf://"`, `SEP_PROBE_SCHEMA_VERSION = 1` and `LEGACY_SEP_PROBE_SUFFIX = ".pt"`. Removes `SEP_PROBE_SUFFIX`. |
 | `SamplingProvider` protocol | `pooled_hidden_state(prompt, layers)`, `num_hidden_layers` and `model_revision`. A **breaking change** for anyone implementing the protocol (v0.x); goes in the CHANGELOG. |
-| `vllm_flags` | Adds `--revision`. |
+| `vllm_flags` | Adds `--revision` and `--tokenizer-revision` (both the registry sha). |
 
 ## Threshold semantics and migration for users
 
@@ -781,12 +785,36 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
   - `test_commit_hash_mismatch_raises`
   - `test_missing_commit_hash_raises`
   - `test_model_revision_from_registry`
-  - `test_vllm_final_layer_posts_same_body_as_today`
+  - `test_vllm_embed_body_carries_no_revision`
   - `test_vllm_rejects_non_final_layers_or_slt_with_remedy`
 - Files: `demo/model_registry.py` (add the fields; remove `sep_probe_path`),
   `serving/model_flags.py`, `demo/slm_provider.py`, `tests/unit/test_model_registry.py`,
   `tests/unit/test_serving_launch.py`, `tests/unit/test_slm_provider.py`.
 - Done when: the tests pass, and the shas are read from the Hub and committed.
+- *As implemented:*
+  - **The commit-hash tests are dropped.** transformers 5.19 no longer keeps
+    `config._commit_hash`, so neither test can be written. Pinning comes from passing the
+    immutable sha as `revision`. It is pinned by
+    `test_every_entry_has_40_hex_revision_layers_and_hidden_size` and
+    `test_hf_from_pretrained_called_with_revision`.
+  - **Added instead:** `test_loaded_dimensions_must_match_registry`. The HF loader raises when
+    the loaded text config disagrees with the registry's depth or width.
+  - **vLLM pins the tokenizer too.** It gets `--tokenizer-revision`, since the chat template
+    comes from the tokenizer.
+  - **`model_revision` is on both protocols** (`SamplingProvider`, `SLMProvider`), read from the
+    registry. A breaking change for protocol implementers, for the item-18 CHANGELOG.
+  - **The vLLM SLT case needs no code.** `pooled_hidden_state` is TBG by contract, so it has no
+    position to refuse. SLT exists only on the HF-only `hidden_states_all_layers` (item 8).
+    Item 9's `test_collect_requires_hf_provider` refuses vLLM for collection, and item 11
+    refuses SLT probes at load.
+  - **`test_vllm_rejects_non_final_layers_or_slt_with_remedy` is not added.** Item 6's
+    `test_vllm_refuses_layers_other_than_the_final_one` already covers the non-final case.
+  - **`test_vllm_embed_body_carries_no_revision` is folded** into the existing
+    `test_vllm_embedding_request_is_chat_templated_last_token_unnormalized`, which now asserts
+    the exact request body.
+  - **The shas** are the `main` commits on 2026-11-07. The dimensions come from config.json at
+    those commits: E2B 35/1536, E4B 42/2560, 26B-A4B 30/2816, 31B 60/5376. The
+    `sep_probe_path` field is removed.
 
 **8. SLT extraction, teacher-forced (HF, collection only).**
 
@@ -949,7 +977,8 @@ All of these are stated as **assumptions** until the first run.
    pre-registered fallback (D10, then D12) on CPU from the export.
 4. Gemma 4 under transformers 5.19: `len(hidden_states) == L+1`, and index L is final-normed.
    Both were read from code, not observed.
-5. `model.config._commit_hash` is populated for Gemma 4 loaded through `AutoModelForCausalLM`.
+5. ~~`model.config._commit_hash` is populated~~ Resolved without a GPU: transformers 5.19
+   drops it (see item 7). Still to check: the Hub load at the pinned sha succeeds.
 6. Teacher-forced SLT agrees with generate-time SLT within tolerance.
 7. HF index L vs the vLLM embed runner at TBG: cosine similarity, and agreement of probe
    probabilities and AUROC. Placeholder bars are cosine ≥ 0.999 and |Δp| ≤ 0.02. Record the

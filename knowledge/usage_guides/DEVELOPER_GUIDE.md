@@ -152,7 +152,12 @@ accelerator type and count). `vllm_flags(runner)` turns the entry into
 `vllm serve` flags for the `generate` or `embed` runner, including
 `--tensor-parallel-size` equal to the accelerator count. Size
 `max_model_len` to what the GPU's memory can hold next to the weights, not to
-the model's maximum context, or vLLM refuses to start. Exactly one entry may
+the model's maximum context, or vLLM refuses to start. Pin the checkpoint
+too: set `revision` to the repo's current full 40-hex commit sha from the Hub
+API (not a branch or tag), and copy `num_hidden_layers` and `hidden_size`
+from `text_config` in that commit's `config.json`. Both providers load exactly
+that commit, and the HF provider refuses a checkpoint whose depth or width
+disagrees with the entry. Exactly one entry may
 be `is_local_default` and one `is_deployed_default`; `tests/unit/test_model_registry.py` enforces this. A
 model must be in the registry before it can appear in `VLLM_MODEL_ID` or
 `TARGET_MODEL_IDS`. Its SEP probe and its sweep results file are named by

@@ -29,8 +29,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-from transformers import BatchEncoding, GenerationConfig
+from transformers import BatchEncoding, GenerationConfig, GenerationMixin
 
+from demo.model_registry import get_model_entry
 from demo.slm_provider import (
     HFTransformersProvider,
     VLLMOpenAIProvider,
@@ -169,7 +170,8 @@ def test_vllm_embedding_request_is_chat_templated_last_token_unnormalized(
     gemma_settings_with_embed,
 ):
     """Chat template + generation prompt, last token, unnormalized: the request
-    that corresponds to HF's layer index L at TBG."""
+    that corresponds to HF's layer index L at TBG. The body carries no revision:
+    the pin is in the server's launch flags."""
     with patch("demo.slm_provider.OpenAI") as openai_cls:
         embed_client = MagicMock()
         embed_client.post.return_value = MagicMock(data=[MagicMock(embedding=[1.0])])
@@ -179,11 +181,12 @@ def test_vllm_embedding_request_is_chat_templated_last_token_unnormalized(
     path = embed_client.post.call_args.args[0]
     kwargs = embed_client.post.call_args.kwargs
     assert path == "/embeddings"
-    assert kwargs["body"]["messages"] == [
-        {"role": "user", "content": build_answer_message("Who wrote Hamlet?")}
-    ]
-    assert kwargs["body"]["add_generation_prompt"] is True
-    assert kwargs["body"]["use_activation"] is False
+    assert kwargs["body"] == {
+        "model": "google/gemma-4-E4B-it",
+        "messages": [{"role": "user", "content": build_answer_message("Who wrote Hamlet?")}],
+        "add_generation_prompt": True,
+        "use_activation": False,
+    }
     # Without this the client would skip refreshing a Google access token.
     assert kwargs["options"] == {"security": {"bearer_auth": True}}
 
@@ -368,6 +371,71 @@ def test_tbg_is_last_prompt_token():
 
 def test_hf_provider_reads_depth_from_the_loaded_config():
     assert _hf_provider(_FakeHFModel()).num_hidden_layers == HF_NUM_LAYERS
+
+
+E2B_ID = "google/gemma-4-E2B-it"
+
+
+class _LoadedLM(GenerationMixin):
+    """What `AutoModelForCausalLM.from_pretrained` hands back, reduced to the
+    attributes the loader reads."""
+
+    def __init__(self, num_hidden_layers: int, hidden_size: int) -> None:
+        self.device = torch.device("cpu")
+        text_config = SimpleNamespace(num_hidden_layers=num_hidden_layers, hidden_size=hidden_size)
+        self.config = SimpleNamespace(get_text_config=lambda: text_config)
+
+    def eval(self) -> "_LoadedLM":
+        return self
+
+
+def _load(monkeypatch, model: _LoadedLM) -> tuple[MagicMock, MagicMock]:
+    """Run the HF provider's loader against spies; return (tokenizer, model) spies."""
+    import transformers
+
+    tokenizer_spy = MagicMock(return_value=_FakeTokenizer())
+    model_spy = MagicMock(return_value=model)
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", tokenizer_spy)
+    monkeypatch.setattr(transformers.AutoModelForCausalLM, "from_pretrained", model_spy)
+    _ = HFTransformersProvider(model_id=E2B_ID).num_hidden_layers  # triggers the load
+    return tokenizer_spy, model_spy
+
+
+def _registry_sized_model() -> _LoadedLM:
+    entry = get_model_entry(E2B_ID)
+    return _LoadedLM(entry.num_hidden_layers, entry.hidden_size)
+
+
+def test_hf_from_pretrained_called_with_revision(monkeypatch):
+    """Weights and tokenizer (chat template included) come from the pinned commit."""
+    tokenizer_spy, model_spy = _load(monkeypatch, _registry_sized_model())
+
+    revision = get_model_entry(E2B_ID).revision
+    assert tokenizer_spy.call_args.args == (E2B_ID,)
+    assert tokenizer_spy.call_args.kwargs["revision"] == revision
+    assert model_spy.call_args.args == (E2B_ID,)
+    assert model_spy.call_args.kwargs["revision"] == revision
+
+
+@pytest.mark.parametrize(("extra_layers", "extra_width"), [(1, 0), (0, 1)])
+def test_loaded_dimensions_must_match_registry(monkeypatch, extra_layers, extra_width):
+    """The registry's depth and width are what probes are checked against, so
+    a checkpoint that disagrees with them must not load."""
+    entry = get_model_entry(E2B_ID)
+    model = _LoadedLM(entry.num_hidden_layers + extra_layers, entry.hidden_size + extra_width)
+    with pytest.raises(ValueError, match="model registry"):
+        _load(monkeypatch, model)
+
+
+def test_model_revision_from_registry(gemma_settings):
+    with patch("demo.slm_provider.OpenAI"):
+        vllm_provider = VLLMOpenAIProvider()
+    hf_provider = HFTransformersProvider(model_id=E2B_ID)
+
+    assert vllm_provider.model_revision == get_model_entry(vllm_provider.model_id).revision
+    # Read without loading the model.
+    assert hf_provider.model_revision == get_model_entry(E2B_ID).revision
+    assert hf_provider._model is None
 
 
 def test_embed_endpoint_for_another_model_fails_fast(gemma_settings_with_embed):

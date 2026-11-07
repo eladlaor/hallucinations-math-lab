@@ -181,3 +181,31 @@ def test_machine_type_carries_the_accelerator_type_and_count(model_id):
         f"{model_id}: {entry.machine_type!r} carries {valid[entry.machine_type]} GPU(s), "
         f"the entry says {entry.accelerator_count}"
     )
+
+
+_COMMIT_SHA_LENGTH = 40
+_HEX_DIGITS = frozenset("0123456789abcdef")
+# Read from each checkpoint's config.json (text_config) at its pinned revision.
+_VERIFIED_DIMENSIONS = {
+    "google/gemma-4-E2B-it": (35, 1536),
+    "google/gemma-4-E4B-it": (42, 2560),
+    "google/gemma-4-26B-A4B-it": (30, 2816),
+    "google/gemma-4-31B-it": (60, 5376),
+}
+
+
+@pytest.mark.parametrize("model_id", list_model_ids())
+def test_every_entry_has_40_hex_revision_layers_and_hidden_size(model_id):
+    """A full commit sha is immutable; a branch or tag could move under a
+    trained probe. Depth and width are what a probe is checked against."""
+    entry = get_model_entry(model_id)
+    assert len(entry.revision) == _COMMIT_SHA_LENGTH
+    assert set(entry.revision) <= _HEX_DIGITS
+    assert entry.num_hidden_layers > 0
+    assert entry.hidden_size > 0
+
+
+@pytest.mark.parametrize(("model_id", "dimensions"), _VERIFIED_DIMENSIONS.items())
+def test_verified_dimensions_of_every_gemma_4_sku(model_id, dimensions):
+    entry = get_model_entry(model_id)
+    assert (entry.num_hidden_layers, entry.hidden_size) == dimensions

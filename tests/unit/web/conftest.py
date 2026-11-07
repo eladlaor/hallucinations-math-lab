@@ -50,6 +50,7 @@ class FakeProvider:
 
     def __init__(self, texts: list[str]) -> None:
         self.model_id = FAKE_MODEL_ID
+        self.model_revision = "fake-revision"
         self.num_hidden_layers = 2
         self._texts = texts
 
