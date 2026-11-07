@@ -1,17 +1,24 @@
 """Pydantic Settings — all configurable values come from env (.env file)."""
 
 from functools import lru_cache
+from typing import Final
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from hallucinations_math_lab.constants import (
+    ESCALATION_THRESHOLDED_DETECTORS,
     HUB_COMMIT_SHA_PATTERN,
     NATS_SCORED_DETECTORS,
     DetectorName,
     JudgeThinkingLevel,
     VLLMAuthMode,
 )
+
+# Settings fields holding the escalation thresholds; pydantic-settings reads
+# each from the env var of the same name, upper-cased.
+SE_THRESHOLD_FIELD: Final[str] = "se_threshold"
+SEP_THRESHOLD_FIELD: Final[str] = "sep_threshold"
 
 _DEFAULT_TARGET_MODEL_IDS: list[str] = [
     "google/gemma-4-E2B-it",
@@ -182,16 +189,32 @@ class Settings(BaseSettings):
         detectors use se_threshold. Raises ValueError for any other detector,
         which has no configured threshold.
         """
-        if detector == DetectorName.SEMANTIC_ENTROPY_PROBE:
-            return self.sep_threshold
-        if detector in NATS_SCORED_DETECTORS:
-            return self.se_threshold
+        threshold: float = getattr(self, escalation_threshold_field(detector))
+        return threshold
+
+
+def escalation_threshold_env_var(detector: DetectorName) -> str:
+    """The environment variable that sets `detector`'s escalation threshold."""
+    return escalation_threshold_field(detector).upper()
+
+
+def escalation_threshold_field(detector: DetectorName) -> str:
+    """The Settings field holding `detector`'s escalation threshold.
+
+    SEP scores a probability and uses sep_threshold; the nats-scored detectors
+    use se_threshold. constants.ESCALATION_THRESHOLDED_DETECTORS is the set
+    that has one; any other detector raises ValueError.
+    """
+    if detector not in ESCALATION_THRESHOLDED_DETECTORS:
         raise ValueError(
             f"No escalation threshold is configured for detector {detector!s}. "
-            f"SE_THRESHOLD covers {sorted(str(d) for d in NATS_SCORED_DETECTORS)!r} and "
-            f"SEP_THRESHOLD covers {DetectorName.SEMANTIC_ENTROPY_PROBE!s}. Escalate on one of "
-            "those, or pass an explicit escalation_threshold to the evaluator."
+            f"{SE_THRESHOLD_FIELD.upper()} covers {sorted(str(d) for d in NATS_SCORED_DETECTORS)!r} "
+            f"and {SEP_THRESHOLD_FIELD.upper()} covers {DetectorName.SEMANTIC_ENTROPY_PROBE!s}. "
+            "Escalate on one of those, or pass an explicit escalation_threshold to the evaluator."
         )
+    if detector == DetectorName.SEMANTIC_ENTROPY_PROBE:
+        return SEP_THRESHOLD_FIELD
+    return SE_THRESHOLD_FIELD
 
 
 @lru_cache(maxsize=1)

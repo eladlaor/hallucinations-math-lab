@@ -1,7 +1,8 @@
-"""Choose the escalation threshold τ (SE_THRESHOLD) on a dev slice.
+"""Choose a detector's escalation threshold τ on a dev slice.
 
-The default `SE_THRESHOLD=1.0` is a placeholder, not a measured value. This
-script picks τ from a run_benchmark.py output over a dev slice that shares
+The defaults (`SE_THRESHOLD=1.0` for the nats-scored detectors,
+`SEP_THRESHOLD=0.5` for the SEP probe) are placeholders, not measured values.
+This script picks τ from a run_benchmark.py output over a dev slice that shares
 no question with the test slice (see load_triviaqa.py `--offset`):
 
     uv run python -m eval.calibrate_threshold --dev eval/results/dev.jsonl \\
@@ -14,8 +15,10 @@ hallucination and a needless escalation equally; when the judge's cost
 matters more, read `escalation_rate` and the accuracy-vs-rate curve from
 escalation_uplift.py instead.
 
-Set the printed τ as SE_THRESHOLD before benchmarking the test slice, and
-report the test result once, at that τ.
+Set the printed τ as the printed `env_var` before benchmarking the test
+slice, and report the test result once, at that τ. A detector with no
+escalation threshold (an LLM judge) is refused. τ is printed unrounded,
+since it is the value to set and the reported rates hold at exactly it.
 """
 
 from __future__ import annotations
@@ -39,6 +42,8 @@ from eval.benchmark_results import (
     load_rows,
     run_config,
 )
+from hallucinations_math_lab.config import escalation_threshold_env_var
+from hallucinations_math_lab.constants import ESCALATION_THRESHOLDED_DETECTORS, DetectorName
 
 REPORT_DECIMALS: Final[int] = 4
 
@@ -76,7 +81,11 @@ def calibrate_report(
     source: str,
     test_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """τ for `detector` over the labeled dev rows, after checking dev/test disjointness."""
+    """τ for `detector` over the labeled dev rows, after checking dev/test disjointness.
+
+    Raises ValueError for a detector that has no escalation threshold to set.
+    """
+    env_var = escalation_threshold_env_var(DetectorName(detector))
     config = run_config(rows, source)
     labeled = [row for row in rows if is_labeled(row)]
     if not labeled:
@@ -98,9 +107,10 @@ def calibrate_report(
     return {
         "run_config": config,
         "detector": detector,
+        "env_var": env_var,
         "n_rows": len(labeled),
         "n_hallucinations": int(sum(labels)),
-        "tau": round(tau, REPORT_DECIMALS),
+        "tau": tau,  # unrounded: it is the value to set, and the rates are at it
         "tpr": round(tpr, REPORT_DECIMALS),
         "fpr": round(fpr, REPORT_DECIMALS),
         "escalation_rate": round(rate, REPORT_DECIMALS),
@@ -116,12 +126,23 @@ def main(dev: Path, detector: str, test: Path | None) -> None:
     print(json.dumps(calibrate_report(load_rows(dev), detector, str(dev), test_ids), indent=2))
 
 
-if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="Choose SE_THRESHOLD on a dev slice.")
+def build_parser() -> argparse.ArgumentParser:
+    """The CLI; `--detector` offers only the detectors that have a threshold to set."""
+    p = argparse.ArgumentParser(
+        description="Choose a detector's escalation threshold on a dev slice."
+    )
     p.add_argument("--dev", type=Path, required=True, help="run_benchmark output, dev slice.")
-    p.add_argument("--detector", default="semantic_entropy")
+    p.add_argument(
+        "--detector",
+        default=str(DetectorName.SEMANTIC_ENTROPY),
+        choices=sorted(str(d) for d in ESCALATION_THRESHOLDED_DETECTORS),
+    )
     p.add_argument(
         "--test", type=Path, default=None, help="Test-slice output; refused if ids overlap."
     )
-    args = p.parse_args()
+    return p
+
+
+if __name__ == "__main__":
+    args = build_parser().parse_args()
     main(args.dev, args.detector, args.test)

@@ -645,7 +645,8 @@ All of these are done in work item 18.
     2. Train your own (collect, then fit, then the release commands).
     3. Refit from the published dataset, no GPU.
   - The deviations table.
-  - Escalation section: `SEP_THRESHOLD`.
+  - Escalation section: `SEP_THRESHOLD`. (The calibrate paragraph already says to set τ as the
+    report's `env_var`; fixed in item 14.)
   - Troubleshooting: the `.pt` refusal, a backbone or prompt mismatch, "vLLM can't serve this
     layer".
 - **`knowledge/GLOSSARY.md`**: token position (TBG, SLT) vs layer; the layer-index convention;
@@ -681,6 +682,10 @@ All of these are done in work item 18.
     `eval.run_benchmark`); a SEP run refuses a question without an `id` instead of skipping it.
   - Added: `SEP_THRESHOLD`, the layer and position sweep, the dataset export, `hf://` probes,
     the publish script, `compute_auroc --json-out`, registry revisions.
+  - Changed: rewrite the existing `eval/calibrate_threshold.py` Added entry (it says it chooses
+    `SE_THRESHOLD`): it now reports the setting to use in `env_var` (`SEP_THRESHOLD` for SEP),
+    `--detector` accepts only detectors with an escalation threshold (LLM judges are refused),
+    and τ is printed unrounded.
   - Removed: Ridge `.pt` probes and `--ridge-alpha`.
   - Fixed: escalation with SEP compared its score against `SE_THRESHOLD`.
 - **Code comments**:
@@ -1178,6 +1183,12 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Files: `eval/compute_auroc.py` (add `--json-out`; today it only prints),
   `eval/calibrate_threshold.py`.
 - Done when: the tests pass.
+- As built: the detector-to-env-var routing lives once in `config.py`
+  (`escalation_threshold_field` / `escalation_threshold_env_var`), which
+  `Settings.escalation_threshold_for` also uses. `calibrate_threshold` now refuses a detector
+  with no escalation threshold (an LLM judge) instead of printing a τ no setting can take.
+  `calibrate_threshold` also prints τ unrounded: escalation fires on `score > τ`, so a rounded
+  τ can change which rows are flagged, and the reported TPR/FPR would no longer hold.
 
 **15. Publish script (PSP 6), with the held-out merge.**
 

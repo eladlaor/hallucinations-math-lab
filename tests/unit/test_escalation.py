@@ -27,8 +27,15 @@ from hallucinations_math_lab import (
     TokenLogprob,
     evaluate_responses,
 )
-from hallucinations_math_lab.config import Settings
-from hallucinations_math_lab.constants import DetectorCategory
+from hallucinations_math_lab.config import (
+    Settings,
+    escalation_threshold_env_var,
+    escalation_threshold_field,
+)
+from hallucinations_math_lab.constants import (
+    ESCALATION_THRESHOLDED_DETECTORS,
+    DetectorCategory,
+)
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
@@ -242,6 +249,28 @@ def test_escalation_threshold_for_routes_per_detector():
     for unroutable in (DetectorName.LLAMA_JUDGE_QA, DetectorName.LLAMA_JUDGE_QA_SAMPLES):
         with pytest.raises(ValueError, match=str(unroutable)):
             settings.escalation_threshold_for(unroutable)
+
+
+def test_escalation_threshold_env_var_sets_that_detectors_threshold(monkeypatch, tmp_path):
+    """Setting the env var a detector's threshold is reported under changes that
+    detector's threshold: a real env round-trip, not a re-derivation of the name."""
+    monkeypatch.chdir(tmp_path)  # no .env file in reach
+    assert escalation_threshold_env_var(DetectorName.SEMANTIC_ENTROPY_PROBE) == "SEP_THRESHOLD"
+    for detector in ESCALATION_THRESHOLDED_DETECTORS:
+        with monkeypatch.context() as patched:
+            patched.setenv(escalation_threshold_env_var(detector), "0.37")
+            settings = Settings()
+            assert settings.escalation_threshold_for(detector) == 0.37
+
+
+@pytest.mark.parametrize("detector", list(DetectorName))
+def test_threshold_routing_covers_exactly_the_thresholded_detectors(detector):
+    """A detector routes to a threshold field iff ESCALATION_THRESHOLDED_DETECTORS has it."""
+    if detector in ESCALATION_THRESHOLDED_DETECTORS:
+        assert escalation_threshold_field(detector) in Settings.model_fields
+    else:
+        with pytest.raises(ValueError, match=str(detector)):
+            escalation_threshold_field(detector)
 
 
 def test_sep_threshold_defaults_to_half():

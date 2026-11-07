@@ -14,12 +14,16 @@ checks success criteria 1 and 2. Criterion 2 (SE's margin over PE) uses a
 *paired* bootstrap: both AUROCs are recomputed on the same resampled rows, and
 the criterion is met only if the point gap clears the target and the CI of
 the gap excludes zero.
+
+`--json-out PATH` also writes the printed report to PATH, byte for byte; the
+probe publisher reads it as the held-out benchmark.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
@@ -39,9 +43,12 @@ from eval.benchmark_results import (
 )
 from eval.inference_stats import CI_LEVEL, BootstrapCI, auroc, paired_bootstrap
 from eval.success_criteria import SE_AUROC_TARGET, SE_MINUS_PE_AUROC_TARGET
-from hallucinations_math_lab.constants import DetectorName
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, DetectorName
 
 REPORT_DECIMALS: Final[int] = 4
+JSON_INDENT: Final[int] = 2
+
+logger = logging.getLogger(__name__)
 
 
 def _ci_dict(ci: BootstrapCI) -> dict[str, Any]:
@@ -143,12 +150,35 @@ def auroc_report(rows: list[BenchmarkRow], source: str) -> dict[str, Any]:
     return report
 
 
-def main(path: Path) -> None:
-    print(json.dumps(auroc_report(load_rows(path), source=str(path)), indent=2))
+def main(path: Path, json_out: Path | None = None) -> None:
+    """Print the AUROC report for `path`; with `json_out`, also write it there."""
+    report = json.dumps(auroc_report(load_rows(path), source=str(path)), indent=JSON_INDENT)
+    print(report)
+    if json_out is None:
+        return
+    try:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(report + "\n")
+    except OSError as e:
+        logger.error(
+            "Could not write the AUROC report.",
+            extra={
+                LOG_EXTRA_KEY: {"source": str(path), "json_out": str(json_out), "error": repr(e)}
+            },
+        )
+        raise RuntimeError(f"Could not write the AUROC report for {path} to {json_out}: {e}") from e
+    logger.info(
+        "Wrote the AUROC report.",
+        extra={LOG_EXTRA_KEY: {"source": str(path), "json_out": str(json_out)}},
+    )
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     p = argparse.ArgumentParser(description="Per-detector AUROC with bootstrap CIs.")
     p.add_argument("--in", dest="path", type=Path, required=True)
+    p.add_argument(
+        "--json-out", type=Path, default=None, help="Also write the report to this JSON file."
+    )
     args = p.parse_args()
-    main(args.path)
+    main(args.path, args.json_out)

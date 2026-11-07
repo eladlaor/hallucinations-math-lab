@@ -23,6 +23,7 @@ from sklearn.metrics import roc_auc_score
 from eval.adversarial_separation import separation_report
 from eval.benchmark_results import SEP_PROBE_IDENTITY_FIELDS, is_correct, run_config
 from eval.compute_auroc import auroc_report
+from eval.compute_auroc import main as compute_auroc_main
 from eval.datasets.load_triviaqa import slice_bounds
 from eval.escalation_uplift import (
     escalation_accuracy,
@@ -175,6 +176,21 @@ def test_gap_criterion_fails_when_ci_includes_zero():
     assert gap["value"] >= 0.05
     assert gap["ci"]["low"] <= 0
     assert gap["met"] is False
+
+
+def test_compute_auroc_json_out_matches_stdout(tmp_path, capsys):
+    """--json-out writes exactly the report printed to stdout, for publishing."""
+    rows = [_row("Paris", se=0.1 * i, pe=0.5) for i in range(5)]
+    rows += [_row("Lyon", se=5.0 + 0.1 * i, pe=0.5) for i in range(5)]
+    results = tmp_path / "results.jsonl"
+    results.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    out = tmp_path / "nested" / "auroc.json"
+
+    compute_auroc_main(results, json_out=out)
+
+    printed = capsys.readouterr().out
+    assert out.read_text() == printed
+    assert json.loads(printed)["detectors"][SE]["auroc"] == 1.0
 
 
 # --- criterion 3 -----------------------------------------------------------

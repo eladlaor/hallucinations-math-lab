@@ -457,8 +457,9 @@ uv run python -m eval.calibrate_threshold --dev <dev results> --test <test resul
 
 It prints the threshold that best separates hallucinated from correct answers
 on the dev slice (true-positive rate minus false-positive rate, highest
-first), and refuses a dev slice that overlaps the test slice. Set it as
-`SE_THRESHOLD`, then benchmark the test slice once. If the judge's cost
+first), and refuses a dev slice that overlaps the test slice. Set it as the
+setting the report names in `env_var` (`SE_THRESHOLD`, or `SEP_THRESHOLD` with
+`--detector semantic_entropy_probe`), then benchmark the test slice once. If the judge's cost
 matters more than that balance, read the escalation rate and the
 accuracy-vs-rate curve from `eval.escalation_uplift` instead. AUROC tells
 you whether *any* threshold can separate the two groups well. A high
