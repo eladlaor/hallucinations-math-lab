@@ -427,7 +427,8 @@ A test asserts that the list is present. No other deviation is allowed silently.
 | D12 | No feature scaling | Same, **unless** fallback step 2 is needed (scaler folded into the weights, recorded) | Pre-registered fallback only. |
 | D13 | Layer 0 included | Search range 1..L | At TBG, layer 0 is a constant vector. |
 
-Active deviations are listed in each probe's config. D10 and D12 appear only if they were used.
+Active deviations are listed in each probe's config. D4 and D5 apply only to nested-CV window
+selection (`--layers auto`), not to a fixed window; D10 and D12 appear only if their fallback was used.
 
 ## Data flow
 
@@ -523,7 +524,7 @@ disk and on the Hub**.
 |---|---|
 | `rows.parquet` | id, question, ground_truth_aliases, sampled_answers (list[str], N=10), cluster_ids (list[int]), se_discrete, se_likelihood_weighted, n_clusters, greedy_answer, greedy_correct |
 | `hidden_states.safetensors` | `tbg` and `slt`, each float32 [rows, L+1, d]. The header holds the ordered id list, which must equal the parquet row order; this is checked on load. About 110 MB per position for E2B (arithmetic, not measured). |
-| `collection_config.json` | `schema_version` (1), `calibration_set` (file name), `calibration_set_sha256` (of its bytes), `n_questions_requested`, and the `backbone`, `prompt` and `labels` blocks (without the fit-time fields: se_estimator, binarization, γ, n_high, n_low). |
+| `collection_config.json` | `schema_version` (1), `calibration_set` (file name), `calibration_set_sha256` (of its bytes), `n_questions_requested`, `transformers_version`, and the `backbone`, `prompt` and `labels` blocks (without the fit-time fields: se_estimator, binarization, γ, n_high, n_low). |
 | `training_log.jsonl` | As above. |
 
 Tensors go in safetensors, not parquet list columns, because lists of 55k floats bloat parquet.
@@ -944,6 +945,48 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
   `--ridge-alpha` removed), `custom_types/sep_probe_types.py` (new).
 - Done when: the tests pass. PSP 3's open question ("the `.pt` path keeps working or is
   removed") is decided: **removed**.
+- *As implemented:*
+  - **CLI.** `--dataset DIR` is required; the trainer reads no calibration file (the
+    collector does), so `resolve_calibration_path` and its test are gone. `--output-dir` defaults to `data/probes/<model slug>/` and, like the dataset
+    directory, must be empty or absent. `--layers`, `--max-iter` and `--standardize` use the
+    spellings the vLLM refusal and the convergence error print (`SEP_LAYERS_FLAG`,
+    `MAX_ITER_FLAG`, `STANDARDIZE_FLAG`); the vLLM refusal now ends "or train the probe
+    with --layers final" (`test_vllm_refuses_layers_other_than_the_final_one`). No
+    `--n-jobs`: the CPU cost is still unmeasured. `--max-iter` accepts only 100 and the
+    D10 fallback 1000 (`argparse` choices, and `train_sep_probe` raises on any other value
+    before it reads the dataset), so D10 always means the pre-registered fallback.
+  - **Positions.** The same `--layers` mode runs at TBG and SLT; the probe written is the
+    TBG one (`SEP_SERVED_TOKEN_POSITION`), and its threshold uses TBG's out-of-fold scores.
+    There is no `--position` flag, since v1 serves no SLT probe.
+  - **The weight file has its own library module**, `services/sep_probe_weights.py`
+    (read and write, safetensors only, header and shape checked), so item 11's loader reuses
+    it without importing sklearn. `eval/repo_state.py` reads `repo_commit` and `repo_dirty`
+    (`git rev-parse HEAD`, `git status --porcelain`; untracked files count as dirty) and
+    raises outside a git checkout.
+  - **`transformers_version` comes from the collection.** The fit runs no model, so its own
+    transformers version means nothing; `SEPCollectionConfig` gains `transformers_version`,
+    written by the collector, and the probe copies it. `training.provider` is copied the
+    same way: `SEPCollectionConfig.provider` records the collecting provider's
+    `provider_kind`, a new property of `AllLayerHiddenStateProvider` that
+    `HFTransformersProvider` reports as `hf_transformers`.
+  - **Deviations listed:** D1–D3, D6–D9, D11 and D13 always; D4 and D5 only with
+    `nested_cv` selection (a fixed window chooses nothing); D10 with `--max-iter 1000`;
+    D12 with `--standardize`.
+  - **metrics.json** is `SEPProbeMetrics` (`extra="forbid"`): `selection[position]`'s
+    `window` and `inner_cv_auroc` come from the selection on all rows (`inner_cv_auroc` is
+    null for fixed layers); `nested_cv_auroc_vs_error` keeps `per_fold`;
+    `final_layer_auroc[position]` is the sweep's layer-L entry, both AUROCs. `ablations` is
+    not written, since nothing runs one; item 15 adds `heldout_benchmark` to the model.
+  - **`train_ids.json`** is `SEPTrainIds` (`calibration_set` is the file name the dataset
+    recorded). `eval/sep_probe_provenance.py` and `run_benchmark` still read the old
+    `.pt` sidecar until item 13; `SEP_PROBE_SUFFIX` stays until item 11 rewrites the
+    detector. `.env.example`'s `SEP_PROBE_PATH` comment no longer names the removed
+    `--output-path` flag or a file layout; item 11 states the directory and `hf://` forms
+    there once the detector reads them.
+  - **Interim hints.** `run_benchmark`'s missing-probe error and the detector's
+    file-not-found error now name the two runnable steps (`eval.collect_sep_dataset`, then
+    `eval.train_sep_probe --dataset DIR`), but both still look for the legacy `.pt` file.
+    Items 11 and 13 must rewrite these hints for the probe directory.
 
 **11. Detector: load the directory or Hub, check compatibility, refuse `.pt` (PSP 4).**
 

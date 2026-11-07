@@ -225,8 +225,9 @@ def _preflight_sweep_probes(model_ids: list[str], questions: list[dict[str, Any]
         probe_path = default_probe_path(model_id)
         if not probe_path.is_file():
             raise FileNotFoundError(
-                f"No SEP probe for {model_id} at {probe_path}. Train one with "
-                f"VLLM_MODEL_ID={model_id} uv run python -m eval.train_sep_probe, or drop "
+                f"No SEP probe for {model_id} at {probe_path}. Collect a dataset with "
+                f"VLLM_MODEL_ID={model_id} uv run python -m eval.collect_sep_dataset, then "
+                "train with uv run python -m eval.train_sep_probe --dataset DIR, or drop "
                 "semantic_entropy_probe from ENABLED_DETECTORS."
             )
         assert_disjoint(probe_path, ids)

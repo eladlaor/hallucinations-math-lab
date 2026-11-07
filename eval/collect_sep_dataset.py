@@ -17,12 +17,11 @@ only input: rows.parquet, hidden_states.safetensors, collection_config.json
 and training_log.jsonl, the last appended one line per question as it runs.
 The other three are written at the end, or, when a question fails or the run
 is interrupted, for the questions finished before it. collection_config.json
-names the calibration set by file name and SHA-256 and records how many
-questions it holds, so such a partial dataset is recognisable, and load_sep_dataset refuses it unless asked not to.
+names the calibration set (file name, SHA-256, question count), the
+provider kind and the transformers version; load_sep_dataset refuses a partial dataset unless asked.
 
-Collection needs SLM_PROVIDER=hf_transformers: the layer sweep needs every
-layer, and the vLLM embed runner pools only the last one. It also needs a GPU
-for any real backbone.
+Collection needs SLM_PROVIDER=hf_transformers (every layer; the vLLM embed
+runner pools only the last one), and a GPU for any real backbone.
 
 Usage:
     uv run python -m eval.collect_sep_dataset [--calibration-set FILE] [--output-dir DIR]
@@ -48,8 +47,9 @@ from typing import Final, Protocol, runtime_checkable
 
 import numpy as np
 import torch
+import transformers
 
-from demo.model_registry import get_model_entry
+from demo.model_registry import ProviderKind, get_model_entry
 from demo.slm_provider import SamplingTruncation, build_default_provider
 from eval.benchmark_results import ALIASES_FIELD, ID_FIELD, QUESTION_FIELD, is_correct
 from eval.datasets.default_question_sets import CALIBRATION_SLICE, ensure_question_set
@@ -123,8 +123,11 @@ class CalibrationSet:
 @runtime_checkable
 class AllLayerHiddenStateProvider(SamplingProvider, Protocol):
     """A sampling provider that can also read every layer at TBG or SLT and
-    name its chat template and sampling truncation. HFTransformersProvider
-    satisfies it; the vLLM provider does not."""
+    name its chat template, sampling truncation and provider kind.
+    HFTransformersProvider satisfies it; the vLLM provider does not."""
+
+    @property
+    def provider_kind(self) -> ProviderKind: ...
 
     @property
     def chat_template_sha256(self) -> str: ...
@@ -268,6 +271,8 @@ def build_collection_config(
         calibration_set=calibration_set.name,
         calibration_set_sha256=calibration_set.sha256,
         n_questions_requested=len(calibration_set.questions),
+        provider=str(provider.provider_kind),
+        transformers_version=transformers.__version__,
         backbone=SEPBackbone(
             model_id=entry.model_id,
             revision=entry.revision,

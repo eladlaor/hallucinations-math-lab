@@ -44,6 +44,8 @@ from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import (
     ANSWER_MESSAGE_TEMPLATE,
     LOG_EXTRA_KEY,
+    SEP_LAYERS_FLAG,
+    SEPLayersMode,
     TokenPosition,
     VLLMAuthMode,
 )
@@ -247,7 +249,8 @@ class VLLMOpenAIProvider:
             raise UnsupportedHiddenStateRequest(
                 f"This probe reads layers {list(layers)}; the vLLM embed runner can only pool "
                 f"the last layer ({final_layer}) of {self.model_id!r}. Use "
-                f"SLM_PROVIDER={ProviderKind.HF_TRANSFORMERS} for SEP."
+                f"SLM_PROVIDER={ProviderKind.HF_TRANSFORMERS} for SEP, or train the probe with "
+                f"{SEP_LAYERS_FLAG} {SEPLayersMode.FINAL}."
             )
         # Embed the prompt exactly as generation sees it: chat template plus
         # the generation prompt, pooled at its last token, unnormalized: the
@@ -464,6 +467,11 @@ class HFTransformersProvider:
                 f"{type(template).__name__}), so the hashed prompt format is undefined."
             )
         return hashlib.sha256(template.encode()).hexdigest()
+
+    @property
+    def provider_kind(self) -> ProviderKind:
+        """Which SLM_PROVIDER this is; a collected dataset records it."""
+        return ProviderKind.HF_TRANSFORMERS
 
     @property
     def sampling_truncation(self) -> SamplingTruncation:

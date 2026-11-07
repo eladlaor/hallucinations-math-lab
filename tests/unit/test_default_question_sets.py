@@ -16,8 +16,6 @@ from eval.datasets.default_question_sets import (
 )
 from eval.run_benchmark import build_parser as build_benchmark_parser
 from eval.run_benchmark import resolve_questions_path
-from eval.train_sep_probe import build_parser as build_probe_parser
-from eval.train_sep_probe import resolve_calibration_path
 
 
 def _fake_loader(calls: list[tuple[int, int, Path]]):
@@ -80,15 +78,3 @@ def test_benchmark_with_in_uses_that_file_untouched(tmp_path: Path) -> None:
     calls: list[tuple[int, int, Path]] = []
     assert resolve_questions_path(args.in_path, loader=_fake_loader(calls)) == own
     assert calls == []
-
-
-def test_probe_training_without_calibration_set_uses_the_default_slice(tmp_path: Path) -> None:
-    args = build_probe_parser().parse_args([])
-    calls: list[tuple[int, int, Path]] = []
-    s = QuestionSlice(name="calibration", offset=0, n=2, directory=tmp_path)
-    assert args.calibration_set is None
-    assert (
-        resolve_calibration_path(args.calibration_set, loader=_fake_loader(calls), slice_=s)
-        == s.path
-    )
-    assert calls == [(2, 0, s.path)]

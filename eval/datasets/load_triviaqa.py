@@ -11,7 +11,7 @@ is kept apart from the benchmark it is evaluated on:
     --offset 500 --n 1000  -> benchmark
 
 Each row has `id`, `question`, `ground_truth_aliases` and
-`ground_truth_value`; run_benchmark.py and train_sep_probe.py both read it.
+`ground_truth_value`; run_benchmark.py and collect_sep_dataset.py both read it.
 """
 
 from __future__ import annotations

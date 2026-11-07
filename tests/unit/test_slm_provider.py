@@ -32,7 +32,7 @@ import pytest
 import torch
 from transformers import BatchEncoding, GenerationConfig, GenerationMixin
 
-from demo.model_registry import get_model_entry
+from demo.model_registry import ProviderKind, get_model_entry
 from demo.slm_provider import (
     HFTransformersProvider,
     SamplingTruncation,
@@ -229,7 +229,10 @@ def test_vllm_refuses_layers_other_than_the_final_one(gemma_settings_with_embed,
         embed_client = MagicMock()
         openai_cls.side_effect = [MagicMock(), embed_client]
         provider = VLLMOpenAIProvider()
-        with pytest.raises(UnsupportedHiddenStateRequest, match="SLM_PROVIDER=hf_transformers"):
+        with pytest.raises(
+            UnsupportedHiddenStateRequest,
+            match="SLM_PROVIDER=hf_transformers for SEP, or train the probe with --layers final",
+        ):
             provider.pooled_hidden_state("q", layers=layers)
     embed_client.post.assert_not_called()
 
@@ -471,6 +474,11 @@ def test_chat_template_sha256_refuses_a_tokenizer_without_a_template():
     tokenizer.chat_template = None
     with pytest.raises(TypeError, match="no chat template"):
         _ = provider.chat_template_sha256
+
+
+def test_hf_provider_reports_its_kind():
+    """A collected dataset records the provider kind from the provider itself."""
+    assert _hf_provider(_FakeHFModel()).provider_kind == ProviderKind.HF_TRANSFORMERS
 
 
 def test_sampling_truncation_reads_the_loaded_generation_config():

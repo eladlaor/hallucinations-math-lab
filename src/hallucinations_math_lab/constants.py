@@ -80,7 +80,9 @@ SE_NLI_INPUT_TEMPLATE: Final[str] = "{question} {answer}"
 # `SampleSet.prompt` keeps the bare question; only the model sees this.
 ANSWER_MESSAGE_TEMPLATE: Final[str] = "{instruction}\nQuestion: {question}"
 
-# SEP probes: one per model, at SEP_PROBE_DIR/<model slug>.pt unless SEP_PROBE_PATH says otherwise.
+# SEP probes: one per model. eval.train_sep_probe writes the directory SEP_PROBE_DIR/<model slug>/;
+# the detector's legacy default SEP_PROBE_DIR/<model slug>.pt (unless SEP_PROBE_PATH says
+# otherwise) stays only until the detector reads probe directories.
 SEP_PROBE_DIR: Final[str] = "data/probes"
 SEP_PROBE_SUFFIX: Final[str] = ".pt"
 # Model id -> filesystem-safe slug: lowercase, runs of other characters become "-".
@@ -151,6 +153,10 @@ class TokenPosition(StrEnum):
     SLT = "slt"
 
 
+# The position a v1 probe reads: SLT is collected and swept, but only TBG is served.
+SEP_SERVED_TOKEN_POSITION: Final[TokenPosition] = TokenPosition.TBG
+
+
 # SEP dataset directory (eval.collect_sep_dataset): one per model, at
 # SEP_DATASET_DIR/<model slug>/ unless --output-dir says otherwise. It is the
 # probe fit's only input.
@@ -160,8 +166,91 @@ SEP_DATASET_TENSORS_FILE: Final[str] = "hidden_states.safetensors"
 SEP_COLLECTION_CONFIG_FILE: Final[str] = "collection_config.json"
 SEP_TRAINING_LOG_FILE: Final[str] = "training_log.jsonl"
 SEP_DATASET_SCHEMA_VERSION: Final[int] = 1
+
+# SEP probe directory (eval.train_sep_probe): the same layout on disk and on the Hub.
+# training_log.jsonl is the dataset's log, copied in (SEP_TRAINING_LOG_FILE).
+SEP_PROBE_WEIGHTS_FILE: Final[str] = "probe.safetensors"
+SEP_PROBE_CONFIG_FILE: Final[str] = "probe_config.json"
+SEP_TRAIN_IDS_FILE: Final[str] = "train_ids.json"
+SEP_METRICS_FILE: Final[str] = "metrics.json"
+SEP_PROBE_SCHEMA_VERSION: Final[int] = 1
+# probe.safetensors: tensor names, and the header metadata naming the format.
+SEP_PROBE_WEIGHT_TENSOR: Final[str] = "weight"
+SEP_PROBE_BIAS_TENSOR: Final[str] = "bias"
+SEP_PROBE_FORMAT_KEY: Final[str] = "format"
+SEP_PROBE_FORMAT: Final[str] = "sep-logistic"
+SEP_PROBE_SCHEMA_VERSION_KEY: Final[str] = "schema_version"
+# probe_config.classifier.penalty: the pure L2 that SEP_LOGREG_L1_RATIO = 0 spells.
+SEP_LOGREG_PENALTY: Final[str] = "l2"
+
+# The trainer's layer flag: `--layers auto|final|<a>-<b>`.
+SEP_LAYERS_FLAG: Final[str] = "--layers"
+
+
+class SEPLayersMode(StrEnum):
+    """The named values of the trainer's `--layers` flag (an `<a>-<b>` range is the third form).
+
+    AUTO: pick a window by nested CV. FINAL: read layer L only, the one layer
+    the vLLM embed runner can serve.
+    """
+
+    AUTO = "auto"
+    FINAL = "final"
+
+
+class SEPLayerConvention(StrEnum):
+    """How a probe's layer indices count: layer k is the state after k decoder layers."""
+
+    AFTER_K_DECODER_LAYERS = "after_k_decoder_layers"
+
+
+class SEPFeatureConcat(StrEnum):
+    """How a probe's layers become one feature vector: concatenated in increasing k."""
+
+    INCREASING_LAYER = "increasing_layer"
+
+
+class SEPBinarization(StrEnum):
+    """How SE became the probe's 0/1 target: the best split over midpoints (deviation D11)."""
+
+    BEST_SPLIT_MIDPOINTS = "best_split_midpoints"
+
+
+class SEPClassifierType(StrEnum):
+    LOGISTIC_REGRESSION = "logistic_regression"
+
+
+class SEPOutputSemantics(StrEnum):
+    """What a probe's score means: P_HIGH_SE is p(SE > γ*), not a hallucination probability."""
+
+    P_HIGH_SE = "p_high_se"
+
+
+class SEPPaperDeviation(StrEnum):
+    """IDs of the deviations from Kossen et al. 2024.
+
+    See SEP_CLASSIFIER.md, "Deviations from the paper"; the README carries the table.
+    """
+
+    CHAT_TEMPLATE_PROMPT = "D1"
+    GEMMA_BACKBONES = "D2"
+    GAMMA_PER_TRAINING_FOLD = "D3"
+    WINDOW_BY_INNER_CV = "D4"
+    WINDOW_RANKED_BY_BINARIZED_SE = "D5"
+    SMALLER_CALIBRATION_SET = "D6"
+    GREEDY_ANSWER = "D7"
+    CHECKPOINT_SAMPLING_TRUNCATION = "D8"
+    ESCALATION_THRESHOLD = "D9"
+    FALLBACK_MAX_ITER = "D10"
+    MIDPOINT_BEST_SPLIT = "D11"
+    FOLDED_STANDARDIZATION = "D12"
+    LAYER_ZERO_EXCLUDED = "D13"
+
+
 # A full Hub commit sha: the only revision form that cannot move.
 HUB_COMMIT_SHA_PATTERN: Final[str] = r"^[0-9a-f]{40}$"
+# A full commit sha of this repository (git's SHA-1 object format).
+GIT_COMMIT_SHA_PATTERN: Final[str] = r"^[0-9a-f]{40}$"
 
 # Reproducibility
 RANDOM_SEED: Final[int] = 42

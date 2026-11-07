@@ -10,7 +10,6 @@ Contract pinned here:
   - adversarial_separation needs both p < 0.01 and the AUC effect size, and
     fails fast on a missing detector score.
   - Results files must be one run, and compared runs must match.
-  - train_sep_probe's cross-validated Pearson r tracks a learnable signal.
   - TriviaQA slices are bounds-checked; probe provenance rejects overlap.
 """
 
@@ -29,7 +28,6 @@ from eval.escalation_uplift import (
 )
 from eval.inference_stats import auroc, mcnemar_exact_p, paired_bootstrap
 from eval.sep_probe_provenance import assert_disjoint, write_training_ids
-from eval.train_sep_probe import cross_validated_pearson_r
 from hallucinations_math_lab.constants import AnswerSource, DetectorName
 
 SE = str(DetectorName.SEMANTIC_ENTROPY)
@@ -362,23 +360,7 @@ def test_run_config_rejects_rows_from_before_it_was_recorded():
         run_config([row], "fixture")
 
 
-# --- SEP probe: cross-validation and provenance ----------------------------
-
-
-def test_cross_validated_pearson_r_tracks_a_linear_signal():
-    rng = np.random.default_rng(0)
-    X = rng.normal(size=(60, 4))
-    y = X @ np.array([1.0, -0.5, 0.0, 2.0]) + rng.normal(scale=0.05, size=60)
-
-    mean_r, std_r = cross_validated_pearson_r(X, y, ridge_alpha=0.1, n_folds=5, seed=0)
-    assert mean_r > 0.95
-    assert std_r < 0.05
-
-
-def test_cross_validated_pearson_r_rejects_tiny_folds():
-    X, y = np.zeros((10, 2)), np.arange(10.0)
-    with pytest.raises(ValueError, match="fewer than 3 held-out rows"):
-        cross_validated_pearson_r(X, y, ridge_alpha=1.0, n_folds=5, seed=0)
+# --- TriviaQA slices and SEP probe provenance -------------------------------
 
 
 def test_slice_bounds_are_checked():

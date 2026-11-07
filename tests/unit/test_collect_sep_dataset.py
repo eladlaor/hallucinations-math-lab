@@ -24,9 +24,10 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 import torch
+import transformers
 
 import eval.collect_sep_dataset as collect_module
-from demo.model_registry import get_model_entry
+from demo.model_registry import ProviderKind, get_model_entry
 from demo.slm_provider import SamplingTruncation
 from eval.collect_sep_dataset import (
     CalibrationQuestion,
@@ -194,6 +195,10 @@ class _FakeCollectionProvider:
     def sampling_truncation(self) -> SamplingTruncation:
         return _FAKE_TRUNCATION
 
+    @property
+    def provider_kind(self) -> ProviderKind:
+        return ProviderKind.HF_TRANSFORMERS
+
     def sample(self, prompt: str) -> SampleSet:
         self.sample_calls += 1
         return SampleSet(prompt=prompt, samples=_SAMPLE_SET.samples)
@@ -268,6 +273,8 @@ def test_dataset_rows_and_columns(tmp_path: Path) -> None:
     assert config.calibration_set == _CALIBRATION_SET.name
     assert config.calibration_set_sha256 == _CALIBRATION_SET.sha256
     assert config.n_questions_requested == len(_QUESTIONS)
+    assert config.provider == ProviderKind.HF_TRANSFORMERS
+    assert config.transformers_version == transformers.__version__
     assert config.backbone.model_id == E2B_ID
     assert config.backbone.revision == _E2B.revision
     assert config.backbone.num_hidden_layers == _E2B.num_hidden_layers
