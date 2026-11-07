@@ -27,6 +27,7 @@ JUDGE_ANSWER_FIELD: Final[str] = "judge_answer"
 DETECTOR_SCORES_FIELD: Final[str] = "detector_scores"
 ESCALATED_FIELD: Final[str] = "escalated"
 ID_FIELD: Final[str] = "id"
+QUESTION_FIELD: Final[str] = "question"
 # What produced the scores. Two runs are comparable only if these match.
 MODEL_ID_FIELD: Final[str] = "model_id"
 SAMPLE_N_FIELD: Final[str] = "sample_n"

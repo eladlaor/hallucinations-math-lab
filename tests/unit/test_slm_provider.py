@@ -22,6 +22,7 @@ Contract pinned here:
     it runs on CPU.
 """
 
+import hashlib
 import math
 from types import SimpleNamespace
 from typing import Any
@@ -34,6 +35,7 @@ from transformers import BatchEncoding, GenerationConfig, GenerationMixin
 from demo.model_registry import get_model_entry
 from demo.slm_provider import (
     HFTransformersProvider,
+    SamplingTruncation,
     VLLMOpenAIProvider,
     build_answer_message,
     build_default_provider,
@@ -455,6 +457,37 @@ def test_slt_failure_names_prompt_position_and_model():
 
 def test_hf_provider_reads_depth_from_the_loaded_config():
     assert _hf_provider(_FakeHFModel()).num_hidden_layers == HF_NUM_LAYERS
+
+
+def test_chat_template_sha256_hashes_the_loaded_template():
+    """A collected dataset records which chat template formatted its prompts."""
+    expected = hashlib.sha256(_FakeTokenizer.chat_template.encode()).hexdigest()
+    assert _hf_provider(_FakeHFModel()).chat_template_sha256 == expected
+
+
+def test_chat_template_sha256_refuses_a_tokenizer_without_a_template():
+    provider = _hf_provider(_FakeHFModel())
+    tokenizer: Any = provider._tokenizer
+    tokenizer.chat_template = None
+    with pytest.raises(TypeError, match="no chat template"):
+        _ = provider.chat_template_sha256
+
+
+def test_sampling_truncation_reads_the_loaded_generation_config():
+    """`sample` sends only the temperature; `generate` takes top-p and top-k
+    from the checkpoint's generation_config (Gemma 4: 0.95 and 64)."""
+    model = _FakeHFModel()
+    model.generation_config = SimpleNamespace(top_p=0.95, top_k=64)  # type: ignore[attr-defined]
+    assert _hf_provider(model).sampling_truncation == SamplingTruncation(top_p=0.95, top_k=64)
+
+
+@pytest.mark.parametrize(("top_p", "top_k"), [(None, 64), (0.95, None)])
+def test_sampling_truncation_refuses_an_unset_value(top_p, top_k):
+    """Unset, generate falls back to a library default the record would not show."""
+    model = _FakeHFModel()
+    model.generation_config = SimpleNamespace(top_p=top_p, top_k=top_k)  # type: ignore[attr-defined]
+    with pytest.raises(ValueError, match="both must be set"):
+        _ = _hf_provider(model).sampling_truncation
 
 
 E2B_ID = "google/gemma-4-E2B-it"

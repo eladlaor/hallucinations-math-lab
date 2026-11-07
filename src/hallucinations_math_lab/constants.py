@@ -151,6 +151,18 @@ class TokenPosition(StrEnum):
     SLT = "slt"
 
 
+# SEP dataset directory (eval.collect_sep_dataset): one per model, at
+# SEP_DATASET_DIR/<model slug>/ unless --output-dir says otherwise. It is the
+# probe fit's only input.
+SEP_DATASET_DIR: Final[str] = "data/sep_datasets"
+SEP_DATASET_ROWS_FILE: Final[str] = "rows.parquet"
+SEP_DATASET_TENSORS_FILE: Final[str] = "hidden_states.safetensors"
+SEP_COLLECTION_CONFIG_FILE: Final[str] = "collection_config.json"
+SEP_TRAINING_LOG_FILE: Final[str] = "training_log.jsonl"
+SEP_DATASET_SCHEMA_VERSION: Final[int] = 1
+# A full Hub commit sha: the only revision form that cannot move.
+HUB_COMMIT_SHA_PATTERN: Final[str] = r"^[0-9a-f]{40}$"
+
 # Reproducibility
 RANDOM_SEED: Final[int] = 42
 

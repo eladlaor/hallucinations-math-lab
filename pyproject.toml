@@ -20,6 +20,8 @@ dependencies = [
     "torch>=2.3",
     "transformers>=4.56",
     "numpy>=1.26",
+    # SEP datasets and probes store tensors as safetensors, which cannot carry code.
+    "safetensors>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -46,6 +48,8 @@ deploy = [
 # Eval / benchmarking harness (eval/*.py, not shipped in the wheel).
 eval = [
     "datasets>=2.20",
+    # The SEP dataset's rows.parquet.
+    "pyarrow>=15",
     "scikit-learn>=1.8",
     "scipy>=1.13",
 ]
@@ -82,8 +86,10 @@ warn_unused_ignores = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-# scikit-learn, scipy and datasets ship no complete type information.
-module = ["sklearn", "sklearn.*", "scipy", "scipy.*", "datasets", "datasets.*"]
+# scikit-learn, scipy, datasets and pyarrow ship no complete type information.
+module = [
+    "sklearn", "sklearn.*", "scipy", "scipy.*", "datasets", "datasets.*", "pyarrow", "pyarrow.*",
+]
 ignore_missing_imports = true
 
 [tool.ruff]

@@ -6,6 +6,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from hallucinations_math_lab.constants import (
+    HUB_COMMIT_SHA_PATTERN,
     NATS_SCORED_DETECTORS,
     DetectorName,
     JudgeThinkingLevel,
@@ -81,6 +82,12 @@ class Settings(BaseSettings):
 
     # NLI for SE clustering
     nli_model_id: str = Field(default="microsoft/deberta-large-mnli")
+    # Full 40-hex Hub commit of nli_model_id. SE labels depend on the NLI
+    # weights, so they load from one immutable commit; change it together
+    # with nli_model_id.
+    nli_revision: str = Field(
+        default="7296194b9009373def4f7c5dad292651e4b5cf4e", pattern=HUB_COMMIT_SHA_PATTERN
+    )
 
     # Detection
     # Escalation thresholds, one per score scale; escalation_threshold_for

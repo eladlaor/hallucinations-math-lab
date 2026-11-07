@@ -420,7 +420,7 @@ A test asserts that the list is present. No other deviation is allowed silently.
 | D5 | Window ranked by AUROC against model error | Ranked by AUROC against binarized SE; error AUROC still reported | Independent of our noisy correctness labeler; matches the probe's target. |
 | D6 | n = 2000 per dataset, 4–5 datasets | n = 500 TriviaQA rows (calibration slice) | GPU budget. CV std is reported so the noise is visible. |
 | D7 | Most-likely answer sampled at T = 0.1 (the text says greedy) | Greedy, T = 0 | Matches the paper's text and our existing greedy answer. |
-| D8 | SE samples at T = 1.0, top-p 0.9, top-k 50 | T = 1.0, **no top-p or top-k** (`config.py:86`; the provider sends neither) | Unchanged project sampler. Pure T = 1 sampling spreads more, which may raise SE. |
+| D8 | SE samples at T = 1.0, top-p 0.9, top-k 50 | T = 1.0 with the checkpoint's own top-p and top-k: the provider sends only the temperature, and `generate` takes the rest from `generation_config.json` (Gemma 4 E2B at the pinned revision: top-p 0.95, top-k 64). The labels block records the effective values. | Unchanged project sampler. Truncation differs from the paper's, so SE values are not directly comparable. |
 | D9 | No escalation threshold | `SEP_THRESHOLD`, with a recommended value from Youden's J on out-of-fold rows | A product need. The paper reports AUROC only. |
 | D10 | max_iter = 100 | Same, **unless** non-convergence forces 1000 (recorded) | Pre-registered fallback; see the classifier section. |
 | D11 | Best split over a 100-point grid ending at max(SE) | Exhaustive search over midpoints of distinct SE values | Exact; no ties with data, so no −1 labels. |
@@ -437,7 +437,7 @@ COLLECT (GPU, SLM_PROVIDER=hf_transformers)      eval/collect_sep_dataset.py
    ├─ sample N=10 at T=1 ─ cluster once (NLI) ─ se_discrete, se_likelihood_weighted, cluster_ids
    ├─ greedy answer (T=0) ─ greedy_correct (alias match)
    └─ hidden_states_all_layers: TBG [L+1,d], SLT [L+1,d]   (one extra forward pass for SLT)
-          │  streamed per row
+          │  log appended per row; rows and tensors written at the end
           ▼
   <dataset dir>/ rows.parquet + hidden_states.safetensors + collection_config.json
                  + training_log.jsonl
@@ -490,7 +490,7 @@ disk and on the Hub**.
 - **`prompt`**: chat_template_sha256, add_generation_prompt: true, answer_instruction.
 - **`labels`**:
   - se_estimator: `"discrete"`
-  - sample_n, temperature, top_p: null, top_k: null
+  - sample_n, temperature, top_p, top_k (the effective values, D8), max_tokens
   - nli_model_id, nli_revision
   - binarization: `"best_split_midpoints"`
   - gamma_nats, n_high, n_low
@@ -523,7 +523,7 @@ disk and on the Hub**.
 |---|---|
 | `rows.parquet` | id, question, ground_truth_aliases, sampled_answers (list[str], N=10), cluster_ids (list[int]), se_discrete, se_likelihood_weighted, n_clusters, greedy_answer, greedy_correct |
 | `hidden_states.safetensors` | `tbg` and `slt`, each float32 [rows, L+1, d]. The header holds the ordered id list, which must equal the parquet row order; this is checked on load. About 110 MB per position for E2B (arithmetic, not measured). |
-| `collection_config.json` | The `backbone`, `prompt` and `labels` blocks (without γ). |
+| `collection_config.json` | `schema_version` (1), `calibration_set` (file name), `calibration_set_sha256` (of its bytes), `n_questions_requested`, and the `backbone`, `prompt` and `labels` blocks (without the fit-time fields: se_estimator, binarization, γ, n_high, n_low). |
 | `training_log.jsonl` | As above. |
 
 Tensors go in safetensors, not parquet list columns, because lists of 55k floats bloat parquet.
@@ -866,6 +866,67 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Files: `eval/collect_sep_dataset.py`, `eval/sep_dataset_io.py` (new; read and write only),
   `pyproject.toml`.
 - Done when: the tests pass with fake provider, sampler and NLI.
+- *As implemented:*
+  - **The NLI model is pinned.** The labels block needs `nli_revision`, and nothing pinned
+    the NLI weights. `Settings.nli_revision` (`NLI_REVISION`, a 40-hex sha validated by
+    `HUB_COMMIT_SHA_PATTERN`) defaults to `microsoft/deberta-large-mnli`'s `main` commit
+    `7296194b9009373def4f7c5dad292651e4b5cf4e` (unchanged since 2021), and `NLIScorer` loads
+    at it (`test_nli_loads_at_the_pinned_revision`). An explicit `NLIScorer(model_id=...)`
+    must also pass its `revision`, a 40-hex commit sha, or it raises. Item 18 documents `NLI_REVISION`.
+  - **The config blocks live in `custom_types/sep_probe_types.py` now**, not in item 10:
+    `SEPBackbone`, `SEPPromptSpec`, `SEPCollectionLabels` and `SEPCollectionConfig`, all
+    `extra="forbid"`. Item 10 adds the probe config there, reusing these blocks, and extends
+    the labels block with the fit-time fields (`se_estimator`, `binarization`, γ, `n_high`,
+    `n_low`). The collection config carries its own `schema_version` (1); an unknown one fails.
+  - **The labels block adds `max_tokens`.** It changes every sampled answer, as the benchmark
+    run config already records.
+  - **The backbone block comes from the registry.** The provider must report the registry's
+    revision and depth, or collection stops before the first sample
+    (`test_collect_fails_fast_on_missing_or_wrong_revision`, with the "hidden states" half as
+    `test_collect_fails_fast_on_missing_hidden_states`). The tensors are checked against the
+    registry's `hidden_size`.
+  - **`chat_template_sha256` is a new `HFTransformersProvider` property**, the SHA-256 of the
+    loaded tokenizer's template. A tokenizer without one raises `TypeError`.
+  - **The HF requirement is structural.** The collector accepts any provider satisfying the
+    runtime-checkable `AllLayerHiddenStateProvider` protocol (`hidden_states_all_layers`,
+    `chat_template_sha256` and `sampling_truncation`), which the vLLM provider does not; anything else raises a
+    `TypeError` naming `SLM_PROVIDER=hf_transformers`.
+  - **Questions need aliases.** `greedy_correct` uses `eval/benchmark_results.is_correct`, so
+    a calibration row without `ground_truth_aliases`, or a repeated id, fails at read time.
+  - **Streaming is the training log only.** It is appended and flushed per question; the
+    tensors are held in preallocated arrays and written with the parquet and the config at
+    the end. A failed question still stops the run, but the questions finished before it
+    are first written as a dataset (`test_collect_writes_the_finished_questions_before_failing`),
+    also on Ctrl-C, which is then re-raised as is. A failure of that write raises naming both
+    the question and the original error.
+    The log is a record, not a checkpoint: a run cannot resume from it. The output
+    directory (default `data/sep_datasets/<model slug>/`) must be empty or absent, so a
+    finished collection is never overwritten; it is checked before the model loads.
+  - **Rows are checked against the config.** Writing and loading both require
+    `sample_n` sampled answers and cluster ids per row, with ids exactly
+    `0..n_clusters-1`.
+  - **The dataset names its questions.** `collection_config.json` records the calibration
+    file's name (`calibration_set`) and the SHA-256 of its bytes (`calibration_set_sha256`),
+    hashed from the same bytes the questions are parsed from. The fit reads only the dataset
+    directory, and these fill the probe's `calibration_set_sha256` and `train_ids.json`'s
+    `calibration_set`.
+  - **A partial dataset is marked.** `collection_config.json` records `n_questions_requested`.
+    `load_sep_dataset` refuses a dataset with fewer rows unless `allow_incomplete=True`, so
+    a fit cannot run on a stopped collection by accident.
+  - **Top-p and top-k are recorded as used, not as sent.** The sampler sends only the
+    temperature, and `generate` applies the checkpoint's `generation_config` top-p and top-k
+    (D8). `HFTransformersProvider.sampling_truncation` reads them from the loaded model and
+    raises when either is unset, since `generate` would then use a library default.
+  - **Calibration rows are type-checked, not coerced.** A row must be a JSON object; the
+    question a non-empty string; the id a string or integer; the aliases a non-empty list of
+    strings.
+  - **The labels block always names the configured NLI.** `collect_sep_dataset`'s `scorer`
+    argument is a test seam for a fake; real runs use the default scorer, which loads
+    `NLI_MODEL_ID` at `NLI_REVISION`.
+  - **The log's "answer word counts"** are `sampled_answer_word_counts` (one per sample) and
+    `greedy_answer_word_count`.
+  - **Dependencies:** `safetensors` joins core and `pyarrow` the `eval` extra (both were
+    already locked). `huggingface-hub` moves into core with item 11, its first direct import.
 
 **10. Trainer writes the probe directory (PSP 1 + 3).**
 

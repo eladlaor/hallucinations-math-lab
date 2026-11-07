@@ -1,6 +1,7 @@
 """DeBERTa-MNLI wrapper for bidirectional entailment judgments used by semantic clustering."""
 
 import logging
+import re
 from collections.abc import Mapping
 from functools import lru_cache
 from typing import Protocol
@@ -14,7 +15,7 @@ from transformers import (
 )
 
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.constants import LOG_EXTRA_KEY, NLILabel
+from hallucinations_math_lab.constants import HUB_COMMIT_SHA_PATTERN, LOG_EXTRA_KEY, NLILabel
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,29 @@ class EntailmentScorer(Protocol):
 
 
 class NLIScorer:
-    """Single-process NLI scorer. Lazily loads the model on first use."""
+    """Single-process NLI scorer. Lazily loads the model on first use.
 
-    def __init__(self, model_id: str | None = None) -> None:
-        self._model_id = model_id or get_settings().nli_model_id
+    With neither argument, loads the configured `nli_model_id` at its pinned
+    `nli_revision`. Another model is always pinned too: `model_id` and
+    `revision` are given together or not at all."""
+
+    def __init__(self, model_id: str | None = None, revision: str | None = None) -> None:
+        if (model_id is None) != (revision is None):
+            raise ValueError(
+                f"NLIScorer needs model_id and revision together, got model_id={model_id!r}, "
+                f"revision={revision!r}; an unpinned NLI model would change the SE labels "
+                "(see NLI_MODEL_ID and NLI_REVISION)."
+            )
+        if revision is not None and not re.fullmatch(HUB_COMMIT_SHA_PATTERN, revision):
+            raise ValueError(
+                f"NLIScorer got revision {revision!r} for {model_id!r}; it needs a 40-hex Hub "
+                "commit sha, since a branch or tag can move and change the SE labels."
+            )
+        if model_id is None or revision is None:
+            settings = get_settings()
+            model_id, revision = settings.nli_model_id, settings.nli_revision
+        self._model_id: str = model_id
+        self._revision = revision
         self._device = "cuda" if torch.cuda.is_available() else "cpu"
         self._tokenizer: PreTrainedTokenizerBase | None = None
         self._model: PreTrainedModel | None = None
@@ -46,14 +66,25 @@ class NLIScorer:
         try:
             logger.info(
                 "Loading NLI model.",
-                extra={LOG_EXTRA_KEY: {"model_id": self._model_id, "device": self._device}},
+                extra={
+                    LOG_EXTRA_KEY: {
+                        "model_id": self._model_id,
+                        "revision": self._revision,
+                        "device": self._device,
+                    }
+                },
             )
-            tokenizer = AutoTokenizer.from_pretrained(self._model_id)
-            model = AutoModelForSequenceClassification.from_pretrained(self._model_id)
+            tokenizer = AutoTokenizer.from_pretrained(self._model_id, revision=self._revision)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                self._model_id, revision=self._revision
+            )
             model.to(self._device)
             model.eval()
         except Exception as e:
-            raise RuntimeError(f"Failed to load NLI model {self._model_id!r}: {e!s}") from e
+            raise RuntimeError(
+                f"Failed to load NLI model {self._model_id!r} at revision {self._revision!r} "
+                f"(set NLI_REVISION together with NLI_MODEL_ID): {e!s}"
+            ) from e
         self._tokenizer, self._model = tokenizer, model
         return tokenizer, model
 

@@ -28,7 +28,9 @@ Concrete implementations live in this module:
 
 from __future__ import annotations
 
+import hashlib
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 import torch
@@ -68,6 +70,14 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SamplingTruncation:
+    """The top-p and top-k a sampled answer was truncated with."""
+
+    top_p: float
+    top_k: int
 
 
 def build_answer_message(question: str) -> str:
@@ -441,6 +451,28 @@ class HFTransformersProvider:
         _, model = self._ensure_loaded()
         return _text_config_num_hidden_layers(model)
 
+    @property
+    def chat_template_sha256(self) -> str:
+        """SHA-256 of the loaded tokenizer's chat template, which formats every
+        prompt and so moves every hidden state. Raises when there is none:
+        hidden states recorded for a probe must come from a chat-formatted prompt."""
+        tokenizer, _ = self._ensure_loaded()
+        template = tokenizer.chat_template
+        if not isinstance(template, str):
+            raise TypeError(
+                f"The tokenizer of {self.model_id!r} has no chat template string (got "
+                f"{type(template).__name__}), so the hashed prompt format is undefined."
+            )
+        return hashlib.sha256(template.encode()).hexdigest()
+
+    @property
+    def sampling_truncation(self) -> SamplingTruncation:
+        """The top-p and top-k `sample` actually uses. It passes only the
+        temperature, so `generate` takes both from the loaded model's
+        generation_config; a dataset's SE labels record these values."""
+        _, model = self._ensure_loaded()
+        return sampling_truncation(model.generation_config)
+
     def hidden_states_all_layers(
         self, prompt: str, position: TokenPosition, answer: str | None = None
     ) -> torch.Tensor:
@@ -625,6 +657,19 @@ def stop_token_ids(config: GenerationConfig) -> set[int]:
             "cannot tell where a sampled sequence ends."
         )
     return ids
+
+
+def sampling_truncation(config: GenerationConfig) -> SamplingTruncation:
+    """The generation_config's top-p and top-k. Raises when either is unset:
+    `generate` would then fall back to a library default this code does not
+    see, and the recorded value could be wrong."""
+    top_p, top_k = config.top_p, config.top_k
+    if top_p is None or top_k is None:
+        raise ValueError(
+            f"Model generation_config sets top_p={top_p!r} and top_k={top_k!r}; both must be "
+            "set to record the truncation sampling uses."
+        )
+    return SamplingTruncation(top_p=float(top_p), top_k=int(top_k))
 
 
 def raw_token_logprobs(
