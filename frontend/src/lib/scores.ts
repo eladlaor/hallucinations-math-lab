@@ -2,7 +2,9 @@
 
 import {
   DetectorName,
+  PERCENT_DECIMALS,
   SCORE_DECIMALS,
+  ScoreScale,
   SeEstimator,
   THRESHOLD_MIN_MAX_NATS,
 } from '@/lib/constants'
@@ -28,6 +30,7 @@ export interface DetectorInfo {
   short: string
   name: string
   meaning: string
+  scale: ScoreScale
 }
 
 const DETECTOR_INFO: Record<string, DetectorInfo> = {
@@ -36,23 +39,28 @@ const DETECTOR_INFO: Record<string, DetectorInfo> = {
     name: 'Semantic Entropy',
     meaning:
       'How many different meanings the answers spread across, in nats. 0 means they all say the same thing.',
+    scale: ScoreScale.NUMBER,
   },
   [DetectorName.DISCRETE_SEMANTIC_ENTROPY]: {
     short: 'SE, discrete',
     name: 'Discrete Semantic Entropy',
     meaning:
       'Semantic Entropy with each meaning weighed by how many answers say it, for answers without token probabilities.',
+    scale: ScoreScale.NUMBER,
   },
   [DetectorName.PREDICTIVE_ENTROPY]: {
     short: 'PE',
     name: 'Predictive Entropy',
     meaning:
       "How unsure the model was of its own words, from token probabilities. Varied wording reads as uncertainty, even when the meaning doesn't change.",
+    scale: ScoreScale.NUMBER,
   },
   [DetectorName.SEMANTIC_ENTROPY_PROBE]: {
     short: 'SEP',
     name: 'Semantic Entropy Probe',
-    meaning: "A linear probe's prediction of SE from one hidden state, without repeated sampling.",
+    meaning:
+      "P(high SE): a linear probe's estimate, from one hidden state and without repeated sampling, of the chance that the sampled answers would spread across many meanings. It is not the chance that the answer is wrong.",
+    scale: ScoreScale.PROBABILITY,
   },
 }
 
@@ -69,7 +77,23 @@ export function seEstimatorNote(estimator: SeEstimator): string {
 }
 
 export function detectorInfo(name: string): DetectorInfo {
-  return DETECTOR_INFO[name] ?? { short: name, name, meaning: '' }
+  return DETECTOR_INFO[name] ?? { short: name, name, meaning: '', scale: ScoreScale.NUMBER }
+}
+
+/**
+ * A score or threshold on its detector's scale: a percentage with
+ * PERCENT_DECIMALS places for a probability (SEP), otherwise a plain number
+ * with `numberDecimals` places. `numberDecimals` never applies to a probability.
+ */
+export function formatDetectorScore(
+  name: string,
+  value: number,
+  numberDecimals: number = SCORE_DECIMALS,
+): string {
+  if (detectorInfo(name).scale === ScoreScale.PROBABILITY) {
+    return `${formatScore(value * 100, PERCENT_DECIMALS)}%`
+  }
+  return formatScore(value, numberDecimals)
 }
 
 /** Canonical display order: PE, SEP, SE, then anything else alphabetically. */

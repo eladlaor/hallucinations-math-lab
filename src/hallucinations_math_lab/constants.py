@@ -39,11 +39,16 @@ NATS_SCORED_DETECTORS: Final[frozenset[DetectorName]] = frozenset(
     }
 )
 
+# Detectors whose score is a probability in [0, 1], so SEP_THRESHOLD is on their scale.
+PROBABILITY_SCORED_DETECTORS: Final[frozenset[DetectorName]] = frozenset(
+    {DetectorName.SEMANTIC_ENTROPY_PROBE}
+)
+
 # Detectors with a configured escalation threshold (SE_THRESHOLD or
 # SEP_THRESHOLD); the LLM judges have none.
-ESCALATION_THRESHOLDED_DETECTORS: Final[frozenset[DetectorName]] = NATS_SCORED_DETECTORS | {
-    DetectorName.SEMANTIC_ENTROPY_PROBE
-}
+ESCALATION_THRESHOLDED_DETECTORS: Final[frozenset[DetectorName]] = (
+    NATS_SCORED_DETECTORS | PROBABILITY_SCORED_DETECTORS
+)
 
 
 class SemanticEntropyEstimator(StrEnum):

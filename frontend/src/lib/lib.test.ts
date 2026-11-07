@@ -2,7 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api, ApiError } from '@/lib/api'
 import { logger } from '@/lib/logger'
-import { formatElapsed, formatScore, shouldEscalate, thresholdSliderMax } from '@/lib/scores'
+import { DetectorName } from '@/lib/constants'
+import {
+  detectorInfo,
+  formatDetectorScore,
+  formatElapsed,
+  formatScore,
+  shouldEscalate,
+  thresholdSliderMax,
+} from '@/lib/scores'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -104,6 +112,21 @@ describe('scores', () => {
   it('lets the slider reach the largest possible SE', () => {
     expect(thresholdSliderMax(10)).toBe(3)
     expect(thresholdSliderMax(50)).toBeCloseTo(4.0)
+  })
+
+  it('shows SEP as a percentage and the entropies as plain numbers', () => {
+    expect(formatDetectorScore(DetectorName.SEMANTIC_ENTROPY_PROBE, 0.7234)).toBe('72.3%')
+    // numberDecimals applies only to the number scale; a probability keeps PERCENT_DECIMALS.
+    expect(formatDetectorScore(DetectorName.SEMANTIC_ENTROPY_PROBE, 0.5, 2)).toBe('50.0%')
+    expect(formatDetectorScore(DetectorName.SEMANTIC_ENTROPY, 1.8343719)).toBe('1.834')
+    expect(formatDetectorScore(DetectorName.SEMANTIC_ENTROPY, 1.0, 2)).toBe('1.00')
+    expect(formatDetectorScore('some_custom_detector', 0.25)).toBe('0.250')
+  })
+
+  it('explains SEP as P(high SE), not in nats', () => {
+    const { meaning } = detectorInfo(DetectorName.SEMANTIC_ENTROPY_PROBE)
+    expect(meaning).toContain('P(high SE)')
+    expect(meaning).not.toContain('nats')
   })
 
   it('formats elapsed time as minutes and seconds', () => {

@@ -28,6 +28,10 @@ export const DetectorName = {
   DISCRETE_SEMANTIC_ENTROPY: 'discrete_semantic_entropy',
 } as const
 
+/** How a detector's score reads: an entropy as a plain number, or a probability as a percentage. */
+export const ScoreScale = { NUMBER: 'number', PROBABILITY: 'probability' } as const
+export type ScoreScale = (typeof ScoreScale)[keyof typeof ScoreScale]
+
 /** How SE weighed its meaning clusters (the API's `se_estimator`). */
 export const SeEstimator = {
   LIKELIHOOD_WEIGHTED: 'likelihood_weighted',
@@ -51,6 +55,8 @@ export const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000
 export const ASK_TIMEOUT_MS = 60 * 60 * 1000
 
 export const SCORE_DECIMALS = 3
+/** A probability score (SEP's P(high SE)) shows as a percentage with one decimal. */
+export const PERCENT_DECIMALS = 1
 /** The threshold slider covers at least 0..3 nats, more when ln(N) is larger. */
 export const THRESHOLD_MIN_MAX_NATS = 3
 export const THRESHOLD_STEP_NATS = 0.05

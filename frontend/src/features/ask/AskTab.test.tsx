@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AskTab } from '@/features/ask/AskTab'
 import { api, ApiError } from '@/lib/api'
 import { README_HARDWARE_URL } from '@/lib/constants'
-import { ESCALATED_CHAT, STATUS, STATUS_NO_JUDGE } from '@/test/fixtures'
+import { ESCALATED_CHAT, SEP_DETECT, STATUS, STATUS_NO_JUDGE } from '@/test/fixtures'
 
 const QUESTION = 'Who was the first woman to walk on Mars?'
 
@@ -77,6 +77,21 @@ describe('AskTab', () => {
     )
     const clusters = screen.getByRole('region', { name: 'Meaning clusters' })
     expect(within(clusters).getAllByRole('listitem', { name: /^Cluster \d+/ })).toHaveLength(7)
+  })
+
+  it('shows SEP as P(high SE) against the SEP threshold', async () => {
+    vi.spyOn(api, 'ask').mockResolvedValue(SEP_DETECT)
+    render(<AskTab status={STATUS} statusError={null} />)
+
+    await ask('Detect')
+
+    const decision = await screen.findByRole('status', { name: 'Escalation decision' })
+    expect(decision).toHaveTextContent('SEP 72.3% is above the threshold 50.0%')
+    const sep = screen.getByRole('group', { name: 'Semantic Entropy Probe (SEP)' })
+    expect(sep).toHaveTextContent('72.3%')
+    expect(sep).toHaveTextContent('P(high SE)')
+    expect(sep).not.toHaveTextContent('nats')
+    expect(screen.getByRole('group', { name: 'Semantic Entropy (SE)' })).toHaveTextContent('1.834')
   })
 
   it("shows the backend's error message verbatim", async () => {

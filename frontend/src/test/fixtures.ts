@@ -16,6 +16,8 @@ export const STATUS: Status = {
   judge_configured: true,
   judge_unavailable_reason: null,
   se_threshold: 1.0,
+  sep_threshold: 0.5,
+  escalation_threshold: 1.0,
   nli_model_id: 'microsoft/deberta-large-mnli',
 }
 
@@ -99,6 +101,17 @@ export const ESCALATED_CHAT: DetectionResult = {
   final_answer_source: 'judge_model',
   judge_reasoning: 'No human has landed on Mars.',
   escalation_policy_desc: null,
+}
+
+/** A Detect run escalated by SEP: its threshold is the status's sep_threshold. */
+export const SEP_DETECT: DetectionResult = {
+  ...ESCALATED_CHAT,
+  detector_scores: { semantic_entropy_probe: 0.7234, semantic_entropy: 1.834 },
+  escalation_detector: 'semantic_entropy_probe',
+  escalation_threshold: STATUS.sep_threshold,
+  final_answer: 'Sally Ride',
+  final_answer_source: 'small_model_greedy',
+  judge_reasoning: null,
 }
 
 const SE_AUROC = {

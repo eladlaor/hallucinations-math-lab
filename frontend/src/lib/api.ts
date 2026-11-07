@@ -37,7 +37,12 @@ export interface Status {
   model_id: string
   judge_configured: boolean
   judge_unavailable_reason: string | null
+  /** In nats, for SE, discrete SE and PE. */
   se_threshold: number
+  /** On SEP's P(high SE) scale, 0..1. */
+  sep_threshold: number
+  /** The one /api/ask applies to the configured escalation detector. */
+  escalation_threshold: number
   nli_model_id: string
 }
 

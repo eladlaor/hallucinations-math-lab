@@ -16,6 +16,9 @@ import typer
 from rich.console import Console
 
 from hallucinations_math_lab import DetectorName, ResponseEvaluator
+from hallucinations_math_lab.constants import (
+    PROBABILITY_SCORED_DETECTORS,
+)
 from hallucinations_math_lab.judges import GeminiJudge
 
 app = typer.Typer(
@@ -26,11 +29,22 @@ console = Console()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 
+# SEP scores p(high SE), a probability, so it is labelled and shown as a percentage;
+# PE and SE are entropies in nats.
 _DETECTOR_LABELS: dict[DetectorName, str] = {
     DetectorName.PREDICTIVE_ENTROPY: "PE",
-    DetectorName.SEMANTIC_ENTROPY_PROBE: "SEP",
+    DetectorName.SEMANTIC_ENTROPY_PROBE: "SEP P(high SE)",
     DetectorName.SEMANTIC_ENTROPY: "SE",
 }
+_NATS_FORMAT = ".3f"
+_PROBABILITY_FORMAT = ".1%"
+
+
+def _format_score(detector: DetectorName, value: float) -> str:
+    """`value` on `detector`'s scale: a percentage for SEP, a plain number in nats otherwise."""
+    if detector in PROBABILITY_SCORED_DETECTORS:
+        return format(value, _PROBABILITY_FORMAT)
+    return format(value, _NATS_FORMAT)
 
 
 def _format_detector_scores(scores: dict[DetectorName, float]) -> str:
@@ -42,7 +56,9 @@ def _format_detector_scores(scores: dict[DetectorName, float]) -> str:
         DetectorName.SEMANTIC_ENTROPY,
     ):
         if name in scores:
-            parts.append(f"[bold]{_DETECTOR_LABELS[name]}[/bold] = {scores[name]:.3f}")
+            parts.append(
+                f"[bold]{_DETECTOR_LABELS[name]}[/bold] = {_format_score(name, scores[name])}"
+            )
     return "  ".join(parts) if parts else "[dim]no detectors ran[/dim]"
 
 
@@ -56,7 +72,8 @@ def chat(prompt: str = typer.Argument(..., help="User prompt to answer.")) -> No
     console.print(_format_detector_scores(result.detector_scores))
     console.print(
         f"[bold]escalation_detector[/bold] = {result.escalation_detector}  "
-        f"[bold]threshold[/bold] = {result.escalation_threshold:.3f}  "
+        f"[bold]threshold[/bold] = "
+        f"{_format_score(result.escalation_detector, result.escalation_threshold)}  "
         f"[bold]escalated[/bold] = {result.escalated}  "
         f"[bold]source[/bold] = {result.final_answer_source}"
     )

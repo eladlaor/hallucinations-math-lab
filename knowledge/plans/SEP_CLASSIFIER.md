@@ -1275,6 +1275,23 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Files: `frontend/src/lib/scores.ts`, `api.ts`, `App.tsx`, `test/fixtures.ts`,
   `frontend/src/lib/lib.test.ts`, `demo/cli.py`; rebuild the committed static bundle.
 - Done when: `npm test` and pytest pass.
+- As built:
+  - The API schema test for `sep_threshold` already landed with the threshold routing
+    (`tests/unit/web/test_web_shell.py`); this item adds `sep_threshold` and
+    `escalation_threshold` to the frontend `Status` type, mirroring
+    `StatusResponse`. No component reads `Status.sep_threshold`: the Ask tab's threshold
+    line uses the run's own `escalation_threshold`, which the server takes from
+    `sep_threshold` when SEP escalates, so the vitest checks that value.
+  - `DetectorInfo` gains a `scale` (`ScoreScale.NUMBER` or `PROBABILITY`), and
+    `formatDetectorScore` renders a probability as a one-decimal percentage. The Ask tab's
+    score cards and its threshold line use it, so a SEP-escalated run reads
+    "SEP 72.3% is above the threshold 50.0%" (the threshold is the run's
+    `escalation_threshold`, which the server takes from `sep_threshold`).
+  - `App.tsx` is unchanged: it passes `se_threshold` only to the Score tab, which scores SE
+    alone.
+  - `demo/cli.py` prints SEP as "SEP P(high SE) = 72.3%" and its threshold as a percentage,
+    through the same `_format_score` (the settings already refuse a detector without a
+    threshold); `tests/unit/test_demo_cli.py` covers it.
 
 **17. Full gate.**
 

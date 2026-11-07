@@ -3,7 +3,7 @@ import { Metric } from '@/components/Metric'
 import { Card, CardDescription, CardTitle } from '@/components/ui/card'
 import type { DetectionResult } from '@/lib/api'
 import { AnswerSource } from '@/lib/constants'
-import { detectorInfo, formatScore, sortDetectors } from '@/lib/scores'
+import { detectorInfo, formatDetectorScore, sortDetectors } from '@/lib/scores'
 
 /** What `demo.cli detect` / `chat` print, laid out: answer, decision, scores, clusters. */
 export function AskResult({ result }: { result: DetectionResult }) {
@@ -43,9 +43,11 @@ export function AskResult({ result }: { result: DetectionResult }) {
           <span className="font-semibold text-good">✓ Not escalated</span>
         )}{' '}
         — {escalationLabel}{' '}
-        {escalationScore === undefined ? 'n/a' : formatScore(escalationScore)}{' '}
+        {escalationScore === undefined
+          ? 'n/a'
+          : formatDetectorScore(result.escalation_detector, escalationScore)}{' '}
         {result.escalated ? 'is above' : 'is not above'} the threshold{' '}
-        {formatScore(result.escalation_threshold, 2)}.
+        {formatDetectorScore(result.escalation_detector, result.escalation_threshold, 2)}.
         {result.escalated && !fromJudge && ' Detect never calls the judge; Chat would.'}
       </div>
 
@@ -56,7 +58,7 @@ export function AskResult({ result }: { result: DetectionResult }) {
             <Metric
               key={name}
               label={`${info.name} (${info.short})`}
-              value={formatScore(result.detector_scores[name] ?? Number.NaN)}
+              value={formatDetectorScore(name, result.detector_scores[name] ?? Number.NaN)}
               note={info.meaning}
             />
           )

@@ -10,6 +10,7 @@ from hallucinations_math_lab.constants import (
     ESCALATION_THRESHOLDED_DETECTORS,
     HUB_COMMIT_SHA_PATTERN,
     NATS_SCORED_DETECTORS,
+    PROBABILITY_SCORED_DETECTORS,
     DetectorName,
     JudgeThinkingLevel,
     VLLMAuthMode,
@@ -201,18 +202,19 @@ def escalation_threshold_env_var(detector: DetectorName) -> str:
 def escalation_threshold_field(detector: DetectorName) -> str:
     """The Settings field holding `detector`'s escalation threshold.
 
-    SEP scores a probability and uses sep_threshold; the nats-scored detectors
-    use se_threshold. constants.ESCALATION_THRESHOLDED_DETECTORS is the set
-    that has one; any other detector raises ValueError.
+    The probability-scored detectors (SEP) use sep_threshold; the nats-scored
+    detectors use se_threshold. constants.ESCALATION_THRESHOLDED_DETECTORS is
+    the set that has one; any other detector raises ValueError.
     """
     if detector not in ESCALATION_THRESHOLDED_DETECTORS:
         raise ValueError(
             f"No escalation threshold is configured for detector {detector!s}. "
             f"{SE_THRESHOLD_FIELD.upper()} covers {sorted(str(d) for d in NATS_SCORED_DETECTORS)!r} "
-            f"and {SEP_THRESHOLD_FIELD.upper()} covers {DetectorName.SEMANTIC_ENTROPY_PROBE!s}. "
+            f"and {SEP_THRESHOLD_FIELD.upper()} covers "
+            f"{sorted(str(d) for d in PROBABILITY_SCORED_DETECTORS)!r}. "
             "Escalate on one of those, or pass an explicit escalation_threshold to the evaluator."
         )
-    if detector == DetectorName.SEMANTIC_ENTROPY_PROBE:
+    if detector in PROBABILITY_SCORED_DETECTORS:
         return SEP_THRESHOLD_FIELD
     return SE_THRESHOLD_FIELD
 
