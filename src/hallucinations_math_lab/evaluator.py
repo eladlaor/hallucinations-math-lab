@@ -59,8 +59,10 @@ def evaluate_responses(
         be None if every configured detector has requires_samples=False.
       detectors: ordered list of Detector instances to run. Every entry
         must have its prerequisites satisfied — fail-fast otherwise.
-      pooled_hidden_state: torch.Tensor or None. Required by any detector
-        with requires_hidden_state=True (e.g. SEP).
+      pooled_hidden_state: torch.Tensor of shape [len(layers), hidden_size]
+        (the layers the hidden-state detector reads, at the last prompt
+        token), or None. Required by any detector with
+        requires_hidden_state=True (e.g. SEP).
       escalation_detector: which detector's score drives the escalation
         decision. Must appear in the `detectors` list.
       escalation_threshold: the score above which escalation fires, on
@@ -111,8 +113,9 @@ def evaluate_responses(
     if need_hidden_state and pooled_hidden_state is None:
         raise ValueError(
             "At least one configured detector requires a pooled hidden state, but "
-            "`pooled_hidden_state` is None. Pass a tensor from your model's last-layer "
-            "hidden state at the final prompt token, or remove SEP from the detector list."
+            "`pooled_hidden_state` is None. Pass your model's hidden states at the final "
+            "prompt token, one row per layer the probe reads, or remove SEP from the "
+            "detector list."
         )
 
     ctx = DetectionContext(
@@ -317,8 +320,11 @@ class ResponseEvaluator:
 
             sample_set = self._slm.sample(prompt) if need_samples else None
             greedy = self._slm.greedy(prompt)
+            # The current SEP probe reads the last layer, index L.
             pooled_hidden_state = (
-                self._slm.pooled_hidden_state(prompt) if need_hidden_state else None
+                self._slm.pooled_hidden_state(prompt, layers=(self._slm.num_hidden_layers,))
+                if need_hidden_state
+                else None
             )
 
             return evaluate_responses(

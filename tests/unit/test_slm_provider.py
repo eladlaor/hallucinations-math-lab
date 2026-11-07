@@ -7,7 +7,11 @@ checkpoint + a GPU and is marked `requires_gpu`, skipped by default.
 Contract pinned here:
   - `pooled_hidden_state` returns None when VLLM_EMBED_BASE_URL is unset.
   - When the embed endpoint is configured, the provider hits /v1/embeddings
-    and returns a float32 tensor.
+    and returns a float32 tensor of shape [1, hidden]; it serves only the
+    final layer and refuses any other layer request.
+  - The HF provider follows the layer convention: row k of its all-layer
+    extraction is HF's boolean `output_hidden_states` entry k (0 = embeddings,
+    L = last layer, final norm applied), read at the last prompt token (TBG).
   - `sample` extracts text + token logprobs from chat.completions response.
   - The model sees the brief-answer instruction plus the question on every
     path (sample, greedy, embed); `SampleSet.prompt` stays the bare question,
@@ -19,11 +23,13 @@ Contract pinned here:
 """
 
 import math
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-from transformers import GenerationConfig
+from transformers import BatchEncoding, GenerationConfig
 
 from demo.slm_provider import (
     HFTransformersProvider,
@@ -34,8 +40,14 @@ from demo.slm_provider import (
     stop_token_ids,
     sweep_model_ids,
 )
+from hallucinations_math_lab.services.sampling_provider import (
+    UnsupportedHiddenStateRequest,
+    final_norm_applied,
+)
 
 EOS_ID = 0
+# google/gemma-4-E4B-it's decoder depth; the vLLM fixtures select that model.
+E4B_NUM_LAYERS = 42
 VOCAB = 4
 
 
@@ -117,7 +129,16 @@ def gemma_settings_with_embed(monkeypatch):
 def test_vllm_provider_returns_none_hidden_state_without_embed_endpoint(gemma_settings):
     with patch("demo.slm_provider.OpenAI"):
         provider = VLLMOpenAIProvider()
-    assert provider.pooled_hidden_state("anything") is None
+    assert provider.pooled_hidden_state("anything", layers=(E4B_NUM_LAYERS,)) is None
+
+
+@pytest.mark.parametrize("layers", [(E4B_NUM_LAYERS - 1,), (E4B_NUM_LAYERS - 1, E4B_NUM_LAYERS)])
+def test_vllm_provider_returns_none_without_embed_endpoint_for_any_layers(gemma_settings, layers):
+    """No embed endpoint means no hidden states at all: None, as the protocol
+    says, not a layer refusal."""
+    with patch("demo.slm_provider.OpenAI"):
+        provider = VLLMOpenAIProvider()
+    assert provider.pooled_hidden_state("anything", layers=layers) is None
 
 
 def test_vllm_provider_returns_tensor_when_embed_endpoint_configured(
@@ -136,22 +157,24 @@ def test_vllm_provider_returns_tensor_when_embed_endpoint_configured(
         openai_cls.side_effect = [generation_client, embed_client]
 
         provider = VLLMOpenAIProvider()
-        result = provider.pooled_hidden_state("anything")
+        result = provider.pooled_hidden_state("anything", layers=(E4B_NUM_LAYERS,))
 
     assert isinstance(result, torch.Tensor)
     assert result.dtype == torch.float32
-    assert result.tolist() == [pytest.approx(x) for x in [0.1, 0.2, 0.3, 0.4]]
+    assert result.tolist() == [[pytest.approx(x) for x in [0.1, 0.2, 0.3, 0.4]]]
     embed_client.post.assert_called_once()
 
 
-def test_vllm_embedding_request_matches_the_hf_hidden_state(gemma_settings_with_embed):
-    """Chat template + generation prompt, unnormalized: the same feature
-    HFTransformersProvider.pooled_hidden_state returns, so SEP probes transfer."""
+def test_vllm_embedding_request_is_chat_templated_last_token_unnormalized(
+    gemma_settings_with_embed,
+):
+    """Chat template + generation prompt, last token, unnormalized: the request
+    that corresponds to HF's layer index L at TBG."""
     with patch("demo.slm_provider.OpenAI") as openai_cls:
         embed_client = MagicMock()
         embed_client.post.return_value = MagicMock(data=[MagicMock(embedding=[1.0])])
         openai_cls.side_effect = [MagicMock(), embed_client]
-        VLLMOpenAIProvider().pooled_hidden_state("Who wrote Hamlet?")
+        VLLMOpenAIProvider().pooled_hidden_state("Who wrote Hamlet?", layers=(E4B_NUM_LAYERS,))
 
     path = embed_client.post.call_args.args[0]
     kwargs = embed_client.post.call_args.kwargs
@@ -163,6 +186,188 @@ def test_vllm_embedding_request_matches_the_hf_hidden_state(gemma_settings_with_
     assert kwargs["body"]["use_activation"] is False
     # Without this the client would skip refreshing a Google access token.
     assert kwargs["options"] == {"security": {"bearer_auth": True}}
+
+
+def test_vllm_provider_reads_depth_from_the_registry(gemma_settings):
+    with patch("demo.slm_provider.OpenAI"):
+        assert VLLMOpenAIProvider().num_hidden_layers == E4B_NUM_LAYERS
+
+
+@pytest.mark.parametrize("embed_base_url", ["", "http://localhost:8081/v1"])
+def test_vllm_depth_of_an_unregistered_model_fails_fast_naming_the_registry(
+    monkeypatch, embed_base_url
+):
+    """L comes from the registry, so SEP on vLLM needs a registry entry, with or
+    without an embed endpoint: the evaluator reads L before asking for states."""
+    from hallucinations_math_lab.config import get_settings
+
+    get_settings.cache_clear()
+    monkeypatch.setenv("SLM_PROVIDER", "vllm")
+    monkeypatch.setenv("VLLM_MODEL_ID", "acme/unregistered-slm")
+    monkeypatch.setenv("VLLM_EMBED_BASE_URL", embed_base_url)
+    monkeypatch.setenv("VLLM_EMBED_MODEL_ID", "")
+    try:
+        with patch("demo.slm_provider.OpenAI"):
+            provider = VLLMOpenAIProvider()
+        with pytest.raises(KeyError, match="not in the model registry"):
+            _ = provider.num_hidden_layers
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize("layers", [(E4B_NUM_LAYERS - 1,), (E4B_NUM_LAYERS - 1, E4B_NUM_LAYERS)])
+def test_vllm_refuses_layers_other_than_the_final_one(gemma_settings_with_embed, layers):
+    """The embed runner pools only the last layer; any other request must fail
+    before a network call, naming the remedy."""
+    with patch("demo.slm_provider.OpenAI") as openai_cls:
+        embed_client = MagicMock()
+        openai_cls.side_effect = [MagicMock(), embed_client]
+        provider = VLLMOpenAIProvider()
+        with pytest.raises(UnsupportedHiddenStateRequest, match="SLM_PROVIDER=hf_transformers"):
+            provider.pooled_hidden_state("q", layers=layers)
+    embed_client.post.assert_not_called()
+
+
+HF_NUM_LAYERS = 3
+HF_HIDDEN_SIZE = 2
+PROMPT_TOKENS = 4
+# The fake model writes `layer + position * POSITION_SCALE` into every hidden
+# value, so a read-back shows both which layer and which token it came from.
+POSITION_SCALE = 0.01
+TBG_POSITION = PROMPT_TOKENS - 1
+
+
+class _FakeTokenizer:
+    chat_template = "fake-template"
+
+    def apply_chat_template(self, messages: list[dict[str, str]], **kwargs: Any) -> BatchEncoding:
+        return BatchEncoding(
+            {
+                "input_ids": torch.arange(PROMPT_TOKENS).unsqueeze(0),
+                "attention_mask": torch.ones(1, PROMPT_TOKENS, dtype=torch.long),
+            }
+        )
+
+
+class _FakeHFModel:
+    """Stands in for a loaded causal LM's forward pass.
+
+    Returns `HF_NUM_LAYERS + 1 + extra_states` hidden-state tensors, entry k
+    filled with `k + position * POSITION_SCALE`; `calls` records the kwargs."""
+
+    def __init__(self, extra_states: int = 0) -> None:
+        self.device = torch.device("cpu")
+        self.config = SimpleNamespace(
+            get_text_config=lambda: SimpleNamespace(num_hidden_layers=HF_NUM_LAYERS)
+        )
+        self.calls: list[dict[str, Any]] = []
+        self._n_states = HF_NUM_LAYERS + 1 + extra_states
+
+    def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        self.calls.append(kwargs)
+        seq_len = kwargs["input_ids"].shape[1]
+        positions = torch.arange(seq_len, dtype=torch.bfloat16).view(1, seq_len, 1)
+        states = tuple(
+            (k + positions * POSITION_SCALE).expand(1, seq_len, HF_HIDDEN_SIZE).clone()
+            for k in range(self._n_states)
+        )
+        return SimpleNamespace(hidden_states=states)
+
+
+def _hf_provider(model: _FakeHFModel) -> HFTransformersProvider:
+    provider = HFTransformersProvider(model_id="google/gemma-4-E2B-it")
+    fakes: Any = provider
+    fakes._tokenizer, fakes._model = _FakeTokenizer(), model
+    return provider
+
+
+def _expected_row(layer: int, position: int = TBG_POSITION) -> list[float]:
+    """The fake model's value for (layer, position), with the same bf16 rounding."""
+    value = (layer + torch.tensor(position, dtype=torch.bfloat16) * POSITION_SCALE).item()
+    return [value] * HF_HIDDEN_SIZE
+
+
+def test_hf_hidden_states_index_k_is_after_k_layers():
+    """Row k is HF's boolean `output_hidden_states` entry k: 0 = embeddings,
+    L = after the last decoder layer."""
+    rows = _hf_provider(_FakeHFModel()).hidden_states_all_layers("q")
+
+    assert rows.shape == (HF_NUM_LAYERS + 1, HF_HIDDEN_SIZE)
+    assert rows.dtype == torch.float32
+    assert rows.device.type == "cpu"
+    assert rows.tolist() == [_expected_row(k) for k in range(HF_NUM_LAYERS + 1)]
+
+
+def test_hf_rows_move_to_cpu_float32_before_stacking(monkeypatch):
+    """A model sharded with device_map="auto" keeps each layer's state on its
+    own device; stacking them before the move would raise."""
+    real_stack = torch.stack
+    stacked: list[list[torch.Tensor]] = []
+
+    def spy_stack(tensors: list[torch.Tensor], *args: Any, **kwargs: Any) -> torch.Tensor:
+        stacked.append(list(tensors))
+        return real_stack(tensors, *args, **kwargs)
+
+    model = _FakeHFModel()
+    provider = _hf_provider(model)
+    monkeypatch.setattr(torch, "stack", spy_stack)
+    provider.hidden_states_all_layers("q")
+
+    [rows] = stacked
+    assert all(row.device.type == "cpu" and row.dtype == torch.float32 for row in rows)
+
+
+def test_layer_L_flagged_final_norm():
+    flags = [final_norm_applied(k, HF_NUM_LAYERS) for k in range(HF_NUM_LAYERS + 1)]
+    assert flags == [False] * HF_NUM_LAYERS + [True]
+
+
+@pytest.mark.parametrize("layer", [-1, HF_NUM_LAYERS + 1])
+def test_final_norm_applied_rejects_out_of_range_layer(layer):
+    with pytest.raises(ValueError, match="outside"):
+        final_norm_applied(layer, HF_NUM_LAYERS)
+
+
+def test_output_hidden_states_is_boolean_true():
+    """The boolean form includes the embeddings at index 0; the list form
+    would shift every index by one."""
+    model = _FakeHFModel()
+    _hf_provider(model).hidden_states_all_layers("q")
+
+    [kwargs] = model.calls
+    assert kwargs["output_hidden_states"] is True
+
+
+def test_wrong_tuple_length_raises():
+    provider = _hf_provider(_FakeHFModel(extra_states=1))
+    with pytest.raises(RuntimeError, match=f"expected {HF_NUM_LAYERS + 1}"):
+        provider.hidden_states_all_layers("q")
+
+
+def test_pooled_hidden_state_stacks_requested_layers():
+    pooled = _hf_provider(_FakeHFModel()).pooled_hidden_state("q", layers=(1, 3))
+
+    assert pooled.shape == (2, HF_HIDDEN_SIZE)
+    assert pooled.dtype == torch.float32
+    assert pooled.tolist() == [_expected_row(1), _expected_row(3)]
+
+
+@pytest.mark.parametrize("layers", [(), (HF_NUM_LAYERS + 1,), (-1,), (2, 1), (1, 1)])
+def test_pooled_hidden_state_rejects_invalid_layers(layers):
+    with pytest.raises(ValueError, match="layers"):
+        _hf_provider(_FakeHFModel()).pooled_hidden_state("q", layers=layers)
+
+
+def test_tbg_is_last_prompt_token():
+    """TBG reads the last token of the chat-formatted prompt with the
+    generation prompt appended: no answer token is involved."""
+    last_layer = _hf_provider(_FakeHFModel()).hidden_states_all_layers("q")[HF_NUM_LAYERS]
+    assert last_layer.tolist() == _expected_row(HF_NUM_LAYERS, PROMPT_TOKENS - 1)
+    assert last_layer.tolist() != _expected_row(HF_NUM_LAYERS, PROMPT_TOKENS - 2)
+
+
+def test_hf_provider_reads_depth_from_the_loaded_config():
+    assert _hf_provider(_FakeHFModel()).num_hidden_layers == HF_NUM_LAYERS
 
 
 def test_embed_endpoint_for_another_model_fails_fast(gemma_settings_with_embed):
@@ -286,7 +491,7 @@ def test_hf_provider_end_to_end_on_tiny_model():
     # manually with: uv run pytest -m requires_gpu tests/unit/test_slm_provider.py
     provider = HFTransformersProvider()
     provider.sample("hello")
-    provider.pooled_hidden_state("hello")
+    provider.pooled_hidden_state("hello", layers=(provider.num_hidden_layers,))
 
 
 def test_answer_message_puts_the_instruction_before_the_question(monkeypatch):

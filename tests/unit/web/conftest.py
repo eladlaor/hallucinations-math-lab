@@ -50,6 +50,7 @@ class FakeProvider:
 
     def __init__(self, texts: list[str]) -> None:
         self.model_id = FAKE_MODEL_ID
+        self.num_hidden_layers = 2
         self._texts = texts
 
     def sample(self, prompt: str) -> SampleSet:
@@ -64,7 +65,7 @@ class FakeProvider:
     def greedy(self, prompt: str) -> str:
         return self._texts[0]
 
-    def pooled_hidden_state(self, prompt: str) -> None:
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> None:
         return None
 
 

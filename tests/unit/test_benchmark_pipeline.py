@@ -39,6 +39,7 @@ class ScatteringSLM:
     """Repeats the right answer for known questions, invents one per sample otherwise."""
 
     model_id = "fake-slm"
+    num_hidden_layers = 2
 
     def _answers(self, prompt: str) -> list[str]:
         if prompt in KNOWN_ANSWERS:
@@ -57,13 +58,13 @@ class ScatteringSLM:
     def greedy(self, prompt: str) -> str:
         return self._answers(prompt)[0]
 
-    def pooled_hidden_state(self, prompt: str):
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]):
         return None
 
 
 class HiddenStateSLM(ScatteringSLM):
-    def pooled_hidden_state(self, prompt: str):
-        return torch.zeros(HIDDEN_DIM)
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]):
+        return torch.zeros(len(layers), HIDDEN_DIM)
 
 
 class EqualityNLI:

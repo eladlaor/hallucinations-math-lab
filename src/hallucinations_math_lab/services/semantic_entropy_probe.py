@@ -142,6 +142,11 @@ class SemanticEntropyProbeDetector(Detector):
                 "DetectionContext.pooled_hidden_state is None."
             )
         h = ctx.pooled_hidden_state.to(dtype=torch.float32)
+        if h.dim() != 2 or h.shape[0] != 1:
+            raise RuntimeError(
+                f"Pooled hidden state has shape {tuple(h.shape)}, but this probe reads one "
+                "layer and expects [1, hidden_dim]."
+            )
         if h.shape[-1] != self._hidden_dim:
             raise RuntimeError(
                 f"Pooled hidden state has dim {h.shape[-1]} but probe expects {self._hidden_dim}. "

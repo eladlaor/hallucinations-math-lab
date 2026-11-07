@@ -55,7 +55,7 @@ def test_detector_declares_correct_prerequisites(trained_probe_file):
 
 def test_score_runs_linear_forward(trained_probe_file):
     detector = SemanticEntropyProbeDetector(probe_path=trained_probe_file)
-    hidden = torch.arange(8, dtype=torch.float32)  # sum = 28
+    hidden = torch.arange(8, dtype=torch.float32).unsqueeze(0)  # one layer, sum = 28
     ctx = DetectionContext(prompt="q", samples=None, pooled_hidden_state=hidden)
     result = detector.score(ctx)
     assert result.name == DetectorName.SEMANTIC_ENTROPY_PROBE
@@ -71,7 +71,17 @@ def test_score_raises_without_hidden_state(trained_probe_file):
 
 def test_score_raises_on_hidden_dim_mismatch(trained_probe_file):
     detector = SemanticEntropyProbeDetector(probe_path=trained_probe_file)
-    wrong_dim = torch.zeros(16)
+    wrong_dim = torch.zeros(1, 16)
     ctx = DetectionContext(prompt="q", samples=None, pooled_hidden_state=wrong_dim)
     with pytest.raises(RuntimeError, match="probe expects"):
         detector.score(ctx)
+
+
+def test_score_raises_unless_exactly_one_layer_is_supplied(trained_probe_file):
+    """The probe reads one layer, so the context must hold one row: a 1-D
+    vector or several layers' rows are rejected rather than reshaped."""
+    detector = SemanticEntropyProbeDetector(probe_path=trained_probe_file)
+    for wrong_shape in (torch.zeros(8), torch.zeros(2, 8)):
+        ctx = DetectionContext(prompt="q", samples=None, pooled_hidden_state=wrong_shape)
+        with pytest.raises(RuntimeError, match="one layer"):
+            detector.score(ctx)

@@ -62,10 +62,11 @@ class ServingRunner(StrEnum):
     EMBED = "embed"
 
 
-# SEP reads the raw last-layer hidden state at the final prompt token, exactly
-# what `HFTransformersProvider.pooled_hidden_state` returns. vLLM's embedding
-# runner defaults to that token but L2-normalizes it; `use_activation: false`
-# turns the normalization off so probes transfer between the two providers.
+# The embed runner pools the final-layer output at the final prompt token,
+# meant to match what `HFTransformersProvider.pooled_hidden_state` returns for
+# layers=(L,). It is expected to carry the final norm, as HF's index L does;
+# that, and whether its vectors match HF's within tolerance, is unverified.
+# It L2-normalizes by default; `use_activation: false` turns that off.
 _EMBED_POOLER_CONFIG: Final[str] = '{"seq_pooling_type":"LAST","use_activation":false}'
 
 
@@ -79,6 +80,10 @@ class ModelEntry:
     accelerator_count: int  # how many of them
     machine_type: str  # GCE machine type that pairs with the accelerator
     default_provider: ProviderKind
+    # Decoder depth L (text_config.num_hidden_layers in the checkpoint's
+    # config.json): the index of the last layer under the layer convention in
+    # hallucinations_math_lab.services.sampling_provider.
+    num_hidden_layers: int
     is_deployed_default: bool = False
     is_local_default: bool = False
     sep_probe_path: str | None = None  # relative to repo root, once a probe is trained
@@ -140,6 +145,7 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         accelerator_count=1,
         machine_type="g2-standard-12",
         default_provider=ProviderKind.HF_TRANSFORMERS,
+        num_hidden_layers=35,
         is_local_default=True,
     ),
     "google/gemma-4-E4B-it": ModelEntry(
@@ -151,6 +157,7 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         accelerator_count=1,
         machine_type="g2-standard-12",
         default_provider=ProviderKind.VLLM,
+        num_hidden_layers=42,
         is_deployed_default=True,
     ),
     "google/gemma-4-26B-A4B-it": ModelEntry(
@@ -162,6 +169,7 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         accelerator_count=1,
         machine_type="a2-ultragpu-1g",
         default_provider=ProviderKind.VLLM,
+        num_hidden_layers=30,
     ),
     "google/gemma-4-31B-it": ModelEntry(
         model_id="google/gemma-4-31B-it",
@@ -172,6 +180,7 @@ _REGISTRY: Final[dict[str, ModelEntry]] = {
         accelerator_count=2,
         machine_type="a2-ultragpu-2g",
         default_provider=ProviderKind.VLLM,
+        num_hidden_layers=60,
     ),
 }
 

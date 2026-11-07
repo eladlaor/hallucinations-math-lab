@@ -8,19 +8,22 @@ or HuggingFace directly.
 Two responsibilities, kept separate by SRP:
   - `sample(...)` returns N stochastic completions with per-token logprobs.
     Feeds SE (semantic clustering) and PE (token-level entropy).
-  - `pooled_hidden_state(...)` returns a single pooled hidden-state vector for
-    the prompt. Feeds SEP (linear probe). Returns None when the provider does
-    not expose hidden states — for example, plain vLLM serving in
-    generation-only mode without a sibling embed endpoint. In that case SEP
-    cannot run; the orchestrator surfaces it as `SEP: n/a` rather than
-    failing.
+  - `pooled_hidden_state(prompt, layers)` returns the requested layers'
+    hidden states at the last prompt token, one row per layer (the layer
+    convention is documented in
+    `hallucinations_math_lab.services.sampling_provider`). Feeds SEP (linear
+    probe). Returns None when the provider does not expose hidden states —
+    for example, plain vLLM serving in generation-only mode without a sibling
+    embed endpoint. In that case SEP cannot run; the orchestrator surfaces it
+    as `SEP: n/a` rather than failing.
 
 Concrete implementations live in this module:
   - `VLLMOpenAIProvider` — OpenAI-compat HTTP client. Hidden states come from
     a second vLLM server running the embed runner, accessed via
-    `/v1/embeddings` when `VLLM_EMBED_BASE_URL` is configured.
+    `/v1/embeddings` when `VLLM_EMBED_BASE_URL` is configured. That runner
+    pools only the last layer.
   - `HFTransformersProvider` — in-process HuggingFace `transformers` model.
-    Exposes hidden states directly, so SEP needs no extra endpoint.
+    Exposes every layer directly, so SEP needs no extra endpoint.
 """
 
 from __future__ import annotations
@@ -34,7 +37,7 @@ from openai.types import CreateEmbeddingResponse
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from demo.google_auth import GoogleAccessToken
-from demo.model_registry import ProviderKind, list_model_ids
+from demo.model_registry import ProviderKind, get_model_entry, list_model_ids
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import (
     ANSWER_MESSAGE_TEMPLATE,
@@ -42,6 +45,10 @@ from hallucinations_math_lab.constants import (
     VLLMAuthMode,
 )
 from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
+from hallucinations_math_lab.services.sampling_provider import (
+    UnsupportedHiddenStateRequest,
+    check_layers,
+)
 
 if TYPE_CHECKING:
     from transformers import (
@@ -87,9 +94,12 @@ class SLMProvider(Protocol):
     @property
     def model_id(self) -> str: ...
 
+    @property
+    def num_hidden_layers(self) -> int: ...
+
     def sample(self, prompt: str) -> SampleSet: ...
     def greedy(self, prompt: str) -> str: ...
-    def pooled_hidden_state(self, prompt: str) -> torch.Tensor | None: ...
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor | None: ...
 
 
 class VLLMOpenAIProvider:
@@ -99,8 +109,8 @@ class VLLMOpenAIProvider:
       - The generation endpoint at `VLLM_BASE_URL` (chat/completions).
       - Optionally, an embed endpoint at `VLLM_EMBED_BASE_URL`: a second vLLM
         server running the `embed` runner, hit via `/v1/embeddings` to return
-        a pooled hidden state per prompt. When unset, `pooled_hidden_state`
-        returns `None`.
+        the last layer's hidden state per prompt. When unset,
+        `pooled_hidden_state` returns `None`.
 
     Both authenticate per `VLLM_AUTH`: a static key for a server you run, or
     a refreshing Google access token for a Vertex AI endpoint."""
@@ -201,13 +211,27 @@ class VLLMOpenAIProvider:
                 f"VLLMOpenAIProvider.greedy failed for prompt={prompt[:80]!r}: {e!s}"
             ) from e
 
-    def pooled_hidden_state(self, prompt: str) -> torch.Tensor | None:
+    @property
+    def num_hidden_layers(self) -> int:
+        """Decoder depth L, from the model registry (the server is not asked).
+
+        An unregistered model therefore cannot serve SEP through vLLM: the
+        registry's KeyError names the remedy (add an entry)."""
+        return get_model_entry(self.model_id).num_hidden_layers
+
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor | None:
         if self._embed_client is None:
             return None
+        final_layer = self.num_hidden_layers
+        if layers != (final_layer,):
+            raise UnsupportedHiddenStateRequest(
+                f"This probe reads layers {list(layers)}; the vLLM embed runner can only pool "
+                f"the last layer ({final_layer}) of {self.model_id!r}. Use "
+                f"SLM_PROVIDER={ProviderKind.HF_TRANSFORMERS} for SEP."
+            )
         # Embed the prompt exactly as generation sees it: chat template plus
-        # the generation prompt, pooled at its last token, unnormalized. This
-        # matches HFTransformersProvider.pooled_hidden_state, so a SEP probe
-        # trained on either provider reads the same feature.
+        # the generation prompt, pooled at its last token, unnormalized: the
+        # request that corresponds to HF's layer L at that token.
         body = {
             "model": self._embed_model_id,
             "messages": [{"role": "user", "content": build_answer_message(prompt)}],
@@ -232,7 +256,7 @@ class VLLMOpenAIProvider:
                 "vLLM embed endpoint returned no data; cannot extract pooled hidden state."
             )
         vector = resp.data[0].embedding
-        return torch.tensor(vector, dtype=torch.float32)
+        return torch.tensor([vector], dtype=torch.float32)
 
 
 class HFTransformersProvider:
@@ -240,12 +264,12 @@ class HFTransformersProvider:
 
     Hosts the SLM in-process. Supports both generation (with per-token
     logprobs from the raw `output_logits`, see `raw_token_logprobs`) and
-    pooled hidden state
-    (separate forward pass with `output_hidden_states=True`, take the
-    last-layer hidden state at the final prompt token).
+    hidden states (a separate forward pass with the boolean
+    `output_hidden_states=True`, read at the final prompt token for every
+    layer 0..L; `pooled_hidden_state` selects rows from that).
 
-    Two forward passes per query (one for sampling, one for the pooled
-    hidden state) is intentional — keeps responsibilities separate. The
+    Two forward passes per query (one for sampling, one for the hidden
+    states) is intentional — keeps responsibilities separate. The
     HF provider exists for dev and research; production throughput goes
     through `VLLMOpenAIProvider`. If you need single-pass HF dispatch
     later, a `Detector`-aware fast path can read hidden states from the
@@ -272,8 +296,6 @@ class HFTransformersProvider:
         # Imported lazily so test suites that never instantiate this provider
         # don't pay the transformers import cost.
         from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationMixin
-
-        from demo.model_registry import get_model_entry
 
         entry = get_model_entry(self.model_id)
         dtype = (
@@ -390,20 +412,50 @@ class HFTransformersProvider:
                 f"HFTransformersProvider.greedy failed for prompt={prompt[:80]!r}: {e!s}"
             ) from e
 
-    def pooled_hidden_state(self, prompt: str) -> torch.Tensor | None:
+    @property
+    def num_hidden_layers(self) -> int:
+        """Decoder depth L, read from the loaded model's text config."""
+        _, model = self._ensure_loaded()
+        return _text_config_num_hidden_layers(model)
+
+    def hidden_states_all_layers(self, prompt: str) -> torch.Tensor:
+        """Every layer's hidden state at the last prompt token (TBG).
+
+        Returns float32 `[L+1, hidden_size]` on CPU, row k being the state
+        after k decoder layers: HF's boolean `output_hidden_states` tuple,
+        whose index L already has the final norm applied. The prompt is
+        chat-formatted with the generation prompt appended, so its last token
+        is the one just before the model's answer."""
         tokenizer, model = self._ensure_loaded()
         try:
             inputs = self._encode(tokenizer, model, prompt)
             with torch.no_grad():
                 out = model(**inputs, output_hidden_states=True)
-            # Last-layer hidden state at the final prompt token. Matches the
-            # Kossen et al. SEP setup.
-            last_layer = out.hidden_states[-1]  # [1, seq_len, hidden_dim]
-            return last_layer[0, -1].detach().to(dtype=torch.float32, device="cpu")
+            hidden_states: tuple[torch.Tensor, ...] = out.hidden_states
+            expected = _text_config_num_hidden_layers(model) + 1
+            if len(hidden_states) != expected:
+                raise ValueError(
+                    f"model returned {len(hidden_states)} hidden-state tensors, expected "
+                    f"{expected} (the embeddings plus one per decoder layer)."
+                )
+            last_prompt_token = inputs["input_ids"].shape[1] - 1
+            # Move each row to CPU before stacking: with device_map="auto" a
+            # sharded model keeps each layer's state on that layer's device.
+            return torch.stack(
+                [
+                    layer[0, last_prompt_token].detach().to(device="cpu", dtype=torch.float32)
+                    for layer in hidden_states
+                ]
+            )
         except Exception as e:
             raise RuntimeError(
-                f"HFTransformersProvider.pooled_hidden_state failed for prompt={prompt[:80]!r}: {e!s}"
+                f"HFTransformersProvider.hidden_states_all_layers failed for "
+                f"prompt={prompt[:80]!r} model={self.model_id!r}: {e!s}"
             ) from e
+
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor:
+        check_layers(layers, self.num_hidden_layers)
+        return self.hidden_states_all_layers(prompt)[list(layers)]
 
 
 def _generate(model: CausalLM, inputs: BatchEncoding, **kwargs: Any) -> GenerateDecoderOnlyOutput:
@@ -419,6 +471,16 @@ def _generate(model: CausalLM, inputs: BatchEncoding, **kwargs: Any) -> Generate
             f"generate returned {type(out).__name__}, expected GenerateDecoderOnlyOutput."
         )
     return out
+
+
+def _text_config_num_hidden_layers(model: CausalLM) -> int:
+    """Decoder depth L of the text backbone (multimodal configs nest it)."""
+    num_hidden_layers = model.config.get_text_config().num_hidden_layers
+    if not isinstance(num_hidden_layers, int):
+        raise TypeError(
+            f"text config num_hidden_layers is {type(num_hidden_layers).__name__}, expected int."
+        )
+    return num_hidden_layers
 
 
 def _require_logits(out: GenerateDecoderOnlyOutput) -> tuple[torch.Tensor, ...]:

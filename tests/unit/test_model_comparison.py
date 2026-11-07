@@ -53,6 +53,7 @@ class FakeSLM:
 
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
+        self.num_hidden_layers = 2
         self._known = KNOWLEDGE.get(model_id, {})
 
     def _answers(self, prompt: str) -> list[str]:
@@ -72,8 +73,8 @@ class FakeSLM:
     def greedy(self, prompt: str) -> str:
         return self._answers(prompt)[0]
 
-    def pooled_hidden_state(self, prompt: str):
-        return torch.zeros(HIDDEN_DIM)
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]):
+        return torch.zeros(len(layers), HIDDEN_DIM)
 
 
 class EqualityNLI:

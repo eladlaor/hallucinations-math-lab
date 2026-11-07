@@ -56,12 +56,14 @@ class FakeSLM:
     simulate a SEP-capable provider."""
 
     model_id = "fake-slm"
+    num_hidden_layers = 2
 
     def __init__(self, answers: list[str], hidden_state=None) -> None:
         self._answers = answers
         self._hidden_state = hidden_state
         self.sample_calls = 0
         self.hidden_state_calls = 0
+        self.requested_layers: list[tuple[int, ...]] = []
 
     def sample(self, prompt: str) -> SampleSet:
         self.sample_calls += 1
@@ -76,7 +78,8 @@ class FakeSLM:
     def greedy(self, prompt: str) -> str:
         return self._answers[0]
 
-    def pooled_hidden_state(self, prompt: str):
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]):
+        self.requested_layers.append(layers)
         self.hidden_state_calls += 1
         return self._hidden_state
 
@@ -227,7 +230,7 @@ def test_hidden_state_detector_receives_tensor_when_provider_supplies_one():
     pooled tensor into the detector's context and SEP-style detectors run."""
     import torch as _torch
 
-    fake_tensor = _torch.zeros(8)
+    fake_tensor = _torch.zeros(1, 8)
     slm = FakeSLM(["x"], hidden_state=fake_tensor)
 
     captured: dict[str, object] = {}
@@ -258,6 +261,7 @@ def test_hidden_state_detector_receives_tensor_when_provider_supplies_one():
     res = evaluator.evaluate("q")
     assert captured["hidden_state"] is fake_tensor
     assert slm.hidden_state_calls == 1
+    assert slm.requested_layers == [(slm.num_hidden_layers,)]
     assert res.detector_scores[DetectorName.SEMANTIC_ENTROPY_PROBE] == pytest.approx(0.42)
 
 

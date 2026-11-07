@@ -9,9 +9,9 @@ detector.
 Why a protocol and not a base class:
   - The detectors share no implementation, only an interface.
   - SE depends on N samples + an NLI scorer, PE on per-token logprobs of those
-    same samples, SEP on a single pooled hidden state, the LLM-as-judge on an
-    external LLM call. The context carries the common inputs; each detector
-    reads only what it needs.
+    same samples, SEP on hidden states at the last prompt token, the
+    LLM-as-judge on an external LLM call. The context carries the common
+    inputs; each detector reads only what it needs.
 
 Each detector declares:
   - `requires_samples` / `requires_hidden_state`: prerequisite flags so the
@@ -40,9 +40,12 @@ class DetectionContext:
     """Per-request input bundle passed to every detector.
 
     `samples` is None when no provider sampled the SLM for this request (e.g. a
-    SEP-only fast path). `pooled_hidden_state` is None when the provider does
-    not expose hidden states (e.g. plain vLLM OpenAI-compat without an embed
-    endpoint configured)."""
+    SEP-only fast path). `pooled_hidden_state` has shape
+    `[len(layers), hidden_size]`: one row per layer the hidden-state detector
+    reads, at the last prompt token, in increasing layer order (see
+    `services/sampling_provider.py` for the layer convention). It is None
+    when the provider does not expose hidden states (e.g. plain vLLM
+    OpenAI-compat without an embed endpoint configured)."""
 
     prompt: str
     samples: SampleSet | None

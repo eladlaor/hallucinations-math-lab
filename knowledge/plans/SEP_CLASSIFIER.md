@@ -329,6 +329,8 @@ main setting (Sec. 4, "Probing Locations").
 
 - `pooled_hidden_state(prompt, layers: tuple[int, ...]) -> Tensor[len(layers), hidden]`
 - a new `model_revision` property
+- a new `num_hidden_layers` property (L), so the library can name layer L without importing
+  the demo registry (HF reads the loaded text config; vLLM reads `ModelEntry`)
 - an HF-only `hidden_states_all_layers(prompt, position, answer=None) -> Tensor[L+1, hidden]`,
   used by the collector
 
@@ -533,7 +535,7 @@ by construction.
 | `ModelEntry.revision`, `.num_hidden_layers`, `.hidden_size` | **New**, required. |
 | `ModelEntry.sep_probe_path` | **Removed** (unused). |
 | `constants.py` | Adds `TokenPosition` StrEnum (TBG, SLT), the recipe constants, file-name constants (`SEP_PROBE_WEIGHTS_FILE`, `SEP_PROBE_CONFIG_FILE`, `SEP_TRAIN_IDS_FILE`, `SEP_TRAINING_LOG_FILE`, `SEP_METRICS_FILE`, `SEP_DATASET_ROWS_FILE`, `SEP_DATASET_TENSORS_FILE`, `SEP_COLLECTION_CONFIG_FILE`), `HF_PROBE_URI_PREFIX = "hf://"`, `SEP_PROBE_SCHEMA_VERSION = 1` and `LEGACY_SEP_PROBE_SUFFIX = ".pt"`. Removes `SEP_PROBE_SUFFIX`. |
-| `SamplingProvider` protocol | `pooled_hidden_state(prompt, layers)` and `model_revision`. A **breaking change** for anyone implementing the protocol (v0.x); goes in the CHANGELOG. |
+| `SamplingProvider` protocol | `pooled_hidden_state(prompt, layers)`, `num_hidden_layers` and `model_revision`. A **breaking change** for anyone implementing the protocol (v0.x); goes in the CHANGELOG. |
 | `vllm_flags` | Adds `--revision`. |
 
 ## Threshold semantics and migration for users
@@ -569,6 +571,7 @@ The evaluator logs both values and warns when they differ.
 | A local `data/probes/<slug>.pt` | Retrain (`eval.collect_sep_dataset`, then `eval.train_sep_probe`), or use the published probe. |
 | `SEP_PROBE_PATH=…/x.pt` | Point it at a probe directory or an `hf://` reference. |
 | SEP on `SLM_PROVIDER=vllm_openai` | Works only for `--layers final` probes. Otherwise use `hf_transformers`. |
+| SEP on `SLM_PROVIDER=vllm` with a model not in `demo/model_registry.py` | Add a registry entry; L is read from it. |
 | Reading SEP in nats in the UI or CLI | It is now shown as a percentage, "P(high SE)". |
 
 ## Backward compatibility for old probes
@@ -600,7 +603,11 @@ All of these are done in work item 18.
   - Detector table row: "p(high SE) from a logistic probe over hidden states".
   - SEP section (`README.md:331-343`): the label, the classifier, the layer and position sweep,
     "not on SE's scale".
-  - Lines 102-103: replace the provider sentence.
+  - Lines 132-134: replace the provider sentence. Its claim that a probe trained through one
+    provider works through the other must go: vLLM/HF parity is unverified, and vLLM serves
+    only layer-L probes.
+  - Line 698: the `SamplingProvider` member list gains `num_hidden_layers`, and the signature
+    becomes `pooled_hidden_state(prompt, layers)`.
   - New Q&A: **"Which layer and token does SEP read, and are mid layers better?"**, carrying the
     terminology correction and the Table 4 evidence above, and pointing to `metrics.json`.
   - "How do I train and use a SEP?":
@@ -746,6 +753,24 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Files: `services/sampling_provider.py`, `services/detector_protocol.py`,
   `demo/slm_provider.py` (fix the line-399 comment), `tests/unit/test_slm_provider.py`.
 - Done when: the tests pass, and no caller uses the old one-argument signature.
+- *As implemented:* until items 11–12 wire in the probe's own layers, the evaluator and the
+  legacy trainer ask for `(num_hidden_layers,)`, the layer the old probe reads, and the old
+  detector checks it got exactly one row. Naming L from the library needs a provider
+  `num_hidden_layers` property (HF: the loaded text config; vLLM: the registry), so two pieces
+  moved here from item 7: `ModelEntry.num_hidden_layers` (read from each checkpoint's
+  `config.json` on the Hub) and the vLLM refusal of anything but `(L,)` with
+  `UnsupportedHiddenStateRequest` (`test_vllm_refuses_layers_other_than_the_final_one`).
+  Its message names only the `SLM_PROVIDER=hf_transformers` remedy for now: the
+  "or train with --layers final" clause is added by item 10, together with that flag, with
+  the spelling matched exactly and asserted in a test.
+  Deviation: because the evaluator reads L before it asks for hidden states, SEP on vLLM now
+  requires a registry entry for the model, with or without an embed endpoint. An unregistered
+  model fails with the registry's KeyError ("not in the model registry"), where it used to
+  score SEP (embed endpoint set) or get the "remove SEP" ValueError (no embed endpoint)
+  (`test_vllm_depth_of_an_unregistered_model_fails_fast_naming_the_registry`).
+  Item 7 still adds `revision` and `hidden_size` and the SLT case. `hidden_states_all_layers`
+  takes only the prompt for now; item 8 adds `position` and `answer`. `check_layers` and
+  `final_norm_applied` live in `services/sampling_provider.py`, beside the convention.
 
 **7. Pin the backbone revision (PSP 2), registry dimensions, vLLM capability.**
 

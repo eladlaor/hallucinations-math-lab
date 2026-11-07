@@ -180,7 +180,8 @@ def main() -> int:
         try:
             sample_set = provider.sample(prompt)
             se_result = compute_semantic_entropy(sample_set)
-            pooled = provider.pooled_hidden_state(prompt)
+            # This probe reads the last layer, index L.
+            pooled = provider.pooled_hidden_state(prompt, layers=(provider.num_hidden_layers,))
         except Exception as e:
             raise RuntimeError(
                 f"Failed to collect training row for prompt={prompt[:80]!r}: {e!s}"
@@ -193,7 +194,7 @@ def main() -> int:
                 "hf_transformers, or for vLLM set VLLM_EMBED_BASE_URL to an embedding "
                 "server (see the DevOps Guide)."
             )
-        hidden_states.append(pooled.detach().to(dtype=torch.float32).numpy())
+        hidden_states.append(pooled[0].detach().to(dtype=torch.float32).numpy())
         se_labels.append(se_result.semantic_entropy)
         logger.info(
             "Collected training row.",
