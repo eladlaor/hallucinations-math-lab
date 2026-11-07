@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the real OpenAI client) and the HF logprob extraction.
 
 ### Changed
+- The "Computed semantic entropy." log record replaces the scalar `se_nats`
+  and `estimator` fields with `se_nats_by_estimator`, a map from estimator to
+  SE in nats.
 - `eval.run_benchmark --in` and `eval.train_sep_probe --calibration-set` are
   optional: without them, fixed non-overlapping TriviaQA slices (200
   benchmark, 500 calibration questions) are downloaded once to

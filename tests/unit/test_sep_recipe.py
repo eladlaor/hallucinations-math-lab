@@ -105,8 +105,8 @@ class _ExactMatchNLI:
 
 
 def _collector_se(cluster_sizes: tuple[int, ...]) -> float:
-    """Discrete SE from the collector's own code path (`compute_semantic_entropy`),
-    with clusters discovered in the given order."""
+    """Discrete SE through `compute_semantic_entropy`, a one-estimator wrapper over the
+    collector's `compute_semantic_entropies`, with clusters discovered in the given order."""
     answers = [f"cluster-{i}" for i, size in enumerate(cluster_sizes) for _ in range(size)]
     sample_set = SampleSet(prompt="q", samples=[Sample(text=a) for a in answers])
     result = compute_semantic_entropy(

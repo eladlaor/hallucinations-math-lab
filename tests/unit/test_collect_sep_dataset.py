@@ -10,8 +10,13 @@ import math
 
 import pytest
 
-from eval.collect_sep_dataset import label_sample_set
-from hallucinations_math_lab.custom_types.domain_types import Sample, SampleSet, TokenLogprob
+from eval.collect_sep_dataset import cluster_ids_per_sample, label_sample_set
+from hallucinations_math_lab.custom_types.domain_types import (
+    Cluster,
+    Sample,
+    SampleSet,
+    TokenLogprob,
+)
 from hallucinations_math_lab.services.semantic_entropy import (
     cluster_by_bidirectional_entailment,
     compute_semantic_entropy,
@@ -77,3 +82,20 @@ def test_collector_validates_logprobs_before_any_nli_call() -> None:
     with pytest.raises(ValueError, match="token logprobs"):
         label_sample_set(sample_set, scorer=nli)
     assert nli.calls == 0
+
+
+def test_cluster_ids_reject_a_sample_in_no_cluster() -> None:
+    sample_set = SampleSet(prompt="q", samples=[Sample(text="a"), Sample(text="b")])
+    clusters = [Cluster(member_indices=[0], representative_text="a")]
+    with pytest.raises(ValueError, match=r"Samples \[1\] are in no cluster"):
+        cluster_ids_per_sample(clusters, sample_set)
+
+
+def test_cluster_ids_reject_a_sample_in_two_clusters() -> None:
+    sample_set = SampleSet(prompt="q", samples=[Sample(text="a"), Sample(text="b")])
+    clusters = [
+        Cluster(member_indices=[0, 1], representative_text="a"),
+        Cluster(member_indices=[1], representative_text="b"),
+    ]
+    with pytest.raises(ValueError, match="Sample 1 is in clusters 0 and 1"):
+        cluster_ids_per_sample(clusters, sample_set)

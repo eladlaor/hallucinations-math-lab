@@ -51,10 +51,10 @@ class SemanticEntropyResult:
 
 
 @dataclass(frozen=True)
-class SemanticEntropiesResult:
+class SemanticEntropyByEstimator:
     """SE under several estimators, all computed from the same clustering."""
 
-    entropies: dict[SemanticEntropyEstimator, float]
+    by_estimator: dict[SemanticEntropyEstimator, float]
     clusters: list[Cluster]
 
 
@@ -149,7 +149,7 @@ def compute_semantic_entropies(
     sample_set: SampleSet,
     estimators: tuple[SemanticEntropyEstimator, ...],
     scorer: EntailmentScorer | None = None,
-) -> SemanticEntropiesResult:
+) -> SemanticEntropyByEstimator:
     """Cluster the samples once and score every requested estimator on those clusters.
 
     The NLI clustering is the expensive part, so asking for several estimators costs
@@ -172,7 +172,7 @@ def compute_semantic_entropies(
     clusters = cluster_by_bidirectional_entailment(
         answers, scorer=scorer, question=sample_set.prompt
     )
-    entropies = {
+    by_estimator = {
         estimator: _entropy_nats(_cluster_probs(clusters, sample_set, estimator))
         for estimator in estimators
     }
@@ -181,7 +181,7 @@ def compute_semantic_entropies(
         "Computed semantic entropy.",
         extra={
             LOG_EXTRA_KEY: {
-                "se_nats": {str(e): round(se, 4) for e, se in entropies.items()},
+                "se_nats_by_estimator": {str(e): round(se, 4) for e, se in by_estimator.items()},
                 "n_clusters": len(clusters),
                 "n_samples": len(answers),
                 "prompt": sample_set.prompt[:80],
@@ -189,7 +189,7 @@ def compute_semantic_entropies(
         },
     )
 
-    return SemanticEntropiesResult(entropies=entropies, clusters=clusters)
+    return SemanticEntropyByEstimator(by_estimator=by_estimator, clusters=clusters)
 
 
 def compute_semantic_entropy(
@@ -201,7 +201,7 @@ def compute_semantic_entropy(
     empty, or if the likelihood-weighted estimator gets samples without finite logprobs."""
     result = compute_semantic_entropies(sample_set, (estimator,), scorer=scorer)
     return SemanticEntropyResult(
-        semantic_entropy=result.entropies[estimator], clusters=result.clusters
+        semantic_entropy=result.by_estimator[estimator], clusters=result.clusters
     )
 
 

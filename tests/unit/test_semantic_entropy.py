@@ -20,6 +20,7 @@ from hallucinations_math_lab.services.semantic_entropy import (
     DiscreteSemanticEntropyDetector,
     SemanticEntropyDetector,
     cluster_by_bidirectional_entailment,
+    compute_semantic_entropies,
     compute_semantic_entropy,
 )
 
@@ -68,6 +69,19 @@ def test_empty_sample_set_raises():
         compute_semantic_entropy(
             SampleSet(prompt="x", samples=[]), scorer=FakeNLI(), estimator=DISCRETE
         )
+
+
+def test_no_estimators_raises_before_any_nli_call():
+    calls: list[tuple[str, str]] = []
+
+    class CountingNLI(FakeNLI):
+        def bidirectional_entails(self, a: str, b: str) -> bool:
+            calls.append((a, b))
+            return super().bidirectional_entails(a, b)
+
+    with pytest.raises(ValueError, match="no estimators"):
+        compute_semantic_entropies(_ss(["Paris", "Lyon"]), (), scorer=CountingNLI())
+    assert calls == []
 
 
 def test_clustering_preserves_member_indices():
