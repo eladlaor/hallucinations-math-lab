@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `eval.rescore_benchmark`: re-runs PE, SE and discrete SE on a saved
+  results file and re-applies the escalation rule, with no model loaded;
+  refuses SEP and files without saved token logprobs.
+- Benchmark rows save each sample's token logprobs
+  (`sample_token_logprobs`), and `DetectionResult` carries them.
 - Local web playground (`uv run python -m demo.web`, http://127.0.0.1:8765): a
   FastAPI app with a committed React UI, one tab per way in — score answers
   with their meaning clusters, PE and a client-side escalation threshold; ask
@@ -80,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the real OpenAI client) and the HF logprob extraction.
 
 ### Changed
+- README: the three ways in are renamed to one question each (*Score
+  answers*, *Ask the model*, *Measure the detectors*), reordered from cheapest
+  to most involved, and explain that way 1 contains a deliberate hallucination
+  while way 3's wrong answers are the model's own mistakes.
 - `eval.run_benchmark --in` and `eval.train_sep_probe --calibration-set` are
   optional: without them, fixed non-overlapping TriviaQA slices (200
   benchmark, 500 calibration questions) are downloaded once to

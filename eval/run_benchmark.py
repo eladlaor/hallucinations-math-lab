@@ -33,8 +33,12 @@ Two modes:
     built, run and released before the next loads. Every model and its SEP
     probe are checked before the first question is scored.
 
+Every row also keeps each sample's token logprobs (`sample_token_logprobs`),
+so rescore_benchmark.py can re-run the sample-based detectors on the saved
+answers without the model.
+
 Downstream: compute_auroc.py, escalation_uplift.py, adversarial_separation.py,
-compare_models.py (for a sweep).
+compare_models.py (for a sweep), rescore_benchmark.py.
 """
 
 from __future__ import annotations
@@ -55,6 +59,7 @@ from eval.benchmark_results import (
     MODEL_ID_FIELD,
     SAMPLE_N_FIELD,
     SAMPLE_TEMPERATURE_FIELD,
+    SAMPLE_TOKEN_LOGPROBS_FIELD,
     RunConfig,
 )
 from eval.datasets.default_question_sets import (
@@ -195,6 +200,10 @@ def run(
                         "escalated": result.escalated,
                         "n_clusters": len(result.clusters) if result.clusters else None,
                         "samples": result.samples,
+                        SAMPLE_TOKEN_LOGPROBS_FIELD: [
+                            [t.model_dump() for t in sample]
+                            for sample in result.sample_token_logprobs
+                        ],
                     }
                 )
                 + "\n"

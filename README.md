@@ -21,6 +21,7 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 - [What does a Semantic Entropy number mean?](#what-does-a-semantic-entropy-number-mean)
 - [When does it escalate, and how do I tune it?](#when-does-it-escalate-and-how-do-i-tune-it)
 - [How do I evaluate one model?](#how-do-i-evaluate-one-model)
+- [How do I re-score a saved run without the model?](#how-do-i-re-score-a-saved-run-without-the-model)
 - [How do I compare several models?](#how-do-i-compare-several-models)
 - [How do I train and use a Semantic Entropy Probe?](#how-do-i-train-and-use-a-semantic-entropy-probe)
 - [How do I score samples from my own model?](#how-do-i-score-samples-from-my-own-model)
@@ -51,13 +52,47 @@ When a chosen score crosses a threshold, the answer can be routed to a judge
 model (Gemini on Vertex is the reference; any class with
 `.answer(prompt) -> (answer, reasoning)` works).
 
-Three ways to use the repo, from cheapest to most involved:
+There are three ways in. Each one answers a different question, and they are
+ordered from cheapest to most involved. The web playground has one tab per way
+in, with the same names:
 
-| Way in | What is evaluated | You bring | What runs | You get back | Hardware prerequisites | Start with |
-|---|---|---|---|---|---|---|
-| **1. Library** | **A set of answers.** Do these N answers to one question look like a hallucination? The example shows how PE and SE react to consistent, paraphrased and contradictory answers. | **for the example:** nothing — it ships three hand-written sample sets.<br>**for your own model:** N answers it gave to one question, with their token logprobs | no model generates answers — yours are scored as given. DeBERTa (a small 1.6 GB model) checks which answers say the same thing, to group them by meaning | PE and SE scores, the meaning clusters, and an escalate yes/no | any laptop ([tier 0](#what-hardware-do-i-need-and-why)) | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model); or the [web playground](#how-do-i-use-the-web-playground), *Score answers* tab |
-| **2. Benchmark** | **The detectors.** Across many questions, how reliably does each detector's score separate the model's right answers from its wrong ones? With several models: on which model does each detector work best? | nothing — 200 TriviaQA questions download on first run; you pick the Gemma 4 model(s) in `.env`, and add Google credentials unless you pass `--no-judge` | per question: Gemma 4 generates 11 answers (here or on a server), DeBERTa groups them by meaning, the detectors score them; Gemini answers the questions that escalate, unless you pass `--no-judge` | one AUROC per detector (per model), with confidence intervals | a machine that fits the model ([tiers 1–3](#what-hardware-do-i-need-and-why)), or a remote vLLM / Vertex server | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), or [`--sweep` + `eval.compare_models`](#how-do-i-compare-several-models); view the results in the [web playground](#how-do-i-use-the-web-playground), *Benchmark results* tab |
-| **3. Live demo** | **One live answer.** Should the model's answer to your question be trusted, or handed to the stronger judge? | a single question typed on the command line; for `chat`, also Google credentials for the Gemini judge | the same as the benchmark, for that one question; only `chat` calls Gemini, and only if the question escalates | the detector scores and an answer — the model's own, or Gemini's when the score crosses the threshold | as for the benchmark | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question), or the [web playground](#how-do-i-use-the-web-playground), *Ask the model* tab |
+| Way in | The question it answers | Does a model answer questions here? | Hardware | Start with |
+|---|---|---|---|---|
+| **1. Score answers** | Do these N answers to one question look like a hallucination? | No. The answers are given; only DeBERTa (a small 1.6 GB model) runs, to check which answers mean the same thing | any laptop ([tier 0](#what-hardware-do-i-need-and-why)) | [`examples/score_precollected_samples.py`](#quickstart-no-gpu-no-llm), then [`evaluate_responses(...)`](#how-do-i-score-samples-from-my-own-model); or the *Score answers* tab |
+| **2. Ask the model** | Should I trust the answer the model just gave to my question, or hand it to a stronger model? | Yes: Gemma 4 answers your one question 11 times | a machine that fits the model ([tiers 1–3](#what-hardware-do-i-need-and-why)), or a remote server | [`demo.cli detect` / `demo.cli chat`](#how-do-i-ask-one-question), or the *Ask the model* tab |
+| **3. Measure the detectors** | On this model, does a high score actually line up with wrong answers? | Yes: Gemma 4 answers 200 TriviaQA questions, 11 times each. Re-scoring a saved run needs no model | as for 2; re-scoring a saved run: tier 0 | [`eval.run_benchmark`](#how-do-i-evaluate-one-model), [`eval.rescore_benchmark`](#how-do-i-re-score-a-saved-run-without-the-model), [`--sweep`](#how-do-i-compare-several-models); read the results in the *Measure the detectors* tab |
+
+**1. Score answers — you bring the answers, nothing generates them.** The
+example ships three hand-written sets of ten answers, and one of them is a
+**deliberate hallucination**. *Consistent* says "Paris" ten times.
+*Paraphrased* says "Paris" in ten different wordings. *Divergent* answers "Who
+was the first woman to walk on Mars?" with ten names that contradict each
+other, which is how a model's answers scatter when it is making something up.
+Because you know in advance which set is the hallucination, you can watch how
+each detector reacts to it. To score your own model, pass the answers it gave
+with their token probabilities.
+
+**2. Ask the model — one question, one live decision.** You type a question.
+The model answers it ten times at random plus once at its most likely, the
+detectors score how much those answers disagree, and you get either the
+model's answer or, if the score crosses the threshold, the stronger model's
+(the judge; only `chat` calls it).
+
+**3. Measure the detectors — do the scores mean anything on this model?**
+The questions come from [TriviaQA](https://nlp.cs.washington.edu/triviaqa/),
+a public trivia dataset that comes with the correct answers. The model answers
+each question, and each answer is marked right or wrong against the dataset.
+**Nothing wrong is planted: the wrong answers are the model's own mistakes.**
+The detectors never see the correct answer. The benchmark checks whether
+their score, computed blind, comes out high on exactly the answers that turned
+out wrong, and reports that as one AUROC per detector.
+
+*Why not plant wrong answers instead?* Because SE does not check whether an
+answer is true; it measures whether the model contradicts itself. A planted
+answer has no model behind it, so there is nothing to measure. That is what
+way 1 is for: patterns you construct by hand. A run saves every answer, so
+you can [re-score it later without the model](#how-do-i-re-score-a-saved-run-without-the-model):
+a new threshold or detector on the same answers, on any laptop.
 
 Everything is configured in `.env` (copy [`.env.example`](.env.example);
 every key is documented there).
@@ -151,11 +186,11 @@ It serves a small web UI and its API from one local process, bound to
 `127.0.0.1` only (`--port` picks another port). The UI is prebuilt and
 committed, so you do not need Node. It has one tab per way in:
 
-| Tab | Way in | Needs |
-|---|---|---|
-| **Score answers** | 1. Library | nothing — DeBERTa downloads on the first score (~1.6 GB, once) |
-| **Ask the model** | 3. Live demo | the model from `.env`, as for `demo.cli`; *Chat* also needs `GCP_PROJECT_ID` and Google credentials |
-| **Benchmark results** | 2. Benchmark (read-only) | results files under `eval/results/`, from `eval.run_benchmark` |
+| Tab (= way in) | Needs |
+|---|---|
+| **1. Score answers** | nothing — DeBERTa downloads on the first score (~1.6 GB, once) |
+| **2. Ask the model** | the model from `.env`, as for `demo.cli`; *Chat* also needs `GCP_PROJECT_ID` and Google credentials |
+| **3. Measure the detectors** (read-only) | results files under `eval/results/`, from `eval.run_benchmark` or `eval.rescore_benchmark` |
 
 - **Score answers** — load one of the three presets from
   `examples/score_precollected_samples.py`, or type your own answers. You
@@ -170,7 +205,7 @@ committed, so you do not need Node. It has one tab per way in:
   strip shows the provider and model; *Chat* is disabled, with the reason,
   when the judge is not configured. Errors from the model are shown as the
   server reports them.
-- **Benchmark results** — pick a results file for per-detector AUROC with
+- **Measure the detectors** — pick a results file for per-detector AUROC with
   its 95% confidence interval (the same numbers as `eval.compute_auroc`),
   or a `--sweep` directory for the model comparison table. Benchmarks are
   run from the command line, not from the UI.
@@ -486,7 +521,7 @@ random correct one (0.5 = coin flip, 1.0 = perfect). It runs the model in
    ```
    Each output row carries the question, answer key, greedy and final
    answers, `detector_scores` (every enabled detector), `escalated`, the
-   cluster count, the raw samples, and the run's `model_id`, `sample_n` and
+   cluster count, the raw samples with their token probabilities, and the run's `model_id`, `sample_n` and
    `sample_temperature`. Rows are written as they finish; the run stops on
    the first error, keeping the rows already written.
 3. **Score it.**
@@ -537,6 +572,34 @@ and SE separating adversarial prompts with a large effect size) and why each
 needs more than a point estimate are in the
 [QA Guide](knowledge/usage_guides/QA_GUIDE.md#what-does-success-look-like-for-the-detectors);
 none has been measured on real hardware yet.
+
+## How do I re-score a saved run without the model?
+
+Point `eval.rescore_benchmark` at a results file. It runs the detectors again
+on the answers the run saved, applies the escalation rule from `.env`, and
+writes a new results file. No model is loaded, so it runs on any laptop:
+
+```bash
+# e.g. after changing SE_THRESHOLD or ENABLED_DETECTORS in .env
+uv run python -m eval.rescore_benchmark \
+    --in eval/results/triviaqa_200.jsonl --out eval/results/triviaqa_200_rescored.jsonl
+
+uv run python -m eval.compute_auroc --in eval/results/triviaqa_200_rescored.jsonl
+```
+
+- **Why it works.** Every results row keeps the model's sampled answers and
+  their token probabilities. That is all PE and SE need, so you generate the
+  answers once (the expensive part) and try detectors, thresholds or a
+  different meaning check on them as often as you like.
+- **What stays the same.** The questions, the answer key, the model's answers
+  and the judge's recorded answer. An escalated row takes the judge answer
+  the run recorded; with a `--no-judge` run it keeps the model's own answer.
+- **What it refuses.** SEP, because it reads the model's internal state,
+  which a saved run does not keep. Also files from before runs saved token
+  probabilities: re-run `eval.run_benchmark` for those.
+- **The output is an ordinary run.** `compute_auroc`, `calibrate_threshold`,
+  `escalation_uplift`, `compare_models` and the *Measure the detectors* tab all
+  read it.
 
 ## How do I compare several models?
 
