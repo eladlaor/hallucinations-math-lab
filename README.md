@@ -1,8 +1,11 @@
 # hallucinations-math-lab
 
-A playground for **math-based response evaluators** that flag when an LLM is
-likely hallucinating — Predictive Entropy, Semantic Entropy, and Semantic
-Entropy Probes — plus an optional "escalate to a stronger judge" step.
+A research repo built around one question: **how well do Semantic Entropy,
+and a cheap single-pass probe approximating it, flag hallucinations in
+self-hosted, open-weight LLMs?** It answers with two measurements — AUROC
+against a predictive-entropy baseline, and an accuracy-vs-escalation-rate
+curve (targeted vs. random escalation to a stronger judge) — and includes an
+interactive web playground for exploring both.
 
 Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 
@@ -35,21 +38,48 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 
 ## Summary
 
-The idea behind Semantic Entropy: ask a model the same question several
-times. If it really knows the answer, the answers agree in meaning. If it is
-making something up, they scatter. This repo turns that idea into numbers you
-can compute, compare and tune — plus two neighbours: a cheaper baseline (PE)
-and a probe that predicts the same signal without the repeated sampling (SEP):
+**The research question.** Ask a model the same question several times. If
+it really knows the answer, the answers agree in meaning; if it is making
+something up, they scatter. Semantic Entropy (SE) turns that scatter into a
+number. This repo asks **how well that number flags hallucinations in
+self-hosted, open-weight LLMs** — and whether a cheap probe can deliver the
+same signal without the repeated sampling.
+
+**The three detectors, and the role each plays:**
+
+- **SE** is the subject: the strong but expensive signal (N generations per
+  question).
+- **SEP** is SE's cheap stand-in, not its rival: a probe trained to predict
+  SE from one generation. Its question is how much of SE's quality survives
+  at a fraction of the cost.
+- **PE** is the baseline SE has to beat: a free, single-sample signal that
+  reads word-level uncertainty rather than meaning.
 
 | Detector | What it reads | Cost |
 |---|---|---|
-| **PE** — Predictive Entropy | the token probabilities of the samples | free (a by-product of generation) |
 | **SE** — Semantic Entropy ([Farquhar et al., *Nature* 2024](https://www.nature.com/articles/s41586-024-07421-0)) | how many *different meanings* appear across N samples | N generations + NLI checks |
 | **SEP** — Semantic Entropy Probes ([Kossen et al., 2024](https://arxiv.org/abs/2406.15927)) | one hidden state of the model, through a trained linear probe | one extra matrix multiply |
+| **PE** — Predictive Entropy | the token probabilities of the samples | free (a by-product of generation) |
 
-When a chosen score crosses a threshold, the answer can be routed to a judge
-model (Gemini on Vertex is the reference; any class with
-`.answer(prompt) -> (answer, reasoning)` works).
+**The two measurements this repo produces:**
+
+1. **AUROC per detector** — how reliably each detector's score ranks the
+   model's wrong answers above its right ones, across every possible
+   threshold. Reported with confidence intervals, and as SE's margin over PE.
+2. **An accuracy-vs-escalation-rate curve** — escalate the answers a detector
+   flags to a stronger judge model, and plot final accuracy against the
+   share of questions escalated, next to escalating the same share **at
+   random**. Escalating *any* questions to a stronger model raises accuracy;
+   the gap between the targeted and random curves is what the detector
+   itself earns. This is the repo's end result: what each extra escalation
+   buys when a detector picks it.
+
+The judge is any model behind `.answer(prompt) -> (answer, reasoning)`;
+Gemini on Vertex is the reference. The model under test is configurable
+(see [below](#which-model-am-i-testing-and-how-do-i-choose-it)).
+
+**The web playground** puts all of this in a browser: score your own answer
+sets, ask the model a live question, and browse benchmark results.
 
 Three ways to use the repo, from cheapest to most involved:
 
@@ -515,6 +545,13 @@ random correct one (0.5 = coin flip, 1.0 = perfect). It runs the model in
    the judge's answers are much longer, since substring matching rewards
    length). It refuses runs where nothing was escalated or the judge never
    answered, since the uplift there is zero by construction.
+
+   Uplift alone doesn't credit the detector: escalating *any* questions to a
+   stronger judge raises accuracy. So the report also gives
+   `escalation_beats_random_pp` (the run's escalation vs. escalating the
+   same share at random, with a 95% CI) and `accuracy_vs_rate`, the
+   accuracy-vs-escalation-rate curve for every detector next to the random
+   baseline. That curve is the repo's headline result.
 5. **Check the adversarial set.** Run step 2 on
    `eval/datasets/adversarial.jsonl` too, with the same model and settings,
    then:
