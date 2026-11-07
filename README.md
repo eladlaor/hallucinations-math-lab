@@ -22,6 +22,7 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 - [How do the three detectors differ?](#how-do-the-three-detectors-differ)
 - [How do I ask one question?](#how-do-i-ask-one-question)
 - [What does a Semantic Entropy number mean?](#what-does-a-semantic-entropy-number-mean)
+- [What does an AUROC number mean?](#what-does-an-auroc-number-mean)
 - [When does it escalate, and how do I tune it?](#when-does-it-escalate-and-how-do-i-tune-it)
 - [How do I evaluate one model?](#how-do-i-evaluate-one-model)
 - [How do I re-score a saved run without the model?](#how-do-i-re-score-a-saved-run-without-the-model)
@@ -66,7 +67,7 @@ same signal without the repeated sampling.
 
 1. **AUROC per detector** — how reliably each detector's score ranks the
    model's wrong answers above its right ones, across every possible
-   threshold. Reported with confidence intervals, and as SE's margin over PE.
+   threshold ([what an AUROC number means](#what-does-an-auroc-number-mean)). Reported with confidence intervals, and as SE's margin over PE.
 2. **An accuracy-vs-escalation-rate curve** — escalate the answers a detector
    flags to a stronger judge model, and plot final accuracy against the
    share of questions escalated, next to escalating the same share **at
@@ -469,6 +470,35 @@ These are reference points, not verdicts — the threshold that separates
 "fine" from "hallucinating" depends on the model and the question set, and
 finding it is what the benchmark is for. The full derivation is in the
 [walkthrough](knowledge/theory/SEMANTIC_ENTROPY_WALKTHROUGH.md).
+
+## What does an AUROC number mean?
+
+**AUROC is the probability that, given one hallucinated answer and one
+correct answer picked at random, the detector gives the hallucinated one the
+higher score.** It runs from 0 to 1 and has no unit.
+
+| AUROC | Reading |
+|---|---|
+| 1.0 | always ranks the hallucinated answer higher — perfect |
+| 0.75 | this repo's target for SE on TriviaQA |
+| 0.5 | a coin flip — the detector carries no signal |
+| < 0.5 | ranks them backwards; flipping the score's sign fixes it |
+
+- **ROC vs. AUROC.** The ROC curve plots, for every possible threshold, the
+  share of hallucinations caught against the share of correct answers wrongly
+  flagged — use it to *choose* a threshold. AUROC is the area under that
+  curve: one number that grades the *ranking* with no threshold at all.
+- **It is not accuracy.** Accuracy needs a threshold; AUROC never picks one.
+  Two detectors with the same AUROC can behave very differently at the
+  threshold you'd actually run.
+- **Compare in absolute points.** "SE beats PE by 0.05" means 0.05 on the
+  0–1 scale, not 5% of SE's value.
+- **Distrust ≈ 0.99.** On a task like TriviaQA that usually means something
+  leaked into the score, not a breakthrough.
+
+Plain "AUC" (area under *a* curve) is usually understood as AUROC; this repo
+writes AUROC to rule out the precision-recall area (AUPRC). Full entry:
+[glossary](knowledge/GLOSSARY.md#what-is-auroc-and-how-is-it-different-from-the-roc-curve).
 
 ## When does it escalate, and how do I tune it?
 
