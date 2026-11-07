@@ -151,25 +151,29 @@ class HubProbeRef:
         return f"{HF_PROBE_URI_PREFIX}{self.repo_id}{suffix}"
 
 
+def validate_hub_repo_id(repo_id: str) -> None:
+    """Raise ValueError unless `repo_id` is a valid `<owner>/<name>` Hub repo id."""
+    parts = repo_id.split(HF_REPO_ID_SEPARATOR)
+    if len(parts) != _HUB_REPO_ID_PARTS or not all(parts):
+        raise ValueError(f"Hub repo id {repo_id!r} must be <owner>/<name>.")
+    try:
+        validate_repo_id(repo_id)
+    except HFValidationError as e:
+        raise ValueError(f"{repo_id!r} is not a valid Hub repo id: {e!s}") from e
+
+
 def parse_hf_probe_uri(uri: str) -> HubProbeRef:
     """Parse `hf://<owner>/<repo>[@<revision>]`; raises ValueError on any other form."""
     repo_id, separator, revision = uri.removeprefix(HF_PROBE_URI_PREFIX).partition(
         HF_PROBE_REVISION_SEPARATOR
     )
-    parts = repo_id.split(HF_REPO_ID_SEPARATOR)
-    if (
-        not uri.startswith(HF_PROBE_URI_PREFIX)
-        or len(parts) != _HUB_REPO_ID_PARTS
-        or not all(parts)
-        or (separator and not revision)
-    ):
+    if not uri.startswith(HF_PROBE_URI_PREFIX) or (separator and not revision):
         raise ValueError(f"SEP probe reference {uri!r} is malformed; expected {_HF_URI_FORM}.")
     try:
-        validate_repo_id(repo_id)
-    except HFValidationError as e:
+        validate_hub_repo_id(repo_id)
+    except ValueError as e:
         raise ValueError(
-            f"SEP probe reference {uri!r} names an invalid Hub repo id; expected "
-            f"{_HF_URI_FORM}: {e!s}"
+            f"SEP probe reference {uri!r} is malformed; expected {_HF_URI_FORM}: {e!s}"
         ) from e
     return HubProbeRef(repo_id=repo_id, revision=revision or None)
 

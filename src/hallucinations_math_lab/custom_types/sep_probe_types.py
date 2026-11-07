@@ -5,14 +5,16 @@ A collected dataset's `collection_config.json` is `SEPCollectionConfig`. The
 blocks are shared with the trained probe's config (`SEPProbeConfig`), so a
 probe fitted on a dataset carries the same backbone and prompt it was
 collected with. The probe directory's `train_ids.json` is `SEPTrainIds` and
-its `metrics.json` is `SEPProbeMetrics`. Every block forbids unknown fields: a
-misspelled or foreign field fails at load instead of being ignored.
+its `metrics.json` is `SEPProbeMetrics`, and `SEPPublishedMetrics` once
+eval.publish_sep_probe has added the held-out benchmark. Every block forbids
+unknown fields: a misspelled or foreign field fails at load instead of being
+ignored.
 """
 
 from __future__ import annotations
 
 from itertools import pairwise
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     AwareDatetime,
@@ -311,3 +313,12 @@ class SEPProbeMetrics(_StrictBlock):
     threshold: SEPThresholdMetrics
     converged: bool
     n_iter: int = Field(ge=0)
+
+
+class SEPPublishedMetrics(SEPProbeMetrics):
+    """`metrics.json` as published: the trainer's metrics plus `heldout_benchmark`,
+    eval.compute_auroc --json-out's report (verbatim) for a benchmark run that scored
+    this exact probe; eval.publish_sep_probe refuses it if any of its `question_ids`
+    is a training id."""
+
+    heldout_benchmark: dict[str, Any]

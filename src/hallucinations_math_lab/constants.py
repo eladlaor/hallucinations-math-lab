@@ -176,6 +176,13 @@ SEP_DATASET_TENSORS_FILE: Final[str] = "hidden_states.safetensors"
 SEP_COLLECTION_CONFIG_FILE: Final[str] = "collection_config.json"
 SEP_TRAINING_LOG_FILE: Final[str] = "training_log.jsonl"
 SEP_DATASET_SCHEMA_VERSION: Final[int] = 1
+# Every file of a dataset directory: what the companion Hub dataset repo holds.
+SEP_DATASET_DIR_FILES: Final[tuple[str, ...]] = (
+    SEP_DATASET_ROWS_FILE,
+    SEP_DATASET_TENSORS_FILE,
+    SEP_COLLECTION_CONFIG_FILE,
+    SEP_TRAINING_LOG_FILE,
+)
 
 # SEP probe directory (eval.train_sep_probe): the same layout on disk and on the Hub.
 # training_log.jsonl is the dataset's log, copied in (SEP_TRAINING_LOG_FILE).

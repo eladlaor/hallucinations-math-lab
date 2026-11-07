@@ -15,8 +15,10 @@ checks success criteria 1 and 2. Criterion 2 (SE's margin over PE) uses a
 the criterion is met only if the point gap clears the target and the CI of
 the gap excludes zero.
 
-`--json-out PATH` also writes the printed report to PATH, byte for byte; the
-probe publisher reads it as the held-out benchmark.
+`--json-out PATH` also writes the printed report to PATH, plus `question_ids`:
+the id of every scored row, in row order. The probe publisher reads that file as
+the held-out benchmark and refuses it if any id trained the probe, so every
+scored row must have an id.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from eval.benchmark_results import (
     ALIASES_FIELD,
     DETECTOR_SCORES_FIELD,
     GREEDY_ANSWER_FIELD,
+    ID_FIELD,
     BenchmarkRow,
     answer_word_counts,
     is_correct,
@@ -47,6 +50,8 @@ from hallucinations_math_lab.constants import LOG_EXTRA_KEY, DetectorName
 
 REPORT_DECIMALS: Final[int] = 4
 JSON_INDENT: Final[int] = 2
+# The --json-out report's list of scored question ids.
+QUESTION_IDS_FIELD: Final[str] = "question_ids"
 
 logger = logging.getLogger(__name__)
 
@@ -150,15 +155,37 @@ def auroc_report(rows: list[BenchmarkRow], source: str) -> dict[str, Any]:
     return report
 
 
+def scored_question_ids(rows: list[BenchmarkRow], source: str) -> list[str]:
+    """The id of every row the report scores (the labeled ones), in row order. A scored
+    row without an id cannot be shown absent from a SEP probe's training set."""
+    ids: list[str] = []
+    for row_no, row in enumerate(rows, start=1):
+        if not is_labeled(row):
+            continue
+        question_id = row.get(ID_FIELD)
+        if question_id is None:
+            raise RuntimeError(
+                f"{source} row {row_no} has no {ID_FIELD!r}; --json-out records every scored "
+                "row's id. Re-run eval.run_benchmark on a question file whose rows have ids."
+            )
+        ids.append(str(question_id))
+    return ids
+
+
 def main(path: Path, json_out: Path | None = None) -> None:
-    """Print the AUROC report for `path`; with `json_out`, also write it there."""
-    report = json.dumps(auroc_report(load_rows(path), source=str(path)), indent=JSON_INDENT)
-    print(report)
+    """Print the AUROC report for `path`; with `json_out`, also write it there with the
+    scored question ids."""
+    rows = load_rows(path)
+    report = auroc_report(rows, source=str(path))
+    # Before printing, so a row without an id fails the run before any output.
+    ids = None if json_out is None else scored_question_ids(rows, source=str(path))
+    print(json.dumps(report, indent=JSON_INDENT))
     if json_out is None:
         return
+    report[QUESTION_IDS_FIELD] = ids
     try:
         json_out.parent.mkdir(parents=True, exist_ok=True)
-        json_out.write_text(report + "\n")
+        json_out.write_text(json.dumps(report, indent=JSON_INDENT) + "\n")
     except OSError as e:
         logger.error(
             "Could not write the AUROC report.",

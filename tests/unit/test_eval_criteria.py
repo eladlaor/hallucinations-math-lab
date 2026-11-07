@@ -22,7 +22,7 @@ from sklearn.metrics import roc_auc_score
 
 from eval.adversarial_separation import separation_report
 from eval.benchmark_results import SEP_PROBE_IDENTITY_FIELDS, is_correct, run_config
-from eval.compute_auroc import auroc_report
+from eval.compute_auroc import QUESTION_IDS_FIELD, auroc_report
 from eval.compute_auroc import main as compute_auroc_main
 from eval.datasets.load_triviaqa import slice_bounds
 from eval.escalation_uplift import (
@@ -178,19 +178,37 @@ def test_gap_criterion_fails_when_ci_includes_zero():
     assert gap["met"] is False
 
 
-def test_compute_auroc_json_out_matches_stdout(tmp_path, capsys):
-    """--json-out writes exactly the report printed to stdout, for publishing."""
+def _results_file(tmp_path, with_ids: bool = True):
     rows = [_row("Paris", se=0.1 * i, pe=0.5) for i in range(5)]
     rows += [_row("Lyon", se=5.0 + 0.1 * i, pe=0.5) for i in range(5)]
+    rows.append(_row("Paris", se=0.0, pe=0.5, aliases=[]))  # unlabeled: not scored
+    if with_ids:
+        rows = [{"id": f"q{i}", **row} for i, row in enumerate(rows)]
     results = tmp_path / "results.jsonl"
     results.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    return results
+
+
+def test_compute_auroc_json_out_is_stdout_plus_scored_ids(tmp_path, capsys):
+    """--json-out writes the report printed to stdout plus the scored rows' ids, for
+    the publisher's check that none trained the probe."""
     out = tmp_path / "nested" / "auroc.json"
 
-    compute_auroc_main(results, json_out=out)
+    compute_auroc_main(_results_file(tmp_path), json_out=out)
 
-    printed = capsys.readouterr().out
-    assert out.read_text() == printed
-    assert json.loads(printed)["detectors"][SE]["auroc"] == 1.0
+    printed = json.loads(capsys.readouterr().out)
+    written = json.loads(out.read_text())
+    assert written.pop(QUESTION_IDS_FIELD) == [f"q{i}" for i in range(10)]
+    assert written == printed
+    assert printed["detectors"][SE]["auroc"] == 1.0
+
+
+def test_compute_auroc_json_out_refuses_a_scored_row_without_id(tmp_path, capsys):
+    out = tmp_path / "auroc.json"
+    with pytest.raises(RuntimeError, match="row 1 has no 'id'"):
+        compute_auroc_main(_results_file(tmp_path, with_ids=False), json_out=out)
+    assert not out.exists()
+    assert capsys.readouterr().out == ""
 
 
 # --- criterion 3 -----------------------------------------------------------

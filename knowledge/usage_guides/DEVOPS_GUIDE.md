@@ -14,6 +14,7 @@
 - [Pointing the client at Vertex](#pointing-the-client-at-vertex)
 - [Running vLLM on your own GPU box instead](#running-vllm-on-your-own-gpu-box-instead)
 - [Tearing the endpoints down](#tearing-the-endpoints-down)
+- [Publishing a SEP probe to the Hub](#publishing-a-sep-probe-to-the-hub)
 - [Continuous integration](#continuous-integration)
 - [Cost notes](#cost-notes)
 
@@ -244,6 +245,59 @@ terraform apply -var="deploy_vertex_endpoint=false"
 The `null_resource` destroy step runs `serving/vertex_deploy.py undeploy`,
 which undeploys every model on each endpoint and deletes the uploaded models
 before Terraform removes the endpoints. No manual `gcloud` step is needed.
+
+## Publishing a SEP probe to the Hub
+
+The release sequence for a trained SEP probe and its calibration dataset. No probe has been
+published yet; the first release also needs the owner's Hub namespace and Gemma-license
+decisions ([`PUBLISHED_SEP_PROBE.md`](../plans/PUBLISHED_SEP_PROBE.md)).
+
+Prerequisites: a GPU host that fits the backbone, `SLM_PROVIDER=hf_transformers` and
+`VLLM_MODEL_ID=<model>` in `.env`, `uv sync --all-extras`, and `hf auth login` with write
+access to the target namespace (the publisher reads that stored token; it takes none on the
+command line). Commit and push before step 2: a probe fitted from uncommitted code is refused,
+and the model card links to the fitting commit.
+
+```bash
+# 1. Collect the calibration rows: SE labels and every layer's hidden states (GPU).
+uv run python -m eval.collect_sep_dataset
+# 2. Fit the probe on CPU; writes data/probes/<slug>/.
+uv run python -m eval.train_sep_probe --dataset data/sep_datasets/<slug>
+# 3. Benchmark the disjoint 200-question slice with that probe (GPU).
+ENABLED_DETECTORS='["predictive_entropy","semantic_entropy_probe","semantic_entropy","discrete_semantic_entropy"]' \
+  uv run python -m eval.run_benchmark --out eval/results/sep_heldout.jsonl --no-judge
+# 4. Score it to JSON, with every scored question's id.
+uv run python -m eval.compute_auroc --in eval/results/sep_heldout.jsonl \
+  --json-out eval/results/sep_heldout_auroc.json
+# 5. Check everything and print the model card; then run again without --dry-run.
+uv run python -m eval.publish_sep_probe --probe-dir data/probes/<slug> \
+  --dataset data/sep_datasets/<slug> --heldout eval/results/sep_heldout_auroc.json \
+  --repo <owner>/<model repo> --dataset-repo <owner>/<dataset repo> --tag v1 --dry-run
+```
+
+The publisher refuses, before writing or uploading anything:
+
+- a `--repo` or `--dataset-repo` that is not a valid `<owner>/<name>` Hub repo id, or a
+  `--tag` that is not a plain tag name (letters, digits, `.`, `_`, `-`; e.g. `v1`);
+- a probe directory with a missing file, fitted from uncommitted code (`repo_dirty`), or
+  whose `metrics.json` reports a TBG window other than the layers the probe reads;
+- a held-out report whose `sep_probe` hashes (`weights_sha256`, `config_sha256`) differ from
+  the probe directory's files, whose model is not the probe's backbone, or that has no SEP
+  AUROC;
+- a held-out report without one `question_ids` entry per scored row (write it with
+  `--json-out`), or with any id the probe was trained on;
+- a held-out run that recorded the probe under an absolute path, which would be published:
+  leave `SEP_PROBE_PATH` unset (or relative) in step 3;
+- a dataset directory with a missing file, a training log other than the probe's, or a
+  backbone, prompt, calibration set or question ids that differ from the probe's.
+
+A real run uploads the probe directory (with the held-out report merged into
+`metrics.json` and the rendered `README.md`) to the model repo and the dataset directory to
+the dataset repo, then tags both commits. A `--tag` that either repo already has is
+refused before anything is uploaded; publish under a new tag. If tagging the model repo
+fails, the publisher deletes the dataset repo's new tag, so the same `--tag` can be retried.
+If that deletion fails too, the error names the tag left behind: delete it on the Hub before
+retrying.
 
 ## Continuous integration
 

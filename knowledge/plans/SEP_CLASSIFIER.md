@@ -522,7 +522,7 @@ disk and on the Hub**.
 - **`threshold`**: `{recommended, tpr, fpr, escalation_rate, source: "oof_youden"}`
 - **`converged`**, **`n_iter`**
 - **`ablations`**: optional.
-- **`heldout_benchmark`**: added at publish time; holds compute_auroc's output for SEP, PE, SE and discrete SE with bootstrap CIs, and the run config, whose `sep_probe` holds the probe's `weights_sha256` (of `probe.safetensors`) and `config_sha256` (of `probe_config.json`); publish_sep_probe checks both against the directory it publishes.
+- **`heldout_benchmark`**: added at publish time; holds compute_auroc's output for SEP, PE, SE and discrete SE with bootstrap CIs, and the run config, whose `sep_probe` holds the probe's `weights_sha256` (of `probe.safetensors`) and `config_sha256` (of `probe_config.json`); publish_sep_probe checks both against the directory it publishes. It also holds `question_ids` (compute_auroc `--json-out` only), and the publisher refuses any that is a training id.
 
 ### The dataset directory (companion Hub dataset repo)
 
@@ -1212,6 +1212,59 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
   3. `eval.run_benchmark` on the disjoint slice
   4. `eval.compute_auroc --json-out`
   5. `eval.publish_sep_probe --dry-run`, then for real
+- *As implemented:*
+  - **Inputs.** `--probe-dir`, `--dataset`, `--heldout` (compute_auroc's JSON), `--repo`,
+    `--dataset-repo`, `--tag` (required, no default), `--dry-run`. No token argument: `HfApi()`
+    uses the `hf auth login` token.
+  - **Held-out merge.** The published `metrics.json` is `SEPPublishedMetrics`, a subclass of
+    `SEPProbeMetrics` with a required `heldout_benchmark` (compute_auroc's report, verbatim).
+    The trainer's `metrics.json` is unchanged, so a probe directory never carries a
+    half-filled field. The publisher reads only the report fields it checks or shows, through
+    a view model that ignores the rest.
+  - **Checks, all before anything is written.** The held-out run must have SEP scores and a
+    `sep_probe` whose two hashes equal the published files', whose `ref` is not an absolute
+    local path (item 13's requirement), and whose `model_id` is the probe's backbone. The
+    dataset must hold every file, the probe's backbone, prompt, calibration-set hash and
+    training ids in order, and the training log the trainer copied. `metrics.json`'s TBG
+    window must equal the probe's layers. "Repo dirty" means the probe's
+    `training.repo_dirty`: the card links to the fitting commit, so a probe fitted from
+    uncommitted code is refused (the publish-time tree only renders the card). The repo ids
+    (one `validate_hub_repo_id`, shared with `parse_hf_probe_uri`) and the tag (a plain tag
+    name, `TAG_PATTERN`) are checked first, so a bad tag fails before any upload.
+  - **Held-out disjointness, verified.** `compute_auroc --json-out` adds `question_ids`, the
+    id of every scored row (the printed report is unchanged, so `--json-out` is no longer
+    byte for byte, and item 14's `test_compute_auroc_json_out_matches_stdout` became
+    `test_compute_auroc_json_out_is_stdout_plus_scored_ids`; it refuses a scored row without
+    an id). The publisher requires one id per
+    scored row and refuses any id in the probe's `train_ids.json`, so the card's "none of them
+    a training question" is checked, not assumed from the default slices.
+  - **Staging.** The model repo's folder is staged in a temporary directory, and the staged
+    weights and config are re-hashed against the loaded ones. `--dry-run` runs every check,
+    prints the card and uploads nothing.
+  - **Upload.** Both repos are created if needed (`exist_ok`), both folders uploaded with an
+    explicit file list, and only then both commits tagged, so the tag exists only when both
+    uploads landed. If tagging the model repo fails, the dataset repo's new tag is deleted, so
+    a retry with the same `--tag` is not refused; if that deletion fails too, the error names
+    the tag to delete by hand. Hub errors are logged and re-raised naming the repo.
+  - **Card.** Rendered by a new `eval/sep_model_card.py` (pure: the card, the held-out
+    report view it shows, and `PublishTarget`), split from `publish_sep_probe.py` (checks,
+    staging, upload) so each stays under 500 lines with one job. It uses
+    `string.Template.substitute`, so a missing field fails. It carries both layer numberings
+    (the paper's marked "likely, not verified"), the held-out AUROCs with CIs, the
+    cross-validated AUROCs (described as nested CV only when `layer_selection` is
+    `nested_cv`; a fixed-layer probe's CV has no inner loop) and layer-L AUROCs for both
+    positions, the recommended threshold, the full deviations
+    table with the probe's active IDs, the limits, citations and the commit link. It has **no
+    license field**: that waits for owner decision 2, and the template gains it before PSP 7.
+    The dataset repo gets no card of its own in this item.
+  - `SEP_DATASET_DIR_FILES` joins `constants.py`, beside `SEP_PROBE_DIR_FILES`.
+  - Extra tests beyond the list: staging contents, absolute `ref`, model mismatch in the
+    held-out report (the named test covers the dataset), a dataset that did not train the
+    probe (ids, missing log, different log), metrics for another window, a Hub failure
+    that tags nothing, a held-out id that trained the probe, a report without one id per
+    scored row, a bad repo id or tag refused before staging, the CV wording for both layer
+    selections, and a failed model tag that deletes the dataset tag (or names it when the
+    deletion fails).
 
 **16. Web and frontend.**
 
