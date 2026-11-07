@@ -79,8 +79,8 @@ The judge is any model behind `.answer(prompt) -> (answer, reasoning)`;
 Gemini on Vertex is the reference. The model under test is configurable
 (see [below](#which-model-am-i-testing-and-how-do-i-choose-it)).
 
-**The web playground** puts all of this in a browser: score your own answer
-sets, ask the model a live question, and browse benchmark results.
+**The web playground** puts all of this in a browser, one tab per way in:
+*Score answers*, *Ask the model* and *Measure the detectors*.
 
 There are three ways in. Each one answers a different question, and they are
 ordered from cheapest to most involved. The web playground has one tab per way
