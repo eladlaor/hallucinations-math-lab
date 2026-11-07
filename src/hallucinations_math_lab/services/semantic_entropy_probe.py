@@ -57,10 +57,10 @@ from hallucinations_math_lab.constants import (
 from hallucinations_math_lab.custom_types.sep_probe_types import SEPProbeConfig
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
-    Detector,
     DetectorMetadata,
     DetectorPrerequisiteError,
     DetectorScore,
+    HiddenStateDetector,
 )
 from hallucinations_math_lab.services.sep_probe_weights import ProbeWeights, read_probe_weights
 
@@ -252,8 +252,8 @@ def load_probe_dir(directory: Path) -> LoadedSEPProbe:
     return LoadedSEPProbe(config=config, weights=weights)
 
 
-class SemanticEntropyProbeDetector(Detector):
-    """SEP detector implementing the `Detector` protocol.
+class SemanticEntropyProbeDetector(HiddenStateDetector):
+    """SEP detector implementing the `HiddenStateDetector` protocol.
 
     `probe_dir` is a local probe directory (see `resolve_probe_source`). The
     caller must pass the hidden states of `hidden_state_layers`, one row per

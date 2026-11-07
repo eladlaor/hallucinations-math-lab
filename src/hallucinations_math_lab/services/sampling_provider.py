@@ -71,16 +71,34 @@ class SamplingProvider(Protocol):
     be tied to the weights and tokenizer it was trained on.
 
     `num_hidden_layers` is the backbone's decoder depth L, the index of its
-    last layer under the convention in this module's docstring.
+    last layer under the convention in this module's docstring, and
+    `hidden_size` the width of one layer's hidden state.
+
+    `chat_template_sha256` is the SHA-256 of the chat template that formats
+    every prompt, which moves every hidden state.
+
+    The evaluator reads these four, plus `model_id`, only when a SEP probe
+    detector is configured, to check that the probe fits the backbone and
+    prompt under test before the first request. The prompt's answer
+    instruction is not read from the provider: it is checked against
+    `Settings.answer_instruction` (ANSWER_INSTRUCTION), which a custom provider
+    must also send for the check to be meaningful.
+
+    `check_hidden_state_request(layers)` raises, without reading any hidden
+    state, when `pooled_hidden_state` could not serve `layers`: a ValueError
+    when they are not a valid selection (see `check_layers`), and
+    `UnsupportedHiddenStateRequest` when they are valid but this provider cannot
+    read them. The evaluator calls it when it is built. A provider that cannot
+    expose hidden states at all must refuse every request here, so that a
+    hidden-state detector on it fails when the evaluator is built.
 
     `pooled_hidden_state(prompt, layers)` takes `layers` non-empty and strictly
-    increasing within 0..L (see `check_layers`) and returns one row per layer,
-    in that order, read at the last token of the chat-formatted prompt: shape
-    `[len(layers), hidden_size]`, float32. It returns None
-    when the implementation cannot expose hidden states; SEP-style detectors
-    gracefully degrade in that case (the orchestrator skips them and reports
-    `n/a`). It raises `UnsupportedHiddenStateRequest` when it can expose
-    hidden states but not the layers requested."""
+    increasing within 0..L and returns one row per layer, in that order, read
+    at the last token of the chat-formatted prompt: shape
+    `[len(layers), hidden_size]`, float32. It raises as
+    `check_hidden_state_request` does for layers it cannot serve. Should it
+    still return None, the evaluator raises rather than score a hidden-state
+    detector without its input."""
 
     @property
     def model_id(self) -> str: ...
@@ -91,6 +109,13 @@ class SamplingProvider(Protocol):
     @property
     def num_hidden_layers(self) -> int: ...
 
+    @property
+    def hidden_size(self) -> int: ...
+
+    @property
+    def chat_template_sha256(self) -> str: ...
+
     def sample(self, prompt: str) -> SampleSet: ...
     def greedy(self, prompt: str) -> str: ...
+    def check_hidden_state_request(self, layers: tuple[int, ...]) -> None: ...
     def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor | None: ...

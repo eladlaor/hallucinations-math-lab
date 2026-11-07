@@ -8,8 +8,13 @@ test_predictive_entropy.py):
   - Flips the escalated flag at the configured threshold.
   - Skips SLM sampling when no enabled detector requires samples.
   - Fails fast when a detector requires hidden states but the SLM provider
-    returns None (e.g. vLLM without an embed sibling).
+    returns None (allowed by the protocol for third-party providers).
   - Refuses to construct if escalation_detector is not in enabled_detectors.
+  - With a SEP probe: asks the provider for the probe's layers, and refuses
+    at construction, before any sampling, a backbone or prompt the probe was
+    not trained on and layers the provider cannot serve; warns when
+    the SEP escalation threshold in use differs from the probe's recommended
+    threshold.
   - evaluate_responses (response-shaped API) runs without an SLM provider
     when the caller supplies samples + greedy_answer directly. This is the
     library entry point consumers like langrag use.
@@ -17,10 +22,13 @@ test_predictive_entropy.py):
 The detector list is injected directly so the tests don't depend on the
 config-driven default registry."""
 
+import logging
 from dataclasses import dataclass
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 
 from hallucinations_math_lab import (
     AnyAbove,
@@ -34,12 +42,25 @@ from hallucinations_math_lab import (
     evaluate_responses,
 )
 from hallucinations_math_lab.config import Settings
-from hallucinations_math_lab.constants import DetectorCategory
+from hallucinations_math_lab.constants import LOG_EXTRA_KEY, DetectorCategory
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
     DetectorMetadata,
     DetectorScore,
+)
+from hallucinations_math_lab.services.sampling_provider import UnsupportedHiddenStateRequest
+from hallucinations_math_lab.services.semantic_entropy_probe import (
+    SemanticEntropyProbeDetector,
+    SEPProbeMismatchError,
+)
+from tests.unit.sep_probe_fixtures import (
+    PROBE_HIDDEN_SIZE,
+    PROBE_NUM_HIDDEN_LAYERS,
+    PROBE_RECOMMENDED_THRESHOLD,
+    ProbeBackboneProvider,
+    probe_config,
+    write_probe_dir,
 )
 
 _TEST_METADATA = DetectorMetadata(
@@ -50,14 +71,10 @@ _TEST_METADATA = DetectorMetadata(
 )
 
 
-class FakeSLM:
-    """In-memory SamplingProvider double. `hidden_state` defaults to None
-    (matches a vLLM provider without an embed sibling); pass a tensor to
-    simulate a SEP-capable provider."""
-
-    model_id = "fake-slm"
-    model_revision = "fake-revision"
-    num_hidden_layers = 2
+class FakeSLM(ProbeBackboneProvider):
+    """In-memory SamplingProvider double, on the fixture probes' backbone.
+    `hidden_state` defaults to None (a provider that exposes no hidden
+    states); pass a tensor to simulate a SEP-capable provider."""
 
     def __init__(self, answers: list[str], hidden_state=None) -> None:
         self._answers = answers
@@ -99,6 +116,7 @@ class _ConstScoreDetector(Detector):
     requires_hidden_state: bool
     fixed_score: float = 0.0
     metadata: DetectorMetadata = _TEST_METADATA
+    hidden_state_layers: tuple[int, ...] = (PROBE_NUM_HIDDEN_LAYERS,)
 
     def score(self, ctx: DetectionContext) -> DetectorScore:
         return DetectorScore(
@@ -207,7 +225,7 @@ def test_no_sample_skipped_when_no_detector_needs_samples():
 
 def test_hidden_state_requirement_fails_fast_when_provider_returns_none():
     """When a configured detector requires hidden states but the SLM provider
-    returns None (e.g. vLLM without an embed sibling configured), the
+    returns None (the protocol allows it for providers that expose none), the
     evaluator must raise rather than dispatch the detector with no
     hidden state in its context."""
     slm = FakeSLM(["x"])  # default hidden_state=None
@@ -339,6 +357,219 @@ def test_escalation_detector_must_be_enabled():
     slm = FakeSLM(["x"])
     with pytest.raises(ValueError, match="not in the enabled detector list"):
         ResponseEvaluator(slm=slm, detectors=[PredictiveEntropyDetector()])
+
+
+# --- SEP probe wiring (ResponseEvaluator construction) ---
+
+
+def _sep_evaluator(slm: FakeSLM, probe_dir: Path) -> ResponseEvaluator:
+    return ResponseEvaluator(slm=slm, detectors=[SemanticEntropyProbeDetector(probe_dir)])
+
+
+@pytest.fixture
+def sep_settings(monkeypatch):
+    """SEP enabled and escalating on SEP_THRESHOLD; returns a setter for it."""
+
+    def _set(sep_threshold: float = PROBE_RECOMMENDED_THRESHOLD) -> None:
+        settings = Settings(
+            sep_threshold=sep_threshold,
+            enabled_detectors=[DetectorName.SEMANTIC_ENTROPY_PROBE],
+            escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
+        )
+        monkeypatch.setattr("hallucinations_math_lab.evaluator.get_settings", lambda: settings)
+
+    _set()
+    return _set
+
+
+def test_provider_asked_for_probe_layers(tmp_path, sep_settings):
+    """A windowed probe reads several layers; the evaluator must request
+    exactly those, not only the last layer."""
+    layers = (1, 2)
+    probe_dir = write_probe_dir(tmp_path / "probe", probe_config(layers=layers))
+    slm = FakeSLM(["x"], hidden_state=torch.zeros(len(layers), PROBE_HIDDEN_SIZE))
+
+    res = _sep_evaluator(slm, probe_dir).evaluate("q")
+
+    assert slm.requested_layers == [layers]
+    # Zero features and zero bias: sigmoid(0).
+    assert res.detector_scores[DetectorName.SEMANTIC_ENTROPY_PROBE] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("attribute", "value", "reported_field"),
+    [
+        ("model_id", "org/other-model", "model_id"),
+        ("model_revision", "f" * 40, "revision"),
+        # The probe's layers stay valid at L + 1, so check_compatible is what raises.
+        ("num_hidden_layers", PROBE_NUM_HIDDEN_LAYERS + 1, "num_hidden_layers"),
+        ("hidden_size", PROBE_HIDDEN_SIZE + 1, "hidden_size"),
+        ("chat_template_sha256", "0" * 64, "chat_template_sha256"),
+    ],
+)
+def test_backbone_mismatch_raises_before_any_sample(
+    tmp_path, sep_settings, attribute, value, reported_field
+):
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    slm = FakeSLM(["x"], hidden_state=torch.zeros(1, PROBE_HIDDEN_SIZE))
+    setattr(slm, attribute, value)
+
+    with pytest.raises(SEPProbeMismatchError, match=f"{reported_field}: probe .*{value!r}"):
+        _sep_evaluator(slm, probe_dir)
+    assert slm.sample_calls == 0
+    assert slm.hidden_state_calls == 0
+
+
+def test_answer_instruction_mismatch_raises_before_any_sample(tmp_path, monkeypatch):
+    settings = Settings(
+        answer_instruction="Answer in one word.",
+        enabled_detectors=[DetectorName.SEMANTIC_ENTROPY_PROBE],
+        escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
+    )
+    monkeypatch.setattr("hallucinations_math_lab.evaluator.get_settings", lambda: settings)
+    slm = FakeSLM(["x"])
+
+    with pytest.raises(SEPProbeMismatchError, match="Answer in one word."):
+        _sep_evaluator(slm, write_probe_dir(tmp_path / "probe"))
+    assert slm.sample_calls == 0
+
+
+def test_vllm_capability_checked_at_build_time(tmp_path, sep_settings, monkeypatch):
+    """The vLLM embed runner pools only the last layer: a windowed probe must
+    be refused when the evaluator is built, before any request is served."""
+    from demo.model_registry import get_model_entry
+    from demo.slm_provider import VLLMOpenAIProvider
+    from hallucinations_math_lab.config import get_settings
+
+    model_id = "google/gemma-4-E2B-it"
+    entry = get_model_entry(model_id)
+    get_settings.cache_clear()
+    monkeypatch.setenv("SLM_PROVIDER", "vllm")
+    monkeypatch.setenv("VLLM_MODEL_ID", model_id)
+    monkeypatch.setenv("VLLM_EMBED_BASE_URL", "http://localhost:8081/v1")
+    monkeypatch.setenv("VLLM_EMBED_MODEL_ID", "")
+    layers = (entry.num_hidden_layers - 1, entry.num_hidden_layers)
+    probe_dir = write_probe_dir(
+        tmp_path / "probe",
+        probe_config(
+            model_id=model_id,
+            num_hidden_layers=entry.num_hidden_layers,
+            hidden_size=entry.hidden_size,
+            layers=layers,
+        ),
+    )
+    import transformers
+
+    tokenizer_spy = MagicMock()
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", tokenizer_spy)
+    try:
+        with patch("demo.slm_provider.OpenAI") as openai_cls:
+            provider = VLLMOpenAIProvider()
+            with pytest.raises(UnsupportedHiddenStateRequest, match="can only pool the last layer"):
+                ResponseEvaluator(slm=provider, detectors=[SemanticEntropyProbeDetector(probe_dir)])
+        # Both clients are the patched class's return value: nothing was sent,
+        # and the check needed no tokenizer download.
+        openai_cls.return_value.post.assert_not_called()
+        openai_cls.return_value.chat.completions.create.assert_not_called()
+        tokenizer_spy.assert_not_called()
+    finally:
+        get_settings.cache_clear()
+
+
+def test_warns_when_sep_threshold_differs_from_recommended(tmp_path, sep_settings, caplog):
+    """The env value is the threshold; the probe's recommendation is only
+    reported, and a difference is flagged."""
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    sep_settings(PROBE_RECOMMENDED_THRESHOLD + 0.1)
+
+    with caplog.at_level(logging.WARNING, logger="hallucinations_math_lab.evaluator"):
+        evaluator = _sep_evaluator(
+            FakeSLM(["x"], hidden_state=torch.zeros(1, PROBE_HIDDEN_SIZE)), probe_dir
+        )
+
+    (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "recommended threshold" in record.getMessage()
+    assert getattr(record, LOG_EXTRA_KEY) == {
+        "probe_dir": str(probe_dir),
+        "threshold_in_use": pytest.approx(PROBE_RECOMMENDED_THRESHOLD + 0.1),
+        "recommended_threshold": PROBE_RECOMMENDED_THRESHOLD,
+    }
+    # The env value stays the threshold in use.
+    assert evaluator.evaluate("q").escalation_threshold == pytest.approx(
+        PROBE_RECOMMENDED_THRESHOLD + 0.1
+    )
+
+
+def test_no_threshold_warning_when_sep_threshold_matches_recommended(
+    tmp_path, sep_settings, caplog
+):
+    """Matching thresholds are still logged, both values, at INFO."""
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    with caplog.at_level(logging.INFO, logger="hallucinations_math_lab.evaluator"):
+        _sep_evaluator(FakeSLM(["x"]), probe_dir)
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+    (record,) = [r for r in caplog.records if r.getMessage() == "SEP escalation threshold."]
+    assert record.levelno == logging.INFO
+    assert getattr(record, LOG_EXTRA_KEY) == {
+        "probe_dir": str(probe_dir),
+        "threshold_in_use": PROBE_RECOMMENDED_THRESHOLD,
+        "recommended_threshold": PROBE_RECOMMENDED_THRESHOLD,
+    }
+
+
+def test_no_threshold_report_when_a_policy_decides(tmp_path, sep_settings, caplog):
+    """Under an escalation policy SEP_THRESHOLD is not what decides, so it is
+    not compared with the probe's recommendation."""
+    probe_dir = write_probe_dir(tmp_path / "probe")
+    sep_settings(PROBE_RECOMMENDED_THRESHOLD + 0.1)
+    with caplog.at_level(logging.INFO, logger="hallucinations_math_lab.evaluator"):
+        ResponseEvaluator(
+            slm=FakeSLM(["x"]),
+            detectors=[SemanticEntropyProbeDetector(probe_dir)],
+            escalation_policy=AnyAbove({DetectorName.SEMANTIC_ENTROPY_PROBE: 0.5}),
+        )
+    assert not [r for r in caplog.records if "threshold" in r.getMessage()]
+
+
+def test_hidden_state_detector_must_name_its_layers():
+    """The provider is asked for the layers the detector reads; a detector
+    requiring hidden states without naming them is refused at construction."""
+
+    @dataclass
+    class _NoLayers:
+        name: DetectorName = DetectorName.SEMANTIC_ENTROPY_PROBE
+        metadata: DetectorMetadata = _TEST_METADATA
+        requires_samples: bool = False
+        requires_hidden_state: bool = True
+
+        def score(self, ctx: DetectionContext) -> DetectorScore:
+            raise AssertionError("never scored")
+
+    with pytest.raises(TypeError, match="hidden_state_layers"):
+        _make_evaluator(FakeSLM(["x"]), [_NoLayers()], threshold=0.5, escalation=_NoLayers.name)
+
+
+def test_hidden_state_detectors_must_agree_on_layers():
+    """One pooled hidden state feeds every hidden-state detector."""
+    detectors: list[Detector] = [
+        _ConstScoreDetector(
+            name=name,
+            requires_samples=False,
+            requires_hidden_state=True,
+            hidden_state_layers=layers,
+        )
+        for name, layers in [
+            (DetectorName.SEMANTIC_ENTROPY_PROBE, (2,)),
+            (DetectorName.PREDICTIVE_ENTROPY, (1, 2)),
+        ]
+    ]
+    with pytest.raises(ValueError, match="different hidden-state layers"):
+        _make_evaluator(
+            FakeSLM(["x"]),
+            detectors,
+            threshold=0.5,
+            escalation=DetectorName.SEMANTIC_ENTROPY_PROBE,
+        )
 
 
 # --- Response-shaped API (evaluate_responses) ---

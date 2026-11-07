@@ -27,17 +27,20 @@ from hallucinations_math_lab import (
     TokenLogprob,
 )
 from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
-from tests.unit.sep_probe_fixtures import PROBE_HIDDEN_SIZE, write_probe_dir
+from tests.unit.sep_probe_fixtures import (
+    PROBE_HIDDEN_SIZE,
+    PROBE_MODEL_ID,
+    ProbeBackboneProvider,
+    write_probe_dir,
+)
 
 KNOWN_ANSWERS = {"Capital of France?": "Paris", "Author of 1984?": "Orwell"}
 
 
-class ScatteringSLM:
+class ScatteringSLM(ProbeBackboneProvider):
     """Repeats the right answer for known questions, invents one per sample otherwise."""
 
     model_id = "fake-slm"
-    model_revision = "fake-revision"
-    num_hidden_layers = 2
 
     def _answers(self, prompt: str) -> list[str]:
         if prompt in KNOWN_ANSWERS:
@@ -61,6 +64,10 @@ class ScatteringSLM:
 
 
 class HiddenStateSLM(ScatteringSLM):
+    """Serves hidden states as the backbone the fixture probes were trained on."""
+
+    model_id = PROBE_MODEL_ID
+
     def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]):
         return torch.zeros(len(layers), PROBE_HIDDEN_SIZE)
 
@@ -171,7 +178,7 @@ def test_benchmark_refuses_questions_the_probe_was_trained_on(tmp_path):
     _write_questions(questions)
     probe_dir = tmp_path / "probe"
     evaluator = _probe_evaluator(probe_dir)
-    write_training_ids(probe_dir, ["q2", "unrelated"], "fake-slm", tmp_path / "calib.jsonl")
+    write_training_ids(probe_dir, ["q2", "unrelated"], PROBE_MODEL_ID, tmp_path / "calib.jsonl")
 
     with pytest.raises(RuntimeError, match="used to train the SEP probe"):
         run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator)
@@ -183,7 +190,7 @@ def test_benchmark_accepts_a_probe_trained_on_other_questions(tmp_path):
     _write_questions(questions)
     probe_dir = tmp_path / "probe"
     evaluator = _probe_evaluator(probe_dir)
-    write_training_ids(probe_dir, ["other-1", "other-2"], "fake-slm", tmp_path / "calib.jsonl")
+    write_training_ids(probe_dir, ["other-1", "other-2"], PROBE_MODEL_ID, tmp_path / "calib.jsonl")
 
     run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator, limit=1)
     assert len((tmp_path / "out.jsonl").read_text().splitlines()) == 1

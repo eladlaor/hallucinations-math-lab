@@ -123,14 +123,11 @@ class CalibrationSet:
 @runtime_checkable
 class AllLayerHiddenStateProvider(SamplingProvider, Protocol):
     """A sampling provider that can also read every layer at TBG or SLT and
-    name its chat template, sampling truncation and provider kind.
+    name its sampling truncation and provider kind.
     HFTransformersProvider satisfies it; the vLLM provider does not."""
 
     @property
     def provider_kind(self) -> ProviderKind: ...
-
-    @property
-    def chat_template_sha256(self) -> str: ...
 
     @property
     def sampling_truncation(self) -> SamplingTruncation: ...

@@ -188,8 +188,15 @@ class _FakeCollectionProvider:
         return self._num_hidden_layers
 
     @property
+    def hidden_size(self) -> int:
+        return _E2B.hidden_size
+
+    @property
     def chat_template_sha256(self) -> str:
         return _FAKE_TEMPLATE_SHA
+
+    def check_hidden_state_request(self, layers: tuple[int, ...]) -> None:
+        raise AssertionError("collection reads every layer, not pooled rows")
 
     @property
     def sampling_truncation(self) -> SamplingTruncation:

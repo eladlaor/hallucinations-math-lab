@@ -16,7 +16,8 @@ Why a protocol and not a base class:
 Each detector declares:
   - `requires_samples` / `requires_hidden_state`: prerequisite flags so the
     orchestrator can fail fast when the context is missing what the detector
-    claimed to need.
+    claimed to need. A hidden-state detector also implements
+    `HiddenStateDetector`, naming the layers it reads.
   - `metadata: DetectorMetadata`: self-description of signal, assumption, and
     failure modes. The eval harness reads this to render the detector report,
     so every detector documents itself honestly in one place.
@@ -108,6 +109,16 @@ class Detector(Protocol):
     requires_hidden_state: bool
 
     def score(self, ctx: DetectionContext) -> DetectorScore: ...
+
+
+@runtime_checkable
+class HiddenStateDetector(Detector, Protocol):
+    """A detector with `requires_hidden_state=True` must also name the layers
+    it reads: the provider is asked for exactly those, and the pooled hidden
+    state in the context has one row per layer, in this order."""
+
+    @property
+    def hidden_state_layers(self) -> tuple[int, ...]: ...
 
 
 class DetectorPrerequisiteError(RuntimeError):

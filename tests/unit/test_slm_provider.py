@@ -5,7 +5,8 @@ without a live vLLM server. HFTransformersProvider needs an actual model
 checkpoint + a GPU and is marked `requires_gpu`, skipped by default.
 
 Contract pinned here:
-  - `pooled_hidden_state` returns None when VLLM_EMBED_BASE_URL is unset.
+  - The vLLM provider refuses hidden-state reads when VLLM_EMBED_BASE_URL is
+    unset (`UnsupportedHiddenStateRequest`, naming the remedy).
   - When the embed endpoint is configured, the provider hits /v1/embeddings
     and returns a float32 tensor of shape [1, hidden]; it serves only the
     final layer and refuses any other layer request.
@@ -130,19 +131,17 @@ def gemma_settings_with_embed(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_vllm_provider_returns_none_hidden_state_without_embed_endpoint(gemma_settings):
+@pytest.mark.parametrize(
+    "layers",
+    [(E4B_NUM_LAYERS,), (E4B_NUM_LAYERS - 1,), (E4B_NUM_LAYERS - 1, E4B_NUM_LAYERS)],
+)
+def test_vllm_provider_refuses_hidden_state_without_embed_endpoint(gemma_settings, layers):
+    """No embed endpoint means no hidden states at all: refused with the
+    remedy, as `check_hidden_state_request` refuses it, never a silent None."""
     with patch("demo.slm_provider.OpenAI"):
         provider = VLLMOpenAIProvider()
-    assert provider.pooled_hidden_state("anything", layers=(E4B_NUM_LAYERS,)) is None
-
-
-@pytest.mark.parametrize("layers", [(E4B_NUM_LAYERS - 1,), (E4B_NUM_LAYERS - 1, E4B_NUM_LAYERS)])
-def test_vllm_provider_returns_none_without_embed_endpoint_for_any_layers(gemma_settings, layers):
-    """No embed endpoint means no hidden states at all: None, as the protocol
-    says, not a layer refusal."""
-    with patch("demo.slm_provider.OpenAI"):
-        provider = VLLMOpenAIProvider()
-    assert provider.pooled_hidden_state("anything", layers=layers) is None
+    with pytest.raises(UnsupportedHiddenStateRequest, match="VLLM_EMBED_BASE_URL"):
+        provider.pooled_hidden_state("anything", layers=layers)
 
 
 def test_vllm_provider_returns_tensor_when_embed_endpoint_configured(
@@ -723,3 +722,72 @@ def test_vllm_sample_and_greedy_send_the_instruction_but_keep_the_bare_prompt(ge
     for call in client.chat.completions.create.call_args_list:
         assert call.kwargs["messages"] == expected
     assert sample_set.prompt == "Capital of France?"
+
+
+# --- What the evaluator checks a SEP probe against, before any request ---
+
+
+def test_hf_check_hidden_state_request_accepts_any_valid_layers():
+    provider = _hf_provider(_FakeHFModel())
+    provider.check_hidden_state_request((0, 1, HF_NUM_LAYERS))
+    with pytest.raises(ValueError, match="layers"):
+        provider.check_hidden_state_request((HF_NUM_LAYERS + 1,))
+
+
+def test_vllm_check_hidden_state_request_serves_only_the_last_layer(gemma_settings_with_embed):
+    with patch("demo.slm_provider.OpenAI"):
+        provider = VLLMOpenAIProvider()
+    provider.check_hidden_state_request((E4B_NUM_LAYERS,))
+    with pytest.raises(UnsupportedHiddenStateRequest, match="can only pool the last layer"):
+        provider.check_hidden_state_request((E4B_NUM_LAYERS - 1, E4B_NUM_LAYERS))
+
+
+def test_vllm_check_hidden_state_request_refuses_without_embed_endpoint(gemma_settings):
+    """Without an embed endpoint no layer can be read: refused when the
+    evaluator is built, not at the first request."""
+    with patch("demo.slm_provider.OpenAI"):
+        provider = VLLMOpenAIProvider()
+    with pytest.raises(UnsupportedHiddenStateRequest, match="VLLM_EMBED_BASE_URL"):
+        provider.check_hidden_state_request((E4B_NUM_LAYERS,))
+
+
+def test_hidden_size_from_registry(gemma_settings):
+    with patch("demo.slm_provider.OpenAI"):
+        vllm_provider = VLLMOpenAIProvider()
+    assert vllm_provider.hidden_size == get_model_entry(vllm_provider.model_id).hidden_size
+    assert (
+        HFTransformersProvider(model_id=E2B_ID).hidden_size == get_model_entry(E2B_ID).hidden_size
+    )
+
+
+def test_vllm_chat_template_sha256_hashes_the_pinned_tokenizer_once(gemma_settings, monkeypatch):
+    """The server reports no template; the provider hashes the template of the
+    tokenizer at the revision the server is launched with, as the HF provider does."""
+    import transformers
+
+    tokenizer_spy = MagicMock(return_value=_FakeTokenizer())
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", tokenizer_spy)
+    with patch("demo.slm_provider.OpenAI"):
+        provider = VLLMOpenAIProvider()
+
+    expected = hashlib.sha256(_FakeTokenizer.chat_template.encode()).hexdigest()
+    assert provider.chat_template_sha256 == expected
+    assert provider.chat_template_sha256 == expected
+    tokenizer_spy.assert_called_once_with(
+        provider.model_id, revision=get_model_entry(provider.model_id).revision
+    )
+    assert expected == _hf_provider(_FakeHFModel()).chat_template_sha256
+
+
+def test_vllm_chat_template_sha256_names_the_model_when_the_tokenizer_fails(
+    gemma_settings, monkeypatch
+):
+    import transformers
+
+    monkeypatch.setattr(
+        transformers.AutoTokenizer, "from_pretrained", MagicMock(side_effect=OSError("gated"))
+    )
+    with patch("demo.slm_provider.OpenAI"):
+        provider = VLLMOpenAIProvider()
+    with pytest.raises(RuntimeError, match=r"gemma-4-E4B-it.*gated"):
+        _ = provider.chat_template_sha256

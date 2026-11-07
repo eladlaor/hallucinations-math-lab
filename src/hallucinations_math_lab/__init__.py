@@ -47,6 +47,7 @@ from hallucinations_math_lab.services.detector_protocol import (
     Detector,
     DetectorPrerequisiteError,
     DetectorScore,
+    HiddenStateDetector,
 )
 from hallucinations_math_lab.services.nli import EntailmentScorer, NLIScorer
 from hallucinations_math_lab.services.predictive_entropy import PredictiveEntropyDetector
@@ -63,6 +64,7 @@ __all__ = [
     "ResponseEvaluator",
     # Protocols
     "Detector",
+    "HiddenStateDetector",
     "EntailmentScorer",
     "Judge",
     "SamplingProvider",

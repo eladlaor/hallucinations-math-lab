@@ -131,6 +131,23 @@ def _api_router(
 ) -> APIRouter:
     router = APIRouter(prefix=API_PREFIX)
     model_lock = threading.Lock()
+    evaluators: dict[AskMode, ResponseEvaluator] = {}
+
+    def evaluator_for(mode: AskMode) -> ResponseEvaluator:
+        """The mode's evaluator, built on first use and reused, so its build-time
+        preflight (probe fit, SEP threshold report) runs once. Call under `model_lock`."""
+        if mode not in evaluators:
+            slm = provider.get()
+            evaluators[mode] = ResponseEvaluator(
+                slm=slm,
+                detectors=build_ask_detectors(settings.enabled_detectors, slm.model_id, scorer),
+                escalation_detector=settings.escalation_detector,
+                escalation_threshold=settings.escalation_threshold_for(
+                    settings.escalation_detector
+                ),
+                judge=judge.get() if mode == AskMode.CHAT else None,
+            )
+        return evaluators[mode]
 
     @router.get(ROUTE_STATUS, response_model=StatusResponse)
     def status() -> StatusResponse:
@@ -221,17 +238,7 @@ def _api_router(
         started = time.perf_counter()
         try:
             with model_lock:
-                slm = provider.get()
-                evaluator = ResponseEvaluator(
-                    slm=slm,
-                    detectors=build_ask_detectors(settings.enabled_detectors, slm.model_id, scorer),
-                    escalation_detector=settings.escalation_detector,
-                    escalation_threshold=settings.escalation_threshold_for(
-                        settings.escalation_detector
-                    ),
-                    judge=judge.get() if request.mode == AskMode.CHAT else None,
-                )
-                result = evaluator.evaluate(request.question)
+                result = evaluator_for(request.mode).evaluate(request.question)
         except Exception as e:
             logger.error("Ask failed.", extra={LOG_EXTRA_KEY: {**ctx, "error": str(e)}})
             raise HTTPException(status_code=500, detail=str(e)) from e

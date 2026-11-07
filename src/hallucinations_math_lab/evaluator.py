@@ -31,8 +31,13 @@ from hallucinations_math_lab.judges.protocol import Judge
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
+    HiddenStateDetector,
 )
 from hallucinations_math_lab.services.sampling_provider import SamplingProvider
+from hallucinations_math_lab.services.semantic_entropy_probe import (
+    SemanticEntropyProbeDetector,
+    resolve_probe_source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +205,6 @@ def _build_default_detectors(enabled: list[DetectorName], model_id: str) -> list
         DiscreteSemanticEntropyDetector,
         SemanticEntropyDetector,
     )
-    from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
 
     detectors: list[Detector] = []
     for name in enabled:
@@ -224,9 +228,62 @@ def _resolve_sep_probe_dir(model_id: str) -> Path:
     the default for `model_id` — the model actually being evaluated, which in a
     multi-model sweep is not VLLM_MODEL_ID. A missing or legacy `.pt` probe
     raises here, so the misconfiguration surfaces before the first request."""
-    from hallucinations_math_lab.services.semantic_entropy_probe import resolve_probe_source
-
     return resolve_probe_source(get_settings().sep_probe_path, model_id)
+
+
+def _hidden_state_layers(detectors: list[Detector]) -> tuple[int, ...] | None:
+    """The layers to ask the provider for: the ones every hidden-state detector
+    reads (one pooled hidden state feeds them all), or None when none needs one."""
+    layers_by_detector: dict[str, tuple[int, ...]] = {}
+    for detector in detectors:
+        if not detector.requires_hidden_state:
+            continue
+        if not isinstance(detector, HiddenStateDetector):
+            raise TypeError(
+                f"Detector {detector.name!s} requires a hidden state but has no "
+                "hidden_state_layers naming the layers it reads; implement HiddenStateDetector."
+            )
+        layers_by_detector[str(detector.name)] = detector.hidden_state_layers
+    distinct = set(layers_by_detector.values())
+    if len(distinct) > 1:
+        raise ValueError(
+            f"The hidden-state detectors read different hidden-state layers "
+            f"{layers_by_detector!s}, but one pooled hidden state feeds them all."
+        )
+    return distinct.pop() if distinct else None
+
+
+def _check_sep_probe_fits(
+    probe: SemanticEntropyProbeDetector, slm: SamplingProvider, answer_instruction: str
+) -> None:
+    """Refuse a probe trained on another backbone or prompt than `slm` uses."""
+    probe.check_compatible(
+        model_id=slm.model_id,
+        revision=slm.model_revision,
+        num_hidden_layers=slm.num_hidden_layers,
+        hidden_size=slm.hidden_size,
+        answer_instruction=answer_instruction,
+        chat_template_sha256=slm.chat_template_sha256,
+    )
+
+
+def _report_sep_threshold(probe: SemanticEntropyProbeDetector, threshold_in_use: float) -> None:
+    """Log the SEP escalation threshold in use next to the probe's recommended
+    one, as a warning when they differ. The probe's value is never applied."""
+    recommended = probe.config.output.recommended_threshold
+    thresholds = {
+        "probe_dir": str(probe.probe_dir),
+        "threshold_in_use": threshold_in_use,
+        "recommended_threshold": recommended,
+    }
+    if threshold_in_use != recommended:
+        logger.warning(
+            "The SEP escalation threshold in use differs from the probe's recommended "
+            "threshold; the threshold in use is applied.",
+            extra={LOG_EXTRA_KEY: thresholds},
+        )
+    else:
+        logger.info("SEP escalation threshold.", extra={LOG_EXTRA_KEY: thresholds})
 
 
 class ResponseEvaluator:
@@ -292,6 +349,22 @@ class ResponseEvaluator:
                         f"enabled detector list {enabled_names!s}."
                     )
 
+        # Hidden-state preflight, before any request: the provider must be able
+        # to serve the layers (checked first: on vLLM it needs no tokenizer
+        # download), and every probe must fit the backbone and prompt under test.
+        self._hidden_state_layers = _hidden_state_layers(self._detectors)
+        if self._hidden_state_layers is not None:
+            self._slm.check_hidden_state_request(self._hidden_state_layers)
+        sep_decides = (
+            self._escalation_policy is None
+            and self._escalation_detector == DetectorName.SEMANTIC_ENTROPY_PROBE
+        )
+        for detector in self._detectors:
+            if isinstance(detector, SemanticEntropyProbeDetector):
+                _check_sep_probe_fits(detector, self._slm, settings.answer_instruction)
+                if sep_decides:
+                    _report_sep_threshold(detector, self._escalation_threshold)
+
     @property
     def slm(self) -> SamplingProvider:
         """The sampling provider this evaluator drives (read-only)."""
@@ -310,16 +383,12 @@ class ResponseEvaluator:
     def evaluate(self, prompt: str) -> DetectionResult:
         try:
             need_samples = any(d.requires_samples for d in self._detectors)
-            need_hidden_state = any(d.requires_hidden_state for d in self._detectors)
 
             sample_set = self._slm.sample(prompt) if need_samples else None
             greedy = self._slm.greedy(prompt)
-            # Only the last layer, index L, is requested, so only a probe whose
-            # features.layers is (L,) can be served; any other probe fails its
-            # shape check in score().
             pooled_hidden_state = (
-                self._slm.pooled_hidden_state(prompt, layers=(self._slm.num_hidden_layers,))
-                if need_hidden_state
+                self._slm.pooled_hidden_state(prompt, layers=self._hidden_state_layers)
+                if self._hidden_state_layers is not None
                 else None
             )
 

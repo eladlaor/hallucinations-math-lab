@@ -18,6 +18,7 @@ from tests.unit.web.conftest import (
     FAKE_JUDGE_ANSWER,
     FAKE_JUDGE_REASONING,
     PROVIDER_ERROR,
+    TEST_PROJECT,
     ClientFactory,
     FailingProvider,
     FakeJudge,
@@ -124,6 +125,31 @@ def test_the_provider_is_built_once(
     _ask(client, "detect")
 
     assert len(built) == 1
+
+
+def test_each_mode_builds_its_evaluator_once(
+    make_client: ClientFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The evaluator's build-time preflight (probe fit, SEP threshold report)
+    runs once per mode, not on every request."""
+    built_for: list[str] = []
+
+    def build(names: list[DetectorName], model_id: str) -> list[Detector]:
+        built_for.append(model_id)
+        return [_FixedSEP()]
+
+    monkeypatch.setattr("demo.web.app._build_default_detectors", build)
+    client = make_client(
+        settings=Settings(
+            gcp_project_id=TEST_PROJECT,
+            enabled_detectors=[DetectorName.SEMANTIC_ENTROPY_PROBE],
+            escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
+        )
+    )
+    for mode in ("detect", "detect", "chat", "chat"):
+        assert _ask(client, mode).status_code == 200
+
+    assert len(built_for) == 2
 
 
 @pytest.mark.parametrize(

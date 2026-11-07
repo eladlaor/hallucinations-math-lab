@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from demo.web.app import create_app
 from hallucinations_math_lab import Sample, SampleSet, TokenLogprob
 from hallucinations_math_lab.config import Settings
+from tests.unit.sep_probe_fixtures import ProbeBackboneProvider
 
 PARIS = "paris"
 TEST_PROJECT = "test-project"
@@ -45,13 +46,11 @@ class KeywordNLI:
         return (PARIS in na and PARIS in nb) or na == nb
 
 
-class FakeProvider:
+class FakeProvider(ProbeBackboneProvider):
     """Answers every prompt with the given sample texts; greedy is the first."""
 
     def __init__(self, texts: list[str]) -> None:
         self.model_id = FAKE_MODEL_ID
-        self.model_revision = "fake-revision"
-        self.num_hidden_layers = 2
         self._texts = texts
 
     def sample(self, prompt: str) -> SampleSet:

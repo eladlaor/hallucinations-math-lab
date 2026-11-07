@@ -340,6 +340,9 @@ main setting (Sec. 4, "Probing Locations").
 - a new `model_revision` property
 - a new `num_hidden_layers` property (L), so the library can name layer L without importing
   the demo registry (HF reads the loaded text config; vLLM reads `ModelEntry`)
+- new `hidden_size` and `chat_template_sha256` properties and a
+  `check_hidden_state_request(layers)` method, which the evaluator's build-time checks need
+  (added in item 12; see its notes)
 - an HF-only `hidden_states_all_layers(prompt, position, answer=None) -> Tensor[L+1, hidden]`,
   used by the collector
 
@@ -452,8 +455,9 @@ FIT (CPU only; reads only the dataset dir)       eval/train_sep_probe.py --datas
 
 USE
   SEP_PROBE_PATH (dir | hf://repo@rev | unset → data/probes/<slug>/)
-   → resolve_probe_source → load_probe_dir → check_compatible   [evaluator constructor]
-   → provider capability check for (position, layers)            [evaluator constructor]
+   → resolve_probe_source → load_probe_dir                       [evaluator constructor]
+   → provider capability check for the layers (TBG)              [evaluator constructor]
+   → check_compatible                                            [evaluator constructor]
    → provider.pooled_hidden_state(prompt, layers) → sigmoid(w·x+b) = p(high SE)
    → escalate if p > SEP_THRESHOLD   (when ESCALATION_DETECTOR=semantic_entropy_probe)
 
@@ -549,7 +553,7 @@ by construction.
 | `ModelEntry.revision`, `.num_hidden_layers`, `.hidden_size` | **New**, required. |
 | `ModelEntry.sep_probe_path` | **Removed** (unused). |
 | `constants.py` | Adds `TokenPosition` StrEnum (TBG, SLT), the recipe constants, file-name constants (`SEP_PROBE_WEIGHTS_FILE`, `SEP_PROBE_CONFIG_FILE`, `SEP_TRAIN_IDS_FILE`, `SEP_TRAINING_LOG_FILE`, `SEP_METRICS_FILE`, `SEP_DATASET_ROWS_FILE`, `SEP_DATASET_TENSORS_FILE`, `SEP_COLLECTION_CONFIG_FILE`), `HF_PROBE_URI_PREFIX = "hf://"`, `SEP_PROBE_SCHEMA_VERSION = 1` and `LEGACY_SEP_PROBE_SUFFIX = ".pt"`. Removes `SEP_PROBE_SUFFIX`. |
-| `SamplingProvider` protocol | `pooled_hidden_state(prompt, layers)`, `num_hidden_layers` and `model_revision`. A **breaking change** for anyone implementing the protocol (v0.x); goes in the CHANGELOG. |
+| `SamplingProvider` protocol | `pooled_hidden_state(prompt, layers)`, `check_hidden_state_request(layers)`, `num_hidden_layers`, `hidden_size`, `model_revision` and `chat_template_sha256`. A **breaking change** for anyone implementing the protocol (v0.x); goes in the CHANGELOG. A custom detector with `requires_hidden_state=True` must also implement `HiddenStateDetector.hidden_state_layers`. |
 | `vllm_flags` | Adds `--revision` and `--tokenizer-revision` (both the registry sha). |
 
 ## Threshold semantics and migration for users
@@ -575,7 +579,9 @@ sigmoid(w·x + b), the paper's `predict_proba[:, 1]` (Sec. 4; verified).
    "SEP_THRESHOLD"`.
 
 **The threshold is never loaded implicitly from the probe.** The env value is the threshold.
-The evaluator logs both values and warns when they differ.
+When SEP alone decides escalation (no escalation policy), the evaluator logs both values and
+warns when they differ. Under an escalation policy, the policy's thresholds are not compared
+with the probe's.
 
 **Migration checklist (goes in the CHANGELOG and the README):**
 
@@ -587,6 +593,9 @@ The evaluator logs both values and warns when they differ.
 | SEP on `SLM_PROVIDER=vllm_openai` | Works only for `--layers final` probes. Otherwise use `hf_transformers`. |
 | SEP on `SLM_PROVIDER=vllm` with a model not in `demo/model_registry.py` | Add a registry entry; L is read from it. |
 | Reading SEP in nats in the UI or CLI | It is now shown as a percentage, "P(high SE)". |
+| A custom `SamplingProvider` | Also implement `hidden_size`, `chat_template_sha256` and `check_hidden_state_request(layers)`. |
+| A custom detector with `requires_hidden_state=True` | Implement `HiddenStateDetector.hidden_state_layers`; otherwise building the evaluator raises `TypeError`. |
+| SEP on `SLM_PROVIDER=vllm` without `VLLM_EMBED_BASE_URL` | Building the evaluator now fails with `UnsupportedHiddenStateRequest`, instead of at the first request. Set `VLLM_EMBED_BASE_URL` or use `hf_transformers`. |
 
 ## Backward compatibility for old probes
 
@@ -620,8 +629,11 @@ All of these are done in work item 18.
   - Lines 132-134: replace the provider sentence. Its claim that a probe trained through one
     provider works through the other must go: vLLM/HF parity is unverified, and vLLM serves
     only layer-L probes.
-  - Line 698: the `SamplingProvider` member list gains `num_hidden_layers`, and the signature
+  - Line 698: the `SamplingProvider` member list gains `num_hidden_layers`, `hidden_size`,
+    `chat_template_sha256` and `check_hidden_state_request(layers)`, and the signature
     becomes `pooled_hidden_state(prompt, layers)`.
+  - "How do I add my own detector?": a detector with `requires_hidden_state=True` implements
+    `HiddenStateDetector.hidden_state_layers`.
   - New Q&A: **"Which layer and token does SEP read, and are mid layers better?"**, carrying the
     terminology correction and the Table 4 evidence above, and pointing to `metrics.json`.
   - "How do I train and use a SEP?":
@@ -1053,6 +1065,45 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
   - `test_warns_when_sep_threshold_differs_from_recommended`
 - Files: `evaluator.py`, `tests/unit/test_evaluator.py`.
 - Done when: the tests pass.
+- *As implemented:*
+  - **The protocol grows by three members, not one.** `check_compatible` needs the hidden
+    size and the chat-template hash, and the build-time capability check needs a call that
+    reads no hidden state. `SamplingProvider` (and the demo's `SLMProvider`) therefore add
+    `hidden_size`, `chat_template_sha256` and `check_hidden_state_request(layers)`. The
+    evaluator reads `model_revision`, `hidden_size` and `chat_template_sha256` only when a SEP
+    probe detector is configured; it calls `check_hidden_state_request` for any hidden-state
+    detector. The collector's
+    `AllLayerHiddenStateProvider` no longer redeclares `chat_template_sha256`.
+  - **Providers.** HF: `hidden_size` from the registry (the loader already refuses a
+    checkpoint that disagrees); `check_hidden_state_request` is `check_layers`. vLLM:
+    `hidden_size` from the registry; `check_hidden_state_request` refuses anything but
+    `(L,)`, and also refuses when `VLLM_EMBED_BASE_URL` is unset (no hidden states at all),
+    so SEP on such a provider fails when the evaluator is built, not at the first request;
+    its `pooled_hidden_state` raises the same error rather than returning `None`.
+    `chat_template_sha256` hashes the template of the tokenizer at the registry revision
+    (`--tokenizer-revision`), fetched from the Hub once on first use (no weights), through
+    the same `_hash_chat_template` helper as HF. That the vLLM server formats prompts with
+    exactly this template, rather than, for example, a processor template, is unverified
+    until a GPU run.
+  - **Order.** The capability check runs before `check_compatible`, not after as the data
+    flow above listed: on vLLM it needs no network, while the vLLM template hash downloads
+    a tokenizer, so a probe vLLM cannot serve is refused without a download. On HF the
+    check reads `num_hidden_layers` from the loaded model, so building an evaluator with
+    SEP enabled loads the weights eagerly (the template hash would load them anyway).
+    The web demo builds each `/ask` mode's evaluator once and reuses it, so this
+    preflight and its threshold report run once per mode, not on every request.
+  - **Layers.** A detector with `requires_hidden_state=True` must implement the new
+    runtime-checkable `HiddenStateDetector` protocol (`hidden_state_layers`), or the
+    evaluator raises `TypeError`; all hidden-state detectors must read the same layers,
+    since one pooled hidden state feeds them. `SemanticEntropyProbeDetector` implements it.
+  - **Answer instruction** is `Settings.answer_instruction`, the one both demo providers
+    send.
+  - **Threshold report.** When SEP decides escalation (no policy), the threshold in use is
+    logged with the probe's `recommended_threshold`: at warning level when they differ.
+    `test_backbone_mismatch_raises_before_any_sample` is parametrized over the provider
+    fields, with the answer instruction as its own test.
+  - Test fakes share `ProbeBackboneProvider` (in `tests/unit/sep_probe_fixtures.py`), and the
+    fixture probes' answer instruction is now the configured default.
 
 **13. Provenance and the benchmark run config.**
 

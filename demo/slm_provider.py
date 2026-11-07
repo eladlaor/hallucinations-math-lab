@@ -12,10 +12,9 @@ Two responsibilities, kept separate by SRP:
     hidden states at the last prompt token, one row per layer (the layer
     convention is documented in
     `hallucinations_math_lab.services.sampling_provider`). Feeds SEP (linear
-    probe). Returns None when the provider does not expose hidden states —
-    for example, plain vLLM serving in generation-only mode without a sibling
-    embed endpoint. In that case SEP cannot run; the orchestrator surfaces it
-    as `SEP: n/a` rather than failing.
+    probe). The vLLM provider without `VLLM_EMBED_BASE_URL` exposes no hidden
+    states: `pooled_hidden_state` raises `UnsupportedHiddenStateRequest`, and
+    `check_hidden_state_request` refuses SEP when the evaluator is built.
 
 Concrete implementations live in this module:
   - `VLLMOpenAIProvider` — OpenAI-compat HTTP client. Hidden states come from
@@ -101,8 +100,10 @@ class SLMProvider(Protocol):
 
     Implementations advertise the prompt-time generation backbone the
     detector pipeline runs against. Hidden-state availability is provider-
-    specific: a provider that cannot expose hidden states returns `None`
-    from `pooled_hidden_state`, and SEP gracefully reports `n/a`."""
+    specific: a provider that cannot serve a layer selection refuses it in
+    `check_hidden_state_request`. Both demo providers raise rather than return
+    `None` from `pooled_hidden_state`; `None` is allowed only for third-party
+    providers that expose no hidden states."""
 
     @property
     def model_id(self) -> str: ...
@@ -113,8 +114,15 @@ class SLMProvider(Protocol):
     @property
     def num_hidden_layers(self) -> int: ...
 
+    @property
+    def hidden_size(self) -> int: ...
+
+    @property
+    def chat_template_sha256(self) -> str: ...
+
     def sample(self, prompt: str) -> SampleSet: ...
     def greedy(self, prompt: str) -> str: ...
+    def check_hidden_state_request(self, layers: tuple[int, ...]) -> None: ...
     def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor | None: ...
 
 
@@ -125,8 +133,9 @@ class VLLMOpenAIProvider:
       - The generation endpoint at `VLLM_BASE_URL` (chat/completions).
       - Optionally, an embed endpoint at `VLLM_EMBED_BASE_URL`: a second vLLM
         server running the `embed` runner, hit via `/v1/embeddings` to return
-        the last layer's hidden state per prompt. When unset,
-        `pooled_hidden_state` returns `None`.
+        the last layer's hidden state per prompt. When unset, no hidden
+        state can be read: `check_hidden_state_request` and
+        `pooled_hidden_state` raise `UnsupportedHiddenStateRequest`.
 
     Both authenticate per `VLLM_AUTH`: a static key for a server you run, or
     a refreshing Google access token for a Vertex AI endpoint."""
@@ -172,6 +181,7 @@ class VLLMOpenAIProvider:
         else:
             self._embed_client = None
             self._embed_model_id = ""
+        self._chat_template_sha256: str | None = None
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10), reraise=True)
     def sample(self, prompt: str) -> SampleSet:
@@ -241,10 +251,51 @@ class VLLMOpenAIProvider:
         registry's KeyError names the remedy (add an entry)."""
         return get_model_entry(self.model_id).num_hidden_layers
 
-    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor | None:
+    @property
+    def hidden_size(self) -> int:
+        """Width of one hidden state, from the model registry."""
+        return get_model_entry(self.model_id).hidden_size
+
+    @property
+    def chat_template_sha256(self) -> str:
+        """SHA-256 of the chat template of the tokenizer at the registry's
+        pinned revision, which the server is launched with
+        (`--tokenizer-revision`) and is expected to format prompts with; not
+        yet verified against a running server.
+
+        The server reports no template, so the tokenizer is fetched from the
+        Hub once, on first use (no weights)."""
+        if self._chat_template_sha256 is None:
+            from transformers import AutoTokenizer
+
+            revision = self.model_revision
+            try:
+                tokenizer = AutoTokenizer.from_pretrained(self.model_id, revision=revision)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Cannot load the tokenizer of {self.model_id!r} at revision {revision!r} "
+                    f"to hash its chat template: {e!s}"
+                ) from e
+            self._chat_template_sha256 = _hash_chat_template(tokenizer, self.model_id)
+        return self._chat_template_sha256
+
+    def _require_embed_client(self) -> OpenAI:
+        """The embed client, or `UnsupportedHiddenStateRequest` when
+        `VLLM_EMBED_BASE_URL` is unset and no hidden state can be read."""
         if self._embed_client is None:
-            return None
+            raise UnsupportedHiddenStateRequest(
+                f"{self.model_id!r} is served without an embed endpoint, so no hidden states "
+                "can be read. Set VLLM_EMBED_BASE_URL to a vLLM embed server for this model, "
+                f"or use SLM_PROVIDER={ProviderKind.HF_TRANSFORMERS}."
+            )
+        return self._embed_client
+
+    def check_hidden_state_request(self, layers: tuple[int, ...]) -> None:
+        """Hidden states need the embed endpoint, and its runner pools only the
+        last layer, so only `(L,)` is served."""
         final_layer = self.num_hidden_layers
+        check_layers(layers, final_layer)
+        self._require_embed_client()
         if layers != (final_layer,):
             raise UnsupportedHiddenStateRequest(
                 f"This probe reads layers {list(layers)}; the vLLM embed runner can only pool "
@@ -252,6 +303,11 @@ class VLLMOpenAIProvider:
                 f"SLM_PROVIDER={ProviderKind.HF_TRANSFORMERS} for SEP, or train the probe with "
                 f"{SEP_LAYERS_FLAG} {SEPLayersMode.FINAL}."
             )
+
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor:
+        self.check_hidden_state_request(layers)
+        # Already checked above; called again only for the typed client handle.
+        embed_client = self._require_embed_client()
         # Embed the prompt exactly as generation sees it: chat template plus
         # the generation prompt, pooled at its last token, unnormalized: the
         # request that corresponds to HF's layer L at that token.
@@ -262,7 +318,7 @@ class VLLMOpenAIProvider:
             "use_activation": False,
         }
         try:
-            resp = self._embed_client.post(
+            resp = embed_client.post(
                 "/embeddings",
                 body=body,
                 cast_to=CreateEmbeddingResponse,
@@ -455,18 +511,17 @@ class HFTransformersProvider:
         return _text_config_num_hidden_layers(model)
 
     @property
+    def hidden_size(self) -> int:
+        """Width of one hidden state, from the model registry; the loader
+        refuses a checkpoint whose text config disagrees with it."""
+        return get_model_entry(self.model_id).hidden_size
+
+    @property
     def chat_template_sha256(self) -> str:
         """SHA-256 of the loaded tokenizer's chat template, which formats every
-        prompt and so moves every hidden state. Raises when there is none:
-        hidden states recorded for a probe must come from a chat-formatted prompt."""
+        prompt and so moves every hidden state."""
         tokenizer, _ = self._ensure_loaded()
-        template = tokenizer.chat_template
-        if not isinstance(template, str):
-            raise TypeError(
-                f"The tokenizer of {self.model_id!r} has no chat template string (got "
-                f"{type(template).__name__}), so the hashed prompt format is undefined."
-            )
-        return hashlib.sha256(template.encode()).hexdigest()
+        return _hash_chat_template(tokenizer, self.model_id)
 
     @property
     def provider_kind(self) -> ProviderKind:
@@ -538,8 +593,12 @@ class HFTransformersProvider:
                 f"prompt={prompt[:80]!r} position={token_position} model={self.model_id!r}: {e!s}"
             ) from e
 
-    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor:
+    def check_hidden_state_request(self, layers: tuple[int, ...]) -> None:
+        """Every valid selection of layers is served."""
         check_layers(layers, self.num_hidden_layers)
+
+    def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]) -> torch.Tensor:
+        self.check_hidden_state_request(layers)
         return self.hidden_states_all_layers(prompt, TokenPosition.TBG)[list(layers)]
 
 
@@ -606,6 +665,18 @@ def _generate(model: CausalLM, inputs: BatchEncoding, **kwargs: Any) -> Generate
             f"generate returned {type(out).__name__}, expected GenerateDecoderOnlyOutput."
         )
     return out
+
+
+def _hash_chat_template(tokenizer: PreTrainedTokenizerBase, model_id: str) -> str:
+    """SHA-256 of `tokenizer`'s chat template. Raises when there is none: hidden
+    states recorded for or read by a probe must come from a chat-formatted prompt."""
+    template = tokenizer.chat_template
+    if not isinstance(template, str):
+        raise TypeError(
+            f"The tokenizer of {model_id!r} has no chat template string (got "
+            f"{type(template).__name__}), so the hashed prompt format is undefined."
+        )
+    return hashlib.sha256(template.encode()).hexdigest()
 
 
 def _require_int_field(value: object, field: str) -> int:

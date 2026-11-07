@@ -29,7 +29,12 @@ from hallucinations_math_lab import (
 )
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.services.semantic_entropy_probe import default_probe_dir
-from tests.unit.sep_probe_fixtures import PROBE_HIDDEN_SIZE, probe_config, write_probe_dir
+from tests.unit.sep_probe_fixtures import (
+    PROBE_HIDDEN_SIZE,
+    ProbeBackboneProvider,
+    probe_config,
+    write_probe_dir,
+)
 
 SMALL_MODEL = "google/gemma-4-E2B-it"
 MID_MODEL = "google/gemma-4-E4B-it"
@@ -45,13 +50,12 @@ KNOWLEDGE = {
 }
 
 
-class FakeSLM:
-    """Repeats the right answer for known questions, scatters otherwise."""
+class FakeSLM(ProbeBackboneProvider):
+    """Repeats the right answer for known questions, scatters otherwise; its
+    backbone is the fixture probes' apart from the model id."""
 
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
-        self.model_revision = "fake-revision"
-        self.num_hidden_layers = 2
         self._known = KNOWLEDGE.get(model_id, {})
 
     def _answers(self, prompt: str) -> list[str]:

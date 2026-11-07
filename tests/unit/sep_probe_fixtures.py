@@ -1,6 +1,8 @@
 """Builders for small, valid SEP probe directories, shared by the detector,
 evaluator and benchmark tests. A probe written here loads exactly like one
-eval.train_sep_probe writes: `probe.safetensors` plus `probe_config.json`."""
+eval.train_sep_probe writes: `probe.safetensors` plus `probe_config.json`.
+`ProbeBackboneProvider` gives a fake sampling provider the backbone these
+probes were trained on, so the evaluator's compatibility check passes."""
 
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from hallucinations_math_lab.config import Settings
 from hallucinations_math_lab.constants import (
     SEP_PROBE_CONFIG_FILE,
     SEP_PROBE_WEIGHTS_FILE,
@@ -27,17 +30,33 @@ from hallucinations_math_lab.custom_types.sep_probe_types import (
     SEPPromptSpec,
     SEPTrainingRecord,
 )
+from hallucinations_math_lab.services.sampling_provider import check_layers
 from hallucinations_math_lab.services.sep_probe_weights import ProbeWeights, write_probe_weights
 
 PROBE_MODEL_ID = "org/model"
 PROBE_REVISION = "a" * 40
 PROBE_NUM_HIDDEN_LAYERS = 2
 PROBE_HIDDEN_SIZE = 4
-PROBE_ANSWER_INSTRUCTION = "Answer briefly."
+# The configured default, which the evaluator checks a probe against.
+PROBE_ANSWER_INSTRUCTION = Settings.model_fields["answer_instruction"].default
 PROBE_TEMPLATE_SHA256 = "b" * 64
 PROBE_RECOMMENDED_THRESHOLD = 0.4
 _N_HIGH = 5
 _N_LOW = 5
+
+
+class ProbeBackboneProvider:
+    """Base for fake sampling providers: reports the backbone and prompt the
+    probes built here were trained on, and serves any valid layers."""
+
+    model_id: str = PROBE_MODEL_ID
+    model_revision: str = PROBE_REVISION
+    num_hidden_layers: int = PROBE_NUM_HIDDEN_LAYERS
+    hidden_size: int = PROBE_HIDDEN_SIZE
+    chat_template_sha256: str = PROBE_TEMPLATE_SHA256
+
+    def check_hidden_state_request(self, layers: tuple[int, ...]) -> None:
+        check_layers(layers, self.num_hidden_layers)
 
 
 def probe_config(
