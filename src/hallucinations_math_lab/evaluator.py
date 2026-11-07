@@ -211,9 +211,7 @@ def _build_default_detectors(enabled: list[DetectorName], model_id: str) -> list
         elif name == DetectorName.DISCRETE_SEMANTIC_ENTROPY:
             detectors.append(DiscreteSemanticEntropyDetector())
         elif name == DetectorName.SEMANTIC_ENTROPY_PROBE:
-            detectors.append(
-                SemanticEntropyProbeDetector(probe_path=_resolve_sep_probe_path(model_id))
-            )
+            detectors.append(SemanticEntropyProbeDetector(_resolve_sep_probe_dir(model_id)))
         else:
             raise ValueError(
                 f"Detector {name!s} is in ENABLED_DETECTORS but unknown to the evaluator."
@@ -221,18 +219,14 @@ def _build_default_detectors(enabled: list[DetectorName], model_id: str) -> list
     return detectors
 
 
-def _resolve_sep_probe_path(model_id: str) -> Path:
-    """SEP_PROBE_PATH if set, else the default probe for `model_id` — the model
-    actually being evaluated, which in a multi-model sweep is not
-    VLLM_MODEL_ID. The detector raises FileNotFoundError on construction if
-    the file does not exist, so the misconfiguration surfaces before the
-    first request."""
-    from hallucinations_math_lab.services.semantic_entropy_probe import default_probe_path
+def _resolve_sep_probe_dir(model_id: str) -> Path:
+    """The probe directory SEP_PROBE_PATH names (a path or an `hf://` repo), else
+    the default for `model_id` — the model actually being evaluated, which in a
+    multi-model sweep is not VLLM_MODEL_ID. A missing or legacy `.pt` probe
+    raises here, so the misconfiguration surfaces before the first request."""
+    from hallucinations_math_lab.services.semantic_entropy_probe import resolve_probe_source
 
-    settings = get_settings()
-    if settings.sep_probe_path:
-        return Path(settings.sep_probe_path)
-    return default_probe_path(model_id)
+    return resolve_probe_source(get_settings().sep_probe_path, model_id)
 
 
 class ResponseEvaluator:
@@ -320,7 +314,9 @@ class ResponseEvaluator:
 
             sample_set = self._slm.sample(prompt) if need_samples else None
             greedy = self._slm.greedy(prompt)
-            # The current SEP probe reads the last layer, index L.
+            # Only the last layer, index L, is requested, so only a probe whose
+            # features.layers is (L,) can be served; any other probe fails its
+            # shape check in score().
             pooled_hidden_state = (
                 self._slm.pooled_hidden_state(prompt, layers=(self._slm.num_hidden_layers,))
                 if need_hidden_state

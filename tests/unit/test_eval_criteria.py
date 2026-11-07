@@ -13,6 +13,8 @@ Contract pinned here:
   - TriviaQA slices are bounds-checked; probe provenance rejects overlap.
 """
 
+import json
+
 import numpy as np
 import pytest
 from sklearn.metrics import roc_auc_score
@@ -27,8 +29,8 @@ from eval.escalation_uplift import (
     uplift_report,
 )
 from eval.inference_stats import auroc, mcnemar_exact_p, paired_bootstrap
-from eval.sep_probe_provenance import assert_disjoint, write_training_ids
-from hallucinations_math_lab.constants import AnswerSource, DetectorName
+from eval.sep_probe_provenance import assert_disjoint, training_ids_path, write_training_ids
+from hallucinations_math_lab.constants import SEP_TRAIN_IDS_FILE, AnswerSource, DetectorName
 
 SE = str(DetectorName.SEMANTIC_ENTROPY)
 PE = str(DetectorName.PREDICTIVE_ENTROPY)
@@ -372,9 +374,23 @@ def test_slice_bounds_are_checked():
 
 
 def test_provenance_rejects_overlap_and_accepts_disjoint_ids(tmp_path):
-    probe = tmp_path / "probe.pt"
+    probe = tmp_path / "probe"
+    probe.mkdir()
     write_training_ids(probe, ["q1", "q2"], "m", tmp_path / "calib.jsonl")
 
     assert_disjoint(probe, ["q3", "q4"])
     with pytest.raises(RuntimeError, match="1 benchmark questions were used"):
         assert_disjoint(probe, ["q2", "q3"])
+
+
+def test_provenance_ignores_a_stale_sidecar_beside_the_probe_dir(tmp_path):
+    # The pre-classifier `<probe>.train_ids.json` sat beside the probe. A
+    # leftover one must not stand in for the directory probe's own ids.
+    probe = tmp_path / "probe"
+    probe.mkdir()
+    write_training_ids(probe, ["q1"], "m", tmp_path / "calib.jsonl")
+    (tmp_path / "probe.train_ids.json").write_text(json.dumps({"question_ids": ["other"]}))
+
+    assert training_ids_path(probe) == probe / SEP_TRAIN_IDS_FILE
+    with pytest.raises(RuntimeError, match="1 benchmark questions were used"):
+        assert_disjoint(probe, ["q1"])

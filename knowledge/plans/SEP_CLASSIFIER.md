@@ -1003,6 +1003,46 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Files: `services/semantic_entropy_probe.py` (rewritten; no sklearn import),
   `tests/unit/test_semantic_entropy_probe.py`.
 - Done when: the tests pass.
+- *As implemented:*
+  - **API.** `resolve_probe_source(sep_probe_path, model_id) -> Path` (no fallback between
+    sources), `parse_hf_probe_uri` -> `HubProbeRef`, `download_probe`, `default_probe_dir`,
+    `load_probe_dir` -> `LoadedSEPProbe`, and `SemanticEntropyProbeDetector(probe_dir)` with
+    `probe_dir`, `config`, `hidden_state_layers` and a keyword-only `check_compatible(...)`.
+    It raises `SEPProbeMismatchError` listing every mismatched field with both values;
+    `ObsoleteSEPProbeError` and `SEPProbeMismatchError` are `ValueError`s. The six mismatch
+    tests are one parametrized `test_mismatch_raises_naming_both` with those six ids. The score
+    is `torch.sigmoid` of the flattened `[len(layers), d]` state against the safetensors
+    weights (through `services/sep_probe_weights.py`); the weight count must equal
+    len(layers) × hidden_size at load.
+  - **Hub.** `hf://a/b` without `@revision` downloads the repo's default branch;
+    `snapshot_download` fetches the five probe-directory files (`SEP_PROBE_DIR_FILES`).
+    `huggingface-hub` is now a core dependency. Download errors are re-raised naming the
+    `hf://` reference. When the Hub is unreachable, `snapshot_download` serves the cached
+    snapshot without raising, so an unpinned reference may load an older probe; the
+    resolved commit (the snapshot folder name) is logged, and item 13's run config should
+    record that commit, not just the reference.
+  - **`.pt` message.** No probe is published yet, so the hint names the `hf://` form rather
+    than a published repo; item 18 adds the real reference once one exists. The `.pt`
+    message is the Ridge explanation followed by the module's one retrain/Hub hint.
+  - **Other regular files** still raise `ObsoleteSEPProbeError`, but the message says
+    `SEP_PROBE_PATH` must be a probe directory or an `hf://` reference rather than calling
+    the file a Ridge probe, and names the parent directory when it holds
+    `probe_config.json` (a file picked from inside a probe directory).
+  - **Callers ported only as far as the gate needs.** The evaluator resolves through
+    `resolve_probe_source`; `run_benchmark`'s guard and sweep preflight use the probe
+    directory (the preflight now raises the loader's missing-directory and `.pt` errors).
+  - **Leakage guard path pulled forward from item 13.** `eval/sep_probe_provenance.py` now
+    reads the training ids from `<probe dir>/train_ids.json`, where the trainer writes them.
+    Left at the old `<probe stem>.train_ids.json` path, a directory probe at
+    `data/probes/<slug>/` would have been checked against a stale sidecar from an old
+    `data/probes/<slug>.pt` and could pass silently. The file is still read by key, not
+    validated as `SEPTrainIds`; item 13 does that and the run-config fields.
+  - **Only last-layer probes can be served until item 12.** The evaluator still asks the
+    provider for layer L alone, so a probe trained with `--layers auto` or `<a>-<b>` loads
+    but fails the shape check at its first `score()`.
+  - `tests/unit/sep_probe_fixtures.py` writes a small valid probe directory for the
+    detector, benchmark and model-comparison tests. `.env.example` and the `sep_probe_path`
+    comment now state the directory and `hf://` forms.
 
 **12. Evaluator wiring.**
 

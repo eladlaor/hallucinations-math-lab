@@ -28,14 +28,11 @@ from hallucinations_math_lab import (
     TokenLogprob,
 )
 from hallucinations_math_lab.config import get_settings
-from hallucinations_math_lab.services.semantic_entropy_probe import (
-    SEPProbe,
-    default_probe_path,
-)
+from hallucinations_math_lab.services.semantic_entropy_probe import default_probe_dir
+from tests.unit.sep_probe_fixtures import PROBE_HIDDEN_SIZE, probe_config, write_probe_dir
 
 SMALL_MODEL = "google/gemma-4-E2B-it"
 MID_MODEL = "google/gemma-4-E4B-it"
-HIDDEN_DIM = 4
 QUESTIONS = [
     {"id": "q1", "question": "Capital of France?", "ground_truth_aliases": ["Paris"]},
     {"id": "q2", "question": "Author of 1984?", "ground_truth_aliases": ["Orwell"]},
@@ -75,7 +72,7 @@ class FakeSLM:
         return self._answers(prompt)[0]
 
     def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]):
-        return torch.zeros(len(layers), HIDDEN_DIM)
+        return torch.zeros(len(layers), PROBE_HIDDEN_SIZE)
 
 
 class EqualityNLI:
@@ -150,17 +147,22 @@ def test_sweep_refuses_one_explicit_probe_path_for_several_models(tmp_path, sett
 def test_sweep_checks_every_models_probe_before_running_anything(tmp_path, settings_env):
     settings_env.setenv("ENABLED_DETECTORS", '["semantic_entropy_probe","semantic_entropy"]')
     settings_env.chdir(tmp_path)
-    small_probe = default_probe_path(SMALL_MODEL)
-    small_probe.parent.mkdir(parents=True)
-    torch.save(SEPProbe(HIDDEN_DIM).state_dict(), small_probe)
+    small_probe = write_probe_dir(
+        default_probe_dir(SMALL_MODEL), probe_config(model_id=SMALL_MODEL)
+    )
     write_training_ids(small_probe, ["other"], SMALL_MODEL, tmp_path / "calib.jsonl")
     # No probe for MID_MODEL: the sweep must fail before scoring SMALL_MODEL.
 
-    with pytest.raises(FileNotFoundError, match="gemma-4-e4b-it"):
+    with pytest.raises(FileNotFoundError, match="gemma-4-e4b-it") as excinfo:
         run_sweep(
             _questions_file(tmp_path), tmp_path / "out", judge=False, evaluator_factory=_evaluator
         )
     assert not (tmp_path / "out").exists()
+    message = str(excinfo.value)
+    assert f"VLLM_MODEL_ID={MID_MODEL}" in message
+    assert "ENABLED_DETECTORS" in message
+    # A sweep refuses SEP_PROBE_PATH, so the hint must not suggest it.
+    assert "SEP_PROBE_PATH" not in message
 
 
 def test_default_sep_probe_follows_the_providers_model_not_vllm_model_id(tmp_path, settings_env):
@@ -168,14 +170,12 @@ def test_default_sep_probe_follows_the_providers_model_not_vllm_model_id(tmp_pat
     settings_env.setenv("VLLM_MODEL_ID", SMALL_MODEL)
     settings_env.setenv("ENABLED_DETECTORS", '["semantic_entropy_probe"]')
     settings_env.setenv("ESCALATION_DETECTOR", "semantic_entropy_probe")
-    probe = default_probe_path(MID_MODEL)
-    probe.parent.mkdir(parents=True)
-    torch.save(SEPProbe(HIDDEN_DIM).state_dict(), probe)
+    probe = write_probe_dir(default_probe_dir(MID_MODEL), probe_config(model_id=MID_MODEL))
 
     evaluator = ResponseEvaluator(slm=FakeSLM(MID_MODEL))
 
     (sep,) = evaluator.detectors
-    assert sep.probe_path == probe  # type: ignore[attr-defined]
+    assert sep.probe_dir == probe  # type: ignore[attr-defined]
 
 
 def _results(tmp_path: Path, model_id: str, questions: list[dict] = QUESTIONS) -> Path:

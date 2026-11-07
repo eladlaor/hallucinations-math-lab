@@ -124,9 +124,10 @@ class Settings(BaseSettings):
     )
     escalation_detector: DetectorName = Field(default=DetectorName.SEMANTIC_ENTROPY)
 
-    # SEP probe weights. Default is the per-model slug under data/probes/.
-    # Resolved per evaluated model when the evaluator is built. Must stay unset
-    # for a multi-model sweep (one file cannot serve several models).
+    # SEP probe directory: a local path or hf://<owner>/<repo>[@<revision>]. Unset
+    # means data/probes/<model slug>/, resolved per evaluated model when the
+    # evaluator is built. Must stay unset for a multi-model sweep (one probe
+    # cannot serve several models).
     sep_probe_path: str = Field(default="")
 
     @field_validator("target_model_ids")

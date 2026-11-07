@@ -871,6 +871,7 @@ name = "hallucinations-math-lab"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "huggingface-hub" },
     { name = "numpy" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -938,6 +939,7 @@ requires-dist = [
     { name = "google-genai", marker = "extra == 'judge'", specifier = ">=1.0" },
     { name = "hallucinations-math-lab", extras = ["demo", "judge", "eval", "deploy", "web"], marker = "extra == 'all'" },
     { name = "httpx2", marker = "extra == 'dev'" },
+    { name = "huggingface-hub", specifier = ">=1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openai", marker = "extra == 'demo'", specifier = ">=3.0" },

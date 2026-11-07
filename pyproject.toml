@@ -22,6 +22,8 @@ dependencies = [
     "numpy>=1.26",
     # SEP datasets and probes store tensors as safetensors, which cannot carry code.
     "safetensors>=0.4",
+    # SEP_PROBE_PATH=hf://... downloads a probe directory from the Hub.
+    "huggingface-hub>=1.0",
 ]
 
 [project.optional-dependencies]

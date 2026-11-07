@@ -5,7 +5,7 @@ in milliseconds. The SLM answers consistently for questions it "knows" and
 scatters for the ones it doesn't, so SE should rank perfectly (AUROC 1.0).
 
 Also pins the leakage guard: a SEP probe may not be evaluated on questions
-listed in its training-id sidecar, and a probe without a sidecar is refused.
+listed in its training-id file, and a probe without one is refused.
 """
 
 import json
@@ -26,13 +26,10 @@ from hallucinations_math_lab import (
     SemanticEntropyDetector,
     TokenLogprob,
 )
-from hallucinations_math_lab.services.semantic_entropy_probe import (
-    SemanticEntropyProbeDetector,
-    SEPProbe,
-)
+from hallucinations_math_lab.services.semantic_entropy_probe import SemanticEntropyProbeDetector
+from tests.unit.sep_probe_fixtures import PROBE_HIDDEN_SIZE, write_probe_dir
 
 KNOWN_ANSWERS = {"Capital of France?": "Paris", "Author of 1984?": "Orwell"}
-HIDDEN_DIM = 4
 
 
 class ScatteringSLM:
@@ -65,7 +62,7 @@ class ScatteringSLM:
 
 class HiddenStateSLM(ScatteringSLM):
     def pooled_hidden_state(self, prompt: str, layers: tuple[int, ...]):
-        return torch.zeros(len(layers), HIDDEN_DIM)
+        return torch.zeros(len(layers), PROBE_HIDDEN_SIZE)
 
 
 class EqualityNLI:
@@ -160,11 +157,10 @@ def test_benchmark_without_a_judge_records_no_judge_answer(tmp_path):
     assert all(row["judge_answer"] is None for row in rows)
 
 
-def _probe_evaluator(probe_path: Path) -> ResponseEvaluator:
-    torch.save(SEPProbe(HIDDEN_DIM).state_dict(), probe_path)
+def _probe_evaluator(probe_dir: Path) -> ResponseEvaluator:
     return ResponseEvaluator(
         slm=HiddenStateSLM(),
-        detectors=[SemanticEntropyProbeDetector(probe_path=probe_path)],
+        detectors=[SemanticEntropyProbeDetector(write_probe_dir(probe_dir))],
         escalation_detector=DetectorName.SEMANTIC_ENTROPY_PROBE,
         escalation_threshold=1.0,
     )
@@ -173,9 +169,9 @@ def _probe_evaluator(probe_path: Path) -> ResponseEvaluator:
 def test_benchmark_refuses_questions_the_probe_was_trained_on(tmp_path):
     questions = tmp_path / "questions.jsonl"
     _write_questions(questions)
-    probe_path = tmp_path / "probe.pt"
-    evaluator = _probe_evaluator(probe_path)
-    write_training_ids(probe_path, ["q2", "unrelated"], "fake-slm", tmp_path / "calib.jsonl")
+    probe_dir = tmp_path / "probe"
+    evaluator = _probe_evaluator(probe_dir)
+    write_training_ids(probe_dir, ["q2", "unrelated"], "fake-slm", tmp_path / "calib.jsonl")
 
     with pytest.raises(RuntimeError, match="used to train the SEP probe"):
         run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator)
@@ -185,9 +181,9 @@ def test_benchmark_refuses_questions_the_probe_was_trained_on(tmp_path):
 def test_benchmark_accepts_a_probe_trained_on_other_questions(tmp_path):
     questions = tmp_path / "questions.jsonl"
     _write_questions(questions)
-    probe_path = tmp_path / "probe.pt"
-    evaluator = _probe_evaluator(probe_path)
-    write_training_ids(probe_path, ["other-1", "other-2"], "fake-slm", tmp_path / "calib.jsonl")
+    probe_dir = tmp_path / "probe"
+    evaluator = _probe_evaluator(probe_dir)
+    write_training_ids(probe_dir, ["other-1", "other-2"], "fake-slm", tmp_path / "calib.jsonl")
 
     run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator, limit=1)
     assert len((tmp_path / "out.jsonl").read_text().splitlines()) == 1
@@ -196,7 +192,7 @@ def test_benchmark_accepts_a_probe_trained_on_other_questions(tmp_path):
 def test_benchmark_refuses_a_probe_without_provenance(tmp_path):
     questions = tmp_path / "questions.jsonl"
     _write_questions(questions)
-    evaluator = _probe_evaluator(tmp_path / "probe.pt")
+    evaluator = _probe_evaluator(tmp_path / "probe")
 
-    with pytest.raises(RuntimeError, match="no training-id sidecar"):
+    with pytest.raises(RuntimeError, match="no training-id file"):
         run_benchmark(questions, tmp_path / "out.jsonl", judge=False, evaluator=evaluator)

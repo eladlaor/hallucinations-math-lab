@@ -71,8 +71,9 @@ from hallucinations_math_lab.constants import LOG_EXTRA_KEY, AnswerSource, Detec
 from hallucinations_math_lab.custom_types.domain_types import DetectionResult
 from hallucinations_math_lab.services.semantic_entropy_probe import (
     SemanticEntropyProbeDetector,
-    default_probe_path,
+    default_probe_dir,
     model_slug,
+    resolve_probe_source,
 )
 
 RESULTS_SUFFIX = ".jsonl"
@@ -102,7 +103,7 @@ def guard_probe_leakage(evaluator: ResponseEvaluator, questions: list[dict[str, 
     ids = [str(q[ID_FIELD]) for q in questions if q.get(ID_FIELD) is not None]
     for detector in evaluator.detectors:
         if isinstance(detector, SemanticEntropyProbeDetector):
-            assert_disjoint(detector.probe_path, ids)
+            assert_disjoint(detector.probe_dir, ids)
 
 
 def _judge_answer(evaluator: ResponseEvaluator, prompt: str, result: DetectionResult) -> str | None:
@@ -218,19 +219,22 @@ def _preflight_sweep_probes(model_ids: list[str], questions: list[dict[str, Any]
         raise ValueError(
             f"SEP_PROBE_PATH={settings.sep_probe_path!r} names one probe, but a sweep runs "
             f"{len(model_ids)} models and each needs its own. Unset SEP_PROBE_PATH so every "
-            "model uses data/probes/<model slug>.pt."
+            "model uses data/probes/<model slug>/."
         )
     ids = [str(q[ID_FIELD]) for q in questions if q.get(ID_FIELD) is not None]
     for model_id in model_ids:
-        probe_path = default_probe_path(model_id)
-        if not probe_path.is_file():
+        try:
+            # Refuses a legacy .pt probe (ObsoleteSEPProbeError) as it is.
+            directory = resolve_probe_source("", model_id)
+        except FileNotFoundError as e:
             raise FileNotFoundError(
-                f"No SEP probe for {model_id} at {probe_path}. Collect a dataset with "
-                f"VLLM_MODEL_ID={model_id} uv run python -m eval.collect_sep_dataset, then "
-                "train with uv run python -m eval.train_sep_probe --dataset DIR, or drop "
-                "semantic_entropy_probe from ENABLED_DETECTORS."
-            )
-        assert_disjoint(probe_path, ids)
+                f"No SEP probe for {model_id} at {default_probe_dir(model_id)}. Collect a "
+                f"dataset with `VLLM_MODEL_ID={model_id} uv run python -m "
+                "eval.collect_sep_dataset`, then train with `uv run python -m "
+                "eval.train_sep_probe --dataset DIR`, or drop semantic_entropy_probe from "
+                "ENABLED_DETECTORS."
+            ) from e
+        assert_disjoint(directory, ids)
 
 
 def run_sweep(

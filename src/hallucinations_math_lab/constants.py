@@ -80,11 +80,15 @@ SE_NLI_INPUT_TEMPLATE: Final[str] = "{question} {answer}"
 # `SampleSet.prompt` keeps the bare question; only the model sees this.
 ANSWER_MESSAGE_TEMPLATE: Final[str] = "{instruction}\nQuestion: {question}"
 
-# SEP probes: one per model. eval.train_sep_probe writes the directory SEP_PROBE_DIR/<model slug>/;
-# the detector's legacy default SEP_PROBE_DIR/<model slug>.pt (unless SEP_PROBE_PATH says
-# otherwise) stays only until the detector reads probe directories.
+# SEP probes: one directory per model, SEP_PROBE_DIR/<model slug>/, written by
+# eval.train_sep_probe and read unless SEP_PROBE_PATH names a directory or a Hub repo.
 SEP_PROBE_DIR: Final[str] = "data/probes"
-SEP_PROBE_SUFFIX: Final[str] = ".pt"
+# SEP_PROBE_PATH=hf://<owner>/<repo>[@<revision>] loads a probe directory from the Hub.
+HF_PROBE_URI_PREFIX: Final[str] = "hf://"
+HF_PROBE_REVISION_SEPARATOR: Final[str] = "@"
+HF_REPO_ID_SEPARATOR: Final[str] = "/"
+# The pre-classifier Ridge probe's file suffix: such a probe is refused, never loaded.
+LEGACY_SEP_PROBE_SUFFIX: Final[str] = ".pt"
 # Model id -> filesystem-safe slug: lowercase, runs of other characters become "-".
 MODEL_SLUG_PATTERN: Final[str] = r"[^a-z0-9]+"
 MODEL_SLUG_SEPARATOR: Final[str] = "-"
@@ -173,6 +177,14 @@ SEP_PROBE_WEIGHTS_FILE: Final[str] = "probe.safetensors"
 SEP_PROBE_CONFIG_FILE: Final[str] = "probe_config.json"
 SEP_TRAIN_IDS_FILE: Final[str] = "train_ids.json"
 SEP_METRICS_FILE: Final[str] = "metrics.json"
+# Every file of a probe directory: what a Hub download fetches.
+SEP_PROBE_DIR_FILES: Final[tuple[str, ...]] = (
+    SEP_PROBE_WEIGHTS_FILE,
+    SEP_PROBE_CONFIG_FILE,
+    SEP_TRAIN_IDS_FILE,
+    SEP_TRAINING_LOG_FILE,
+    SEP_METRICS_FILE,
+)
 SEP_PROBE_SCHEMA_VERSION: Final[int] = 1
 # probe.safetensors: tensor names, and the header metadata naming the format.
 SEP_PROBE_WEIGHT_TENSOR: Final[str] = "weight"
