@@ -90,8 +90,8 @@ destructive before it.
 - [x] **"Discrete SE" naming.** Done 2026-11-03: `semantic_entropy` is now likelihood-weighted; the count-based estimator is `discrete_semantic_entropy`. `p(c)=|c|/N` ignores sequence likelihoods.
   - Call it "discrete SE" everywhere.
   - Add probability-weighted SE from the logprobs already collected.
-- [ ] **The SEP probe does not match Kossen et al.**
-  - It uses unstandardized Ridge regression on raw last-layer SE, reported as Pearson
+- [x] **The SEP probe does not match Kossen et al.** Done: [`SEP_CLASSIFIER.md`](SEP_CLASSIFIER.md). SEP is now a logistic classifier on best-split binarized discrete SE, with a layer and token-position sweep, nested-CV window selection, AUROC, and its own `SEP_THRESHOLD`. Its GPU-only assumptions are listed in that plan's "What needs a real GPU run".
+  - It used unstandardized Ridge regression on raw last-layer SE, reported as Pearson
     r. The paper trains a logistic classifier on binarized SE, with a layer sweep,
     and reports AUROC.
   - **Decided (2026-11-05): implement the paper's recipe.** Binarize SE at a
@@ -121,8 +121,24 @@ destructive before it.
   been trained or published, so nobody can try SEP without a GPU run first. Ship
   the weights, a backbone-pinned config, the training record, held-out metrics,
   a model card, and the calibration dataset. Plan:
-  [`PUBLISHED_SEP_PROBE.md`](PUBLISHED_SEP_PROBE.md). Do it right after switching
-  SEP to the classifier recipe and the B2 label fixes.
+  [`PUBLISHED_SEP_PROBE.md`](PUBLISHED_SEP_PROBE.md). The code is done (the
+  classifier recipe, the dataset export, `hf://` loading and the publish
+  script); what remains is the GPU run (PSP item 7), which needs the owner's
+  Hub namespace and Gemma-license decisions.
+- [ ] **Serving SLT probes.** The collection and the sweep cover the
+  second-last-token position, but the loader refuses an SLT probe in v1:
+  serving one needs the greedy answer passed through to the hidden-state read.
+- [ ] **`eval/check_hidden_state_parity.py`.** Automate the HF-vs-vLLM
+  hidden-state check (cosine similarity at TBG, agreement of probe
+  probabilities and AUROC; item 7 of SEP_CLASSIFIER's "What needs a real GPU
+  run"), recording the result in `metrics.json["provider_parity"]`.
+- [ ] **A resumable one-command release orchestrator**
+  (`eval/release_sep_probe.py`) wrapping collect → train → benchmark → score →
+  publish.
+- [ ] **A vLLM path for non-final layers.** The embed runner pools only the
+  last layer. Options: an out-of-tree model plugin returning intermediate
+  hidden states, or an HF-transformers sidecar. Pending an owner decision,
+  after the first sweep shows whether the chosen window is near layer L.
 - [ ] **Library settings leak into consumers.** `config.py` has no `env_prefix`, so a
   consumer's `MAX_TOKENS=4096` breaks `NLIScorer()`.
   - Use `env_prefix="HML_"`.
@@ -185,10 +201,15 @@ destructive before it.
   - A missing hidden state is said to degrade to "SEP: n/a", but it raises.
   - SEP probe loading is called lazy, but it is eager.
   - The Dockerfile is said to use `model_flags.py`, but it uses `launch.py`.
+- [ ] Glossary entries for the SEP classifier (deferred from
+  [`SEP_CLASSIFIER.md`](SEP_CLASSIFIER.md) item 18): token position (TBG, SLT)
+  vs layer, the layer-index convention, best-split binarization, linear probe
+  vs linear classifier, nested CV, p(high SE).
 - [ ] `HFTransformersProvider._device` is dead code.
 - [ ] `NLIScorer._ensure_loaded` has no lock.
 - [ ] `serving/launch.py --help` crashes when `MODEL_ID` is unset.
-- [ ] `SEP_PROBE_PATH` is missing from `.env.example`.
+- [x] `SEP_PROBE_PATH` is missing from `.env.example`. It is now documented
+  there with the directory and `hf://` forms.
 - [ ] `cloudbuild.googleapis.com` is missing from `apis.tf`, and `cloudbuild.yaml` uses
   the default 10-minute timeout.
 - [ ] The fixed default `vertex_endpoint_id` (1000000001) can collide between stacks.

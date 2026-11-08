@@ -115,9 +115,21 @@ Two caveats that eat into the favorable latency number:
 
 **Short answer:** No: SEP learns to imitate SE, so it inherits SE's errors, and it only works on the one model it was trained on.
 
-**What SEP is, first.** Semantic Entropy Probe. Instead of generating 10 answers and clustering them every time (slow, expensive), you train a much simpler model once, offline: a single linear layer that looks at the LLM's internal state right after reading the *question* (before generating any answer), and tries to predict what the Semantic Entropy *would have been* if you'd done the full expensive process. Once trained, using it at inference time is just one fast matrix multiplication — cheap, like Predictive Entropy.
+**What SEP is, first.** Semantic Entropy Probe. Instead of generating 10 answers and clustering them every time (slow, expensive), you train a much simpler model once, offline: a logistic classifier that looks at the LLM's internal state right after reading the *question* (before generating any answer), and predicts whether Semantic Entropy *would have been* high if you'd done the full expensive process. Its score is that probability, p(high SE), in [0, 1]: not SE in nats, and not a probability that the answer is wrong. Once trained, using it at inference time is one fast dot product and a sigmoid — cheap, like Predictive Entropy.
 
-**Why it "inherits SE's mistakes."** To train this probe, you need training examples of (question, correct SE score) pairs — and the "correct SE score" for each training example was itself computed using the full, expensive, NLI-based Semantic Entropy process from caveat #1. So if that process is sometimes wrong or noisy (per caveats 1–3), the probe is trained to imitate those exact wrong/noisy numbers. It can't be more accurate than its own training labels — it's learning to mimic SE, flaws included, not learning some purer ground truth.
+**Why it "inherits SE's mistakes."** To train this probe, you need training examples of (question, SE label) pairs — and each label was itself computed using the full, expensive, NLI-based Semantic Entropy process from caveat #1. So if that process is sometimes wrong or noisy (per caveats 1–3), the probe is trained to imitate those exact wrong/noisy labels. It can't be more accurate than its own training labels — it's learning to mimic SE, flaws included, not learning some purer ground truth.
+
+**What exactly does it imitate?** Not SE itself, but *binarized discrete* SE: the 10-sample, count-based SE (each cluster's share of the samples), split into high and low at the point that best separates the two groups. The repo's SE detector defaults to the likelihood-weighted estimator, so SEP's target and the SE detector's score are related but not the same number.
+
+**What else is it tied to?**
+
+- **One backbone at one revision.** The probe records the model id, the exact Hub commit, the layer count and the hidden size, and refuses to score a model that differs in any of them. A re-uploaded checkpoint at a new commit needs a new probe.
+- **One prompt.** It also records the brief-answer instruction and a hash of the chat template, and refuses a mismatch: a changed prompt moves the internal state the probe reads.
+- **Not the paper's reading position.** Kossen et al. read the token before generation of a plain-text `...Answer:` prompt. Ours is the last token of the Gemma chat template, the opening of the model's turn. Whether that position carries the same signal is unverified until the first GPU run.
+
+**Do the two providers give the same hidden states?** Unverified. The vLLM embed runner can serve only a probe that reads the last layer, and whether its vectors match the in-process transformers ones within tolerance has not been measured.
+
+**Is `SEP_THRESHOLD=0.5` calibrated?** No. 0.5 is the classifier's own decision boundary, a placeholder for escalation. Start from the probe's `recommended_threshold` (chosen on held-out folds of the calibration data), or calibrate it on a dev slice with `eval/calibrate_threshold.py`.
 
 **What "generalization gap" means.** "Generalization" = does something that works on the data you tested it on also work on new, different data it hasn't seen. The probe is trained on the internal numerical representations ("hidden states") of one specific model — say, Gemma 4 E4B. Those internal representations are specific to that model's architecture and training — a different model (even a same-family model of a different size) organizes its internal "thoughts" differently. So a probe trained on Gemma 4 E4B's hidden states is essentially useless if you swap in a different model — you'd have to retrain it from scratch.
 

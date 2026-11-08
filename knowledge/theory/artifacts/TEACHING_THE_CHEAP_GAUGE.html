@@ -417,6 +417,7 @@
   <p class="eyebrow">hallucinations-math-lab · detector notes</p>
   <h1>Teaching the Cheap Gauge</h1>
   <p class="standfirst">Semantic Entropy works by asking the model ten times. A probe learns to guess its answer from one. This is the walk from one to the other — and specifically, what those <em>(hidden state → SE value)</em> pairs actually are.</p>
+  <p class="lede"><strong>Note: this page describes the earlier recipe.</strong> The probe here is a ridge regression on the last layer, predicting SE in nats. The repo's SEP now follows Kossen et al.: a logistic classifier on SE split into high and low, reading a window of layers chosen by a sweep, whose score is p(high SE). The (hidden state → SE) pairs below are still how the training data is built; for the current fit, see the walkthrough's section "How does SEP get SE's signal from one forward pass?" (<code>knowledge/theory/SEMANTIC_ENTROPY_WALKTHROUGH.md</code>).</p>
 </header>
 
 <section>

@@ -26,6 +26,9 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 - [How do I evaluate one model?](#how-do-i-evaluate-one-model)
 - [How do I compare several models?](#how-do-i-compare-several-models)
 - [How do I train and use a Semantic Entropy Probe?](#how-do-i-train-and-use-a-semantic-entropy-probe)
+  - [Which layer and token does SEP read, and are mid layers better?](#which-layer-and-token-does-sep-read-and-are-mid-layers-better)
+  - [How does this SEP differ from the paper?](#how-does-this-sep-differ-from-the-paper)
+  - [What changed for an existing SEP setup?](#what-changed-for-an-existing-sep-setup)
 - [How do I score samples from my own model?](#how-do-i-score-samples-from-my-own-model)
 - [How do I add my own detector?](#how-do-i-add-my-own-detector)
 - [What can I experiment with?](#what-can-i-experiment-with)
@@ -58,7 +61,7 @@ same signal without the repeated sampling.
 | Detector | What it reads | Cost |
 |---|---|---|
 | **SE** — Semantic Entropy ([Farquhar et al., *Nature* 2024](https://www.nature.com/articles/s41586-024-07421-0)) | how many *different meanings* appear across N samples | N generations + NLI checks |
-| **SEP** — Semantic Entropy Probes ([Kossen et al., 2024](https://arxiv.org/abs/2406.15927)) | one hidden state of the model, through a trained linear probe | one extra matrix multiply |
+| **SEP** — Semantic Entropy Probes ([Kossen et al., 2024](https://arxiv.org/abs/2406.15927)) | p(high SE) from a logistic probe over the model's hidden states, before it answers | one extra dot product |
 | **PE** — Predictive Entropy | the token probabilities of the samples | free (a by-product of generation) |
 
 **The two measurements this repo produces:**
@@ -129,9 +132,14 @@ name, not only for vLLM.
   server running the embed runner, set in `VLLM_EMBED_BASE_URL`. Setup is in
   the [DevOps Guide](knowledge/usage_guides/DEVOPS_GUIDE.md).
 
-Both providers feed SEP the same input (the hidden state at the last token
-of the chat-formatted prompt), so a probe trained through one works through
-the other — but only for the same model.
+Both providers read SEP's input at the same token, the last token of the
+chat-formatted prompt, and both load the registry's pinned checkpoint. But
+the vLLM embed runner can serve only a probe that reads the **last layer**
+(one trained with `--layers final`), and whether its vectors match the
+in-process ones within tolerance is unverified until the first GPU run.
+Collecting a probe's training data (`eval.collect_sep_dataset`) needs
+`hf_transformers`, which exposes every layer; the fit itself runs on CPU
+from the collected dataset.
 
 **The judge** is separate from the model under test: `JUDGE_MODEL_ID`
 (default `gemini-3.5-flash-lite`), Gemini on Vertex AI through the
@@ -360,17 +368,25 @@ works and when it silently fails.
 
 ### Semantic Entropy Probe (SEP) — SE from one forward pass
 
-- **What it measures.** A single linear layer over the model's last-layer
-  hidden state at the final prompt token, trained to predict SE. Its output
-  is in nats, so SE's threshold carries over.
+- **What it measures.** p(high SE): the probability that the ten-sample SE
+  would land above a split point, read by a logistic classifier from the
+  model's hidden states at the final prompt token, before any answer is
+  generated. Following [Kossen et al.](https://arxiv.org/abs/2406.15927), the
+  label is **discrete** SE split into high and low at the best-split point,
+  and the layers are chosen by a sweep, not fixed to the last one (see
+  [below](#which-layer-and-token-does-sep-read-and-are-mid-layers-better)).
+  The score is a probability in [0, 1], **not on SE's scale**: it is not in
+  nats, and it is not the probability that the answer is wrong. It has its
+  own threshold, `SEP_THRESHOLD`.
 - **Assumption.** The model's internal state *before it answers* already
   encodes how scattered its answers will be, in a linearly readable way —
   a much stronger claim than SE's.
-- **Fails when.** (a) Used on a different model than it was trained on —
-  probes do not transfer. (b) Prompts are adversarial or unlike the training
-  set. (c) The provider does not expose hidden states (most hosted APIs).
-  (d) The SE labels it was trained on were themselves miscalibrated.
-- **Cost.** One matrix-vector multiply — the cheapest by far.
+- **Fails when.** (a) Used on a different model, revision or prompt than it
+  was trained on — the probe refuses to load. (b) Prompts are adversarial or
+  unlike the training set. (c) The provider does not expose hidden states
+  (most hosted APIs). (d) The SE labels it was trained on were themselves
+  miscalibrated.
+- **Cost.** One dot product and a sigmoid — the cheapest by far.
 
 **How they relate.** PE is the floor (free, wording-only). SE is the signal
 ceiling at real cost. SEP tries to buy most of SE's signal at PE's price by
@@ -410,7 +426,7 @@ George Orwell.
 ```
 
 - **PE / SE** — the detector scores, in nats. SEP appears between them when
-  enabled.
+  enabled, as a percentage: `SEP P(high SE) = 72.3%`.
 - **escalated** — whether the escalation rule fired.
 - **source** — `small_model_greedy` (the greedy answer) or `judge_model`.
 - **Judge Reasoning** — the third block, printed only when the judge answered.
@@ -442,6 +458,17 @@ It escalates when the escalation rule fires — by default
 The default `1.0` is a placeholder, not a measured value. The judge then receives **only the original question** (not
 the samples), answers it independently, and its answer and reasoning replace
 the greedy answer.
+
+Each detector is compared against the threshold on its own scale.
+`SE_THRESHOLD` (nats) serves SE, discrete SE and PE. SEP's score is a
+probability, so `ESCALATION_DETECTOR=semantic_entropy_probe` uses
+`SEP_THRESHOLD` (default `0.5`, the classifier's own decision boundary, a
+placeholder uncalibrated for escalation); `SE_THRESHOLD` does not affect SEP.
+A trained probe carries a `recommended_threshold`, chosen by Youden's J on
+out-of-fold predictions over its calibration questions. It is **never loaded
+implicitly**: copy it into `SEP_THRESHOLD` if you want it, and the evaluator
+logs a warning when the two differ. Escalating on SEP also requires SEP in
+`ENABLED_DETECTORS`; settings refuse the combination otherwise.
 
 - **Lower threshold** → escalates more → fewer hallucinations get through,
   more judge calls (cost, latency).
@@ -517,9 +544,10 @@ random correct one (0.5 = coin flip, 1.0 = perfect). It runs the model in
    ```
    Each output row carries the question, answer key, greedy and final
    answers, `detector_scores` (every enabled detector), `escalated`, the
-   cluster count, the raw samples, and the run's `model_id`, `sample_n` and
-   `sample_temperature`. Rows are written as they finish; the run stops on
-   the first error, keeping the rows already written.
+   cluster count, the raw samples, and the run's `model_id`, `sample_n`,
+   `sample_temperature` and `sep_probe` (the SEP probe's reference and
+   hashes, or null without SEP). Rows are written as they finish; the run
+   stops on the first error, keeping the rows already written.
 3. **Score it.**
    ```bash
    uv run python -m eval.compute_auroc --in eval/results/triviaqa_200.jsonl
@@ -619,39 +647,162 @@ google/gemma-4-E4B-it  ...     ...    ...       ...                             
 
 ## How do I train and use a Semantic Entropy Probe?
 
-A probe is trained per model: for each calibration question it computes SE
-(the label) and takes the model's hidden state at the last prompt token (the
-input), then fits a ridge regression — a linear fit with a penalty that
-keeps the weights small.
+A probe is trained per model, following
+[Kossen et al. 2024](https://arxiv.org/abs/2406.15927) with the deviations
+listed [below](#how-does-this-sep-differ-from-the-paper). For each
+calibration question, the expensive step computes SE from 10 samples and
+stores the model's hidden states at every layer; the cheap step splits SE
+into high and low, fits a logistic classifier, and picks which layers it
+reads. **No probe has been trained or published yet**: there is no GPU
+result for any Gemma 4 model so far.
+
+A probe is a **directory**, the same on disk and on the Hugging Face Hub:
+
+| File | Holds |
+|---|---|
+| `probe.safetensors` | the weights and bias (safetensors cannot carry code) |
+| `probe_config.json` | the backbone (model id, Hub commit, layer count, width), the layers and token position read, the prompt (answer instruction, chat-template hash), the label and classifier settings, the recommended threshold, the training provenance and the active deviations from the paper |
+| `train_ids.json` | the calibration question ids, for the leakage guard |
+| `training_log.jsonl` | one line per calibration question |
+| `metrics.json` | the layer sweep, the selected window with its cross-validated AUROC, the last-layer baseline and the recommended threshold |
+
+`SEP_PROBE_PATH` takes a probe directory or a Hub reference,
+`hf://<owner>/<repo>[@<revision>]`; pin `@<revision>` for reproducible runs.
+Unset, the evaluator looks in `data/probes/<model slug>/`; there is no
+fallback between sources. Before the first sample, it refuses a probe whose
+model id, revision, layer count, width, answer instruction or chat template
+differs from the model under test, naming both values.
+
+**1. Use a published probe.** None exists yet. Once one is published, set
+`SEP_PROBE_PATH=hf://<owner>/<repo>@<tag>` and enable SEP as in step 2.4
+below; nothing else is needed, on any machine that runs the model with
+`hf_transformers` (or with vLLM for a last-layer probe).
+
+**2. Train your own.** Needs `SLM_PROVIDER=hf_transformers` and a GPU that
+fits the model (collection runs 500 questions × 11 generations).
 
 1. **Calibration questions come with the repo.** Without `--calibration-set`,
-   training uses the first 500 questions of the same fixed-seed shuffle,
+   collection uses the first 500 questions of the same fixed-seed shuffle,
    downloaded once to `data/questions/`. They never overlap the default
-   benchmark questions. To use your own, pass any slice that does not
-   overlap your benchmark.
-2. **Train** for the model in `VLLM_MODEL_ID`. Needs a provider that exposes
-   hidden states (the default `hf_transformers` does):
+   benchmark questions. To use your own, pass any slice with answer aliases
+   that does not overlap your benchmark.
+2. **Collect** for the model in `VLLM_MODEL_ID` (GPU):
    ```bash
-   uv run python -m eval.train_sep_probe
+   uv run python -m eval.collect_sep_dataset
    ```
-   It writes `data/probes/<model slug>.pt` (or `--output-path`), which is where the evaluator
-   looks for that model unless `SEP_PROBE_PATH` says otherwise. Next to it,
-   it writes `<model slug>.train_ids.json`, the ids of the questions it was
-   trained on. Before saving, it logs the probe's 5-fold cross-validated
-   Pearson r against SE (mean ± std, `--cv-folds`): how well the one-pass
-   probe stands in for the ten-sample SE on questions it never saw.
-3. **Enable it** in `.env` and benchmark on the disjoint slice:
+   It writes the dataset directory `data/sep_datasets/<model slug>/` (or
+   `--output-dir`, which must be empty or absent): `rows.parquet` (the
+   samples, their meaning clusters, discrete and likelihood-weighted SE, the
+   greedy answer and its correctness), `hidden_states.safetensors` (every
+   layer, at two token positions), `collection_config.json` and
+   `training_log.jsonl`. If a question fails, the questions finished before it
+   are still written, marked incomplete.
+3. **Fit** on CPU, from the dataset alone:
+   ```bash
+   uv run python -m eval.train_sep_probe --dataset data/sep_datasets/<model slug>
+   ```
+   It writes the probe directory to `data/probes/<model slug>/` (or
+   `--output-dir`). `--layers auto` (default) chooses a 5-layer window by
+   cross-validation over all calibration rows and reports the nested
+   cross-validation AUROC, which includes the cost of choosing;
+   `--layers final` reads only the last layer, the only probe the vLLM
+   embed runner can serve; `--layers <a>-<b>` fixes a range. If the fit
+   does not converge, it stops and names the pre-registered fallback: refit
+   with `--max-iter 1000`, then, only if that fails too, `--standardize`.
+   Both are recorded in the probe.
+4. **Enable it** in `.env` and benchmark on the disjoint slice:
    ```
    ENABLED_DETECTORS=["predictive_entropy","semantic_entropy_probe","semantic_entropy"]
    ```
    `run_benchmark` checks the benchmark questions against the probe's
-   `.train_ids.json` and refuses to start on any overlap, or if the file is
-   missing.
+   `train_ids.json` and refuses to start on any overlap, if the file is
+   missing, or if a question has no `id`. Every row records the probe's
+   reference and the SHA-256 of its weights and config.
+5. **Publish** (optional): the release sequence, which merges the held-out
+   benchmark into `metrics.json` and uploads the probe and its dataset, is in
+   the [DevOps Guide](knowledge/usage_guides/DEVOPS_GUIDE.md#publishing-a-sep-probe-to-the-hub).
+
+**3. Refit from a published dataset, no GPU.** The dataset repo holds every
+input the fit needs, so the CPU step can be rerun anywhere: download it,
+check out the commit the probe card names, and run step 2.3 on it. The
+model card prints the exact commands.
 
 A probe trained on one model is meaningless on another. To include SEP in a
-model comparison, train one probe per model (rerun step 2 with each
+model comparison, train one probe per model (rerun steps 2.2–2.3 with each
 `VLLM_MODEL_ID`) and leave `SEP_PROBE_PATH` unset — `--sweep` refuses a
-single explicit probe path.
+single explicit probe.
+
+### Which layer and token does SEP read, and are mid layers better?
+
+These are two separate choices. The **token position** is *which token's*
+vector is read; the **layer** is *how deep* in the network it is read. "A
+token in the middle layers" mixes them up.
+
+- **Token position.** The served probe reads TBG ("token before
+  generation"): the last token of the chat-formatted prompt, so it scores
+  before the model answers. Collection also stores SLT ("second-last
+  token", as the authors' code computes it): teacher-forcing the greedy
+  answer of m tokens a[0..m-1], counted from 0, the state at answer token
+  a[m-3] (the token whose output predicts a[m-2]). For answers of 1-2
+  tokens this falls on the answer's first token or the last prompt token.
+  SLT is the paper's main setting; it is swept and reported, but v1 serves
+  only TBG probes.
+- **Layer.** Layer k is the vector after k of the model's L layers (0 is the
+  token embedding, L the last). The paper numbers the same vectors from 1,
+  so our k is probably its k + 1; the model card prints both. The trainer
+  sweeps every layer from 1 to L at both positions and picks a window of 5
+  consecutive layers by cross-validation over all calibration rows; nested
+  cross-validation (selection repeated inside each outer fold) gives the
+  reported AUROC, which therefore includes the cost of choosing.
+
+**The misconception to head off: "research shows mid layers are best."** In
+Kossen et al., mid layers win for probes that predict *correctness* and for
+*long-form* answers. For short answers, the setting used here, their SEP
+AUROC rises toward the late layers, and most of their chosen windows are
+the last five layers. Gemma 4 was not in the paper, and our prompt differs
+from theirs, so this repo assumes neither: the sweep measures it. Read the
+result from the probe's `metrics.json`: `layer_sweep` (every layer, both
+positions), `selection` (the chosen window and its nested-CV AUROC) and
+`final_layer_auroc` (the last layer alone, the baseline for "just use the
+last layer"). No Gemma 4 sweep has run yet.
+
+### How does this SEP differ from the paper?
+
+Each probe lists the deviations active for it in
+`probe_config.json` → `deviations_from_paper`.
+
+| ID | Paper | Here | Why |
+|---|---|---|---|
+| D1 | Plain-text few-shot "Answer:" prompt, no chat template | Gemma chat template plus the brief-answer instruction, zero-shot | Our models are chat-tuned, and every detector reads the same input. TBG is therefore a different position; unverified relative to the paper. |
+| D2 | Llama-2, Mistral, Phi-3 | Gemma 4 | Our backbones. The paper's layer choices do not transfer, so layers are swept. |
+| D3 | γ fitted on all data before splitting | γ fitted per training fold; the final γ uses all rows | No label leakage into cross-validation estimates. |
+| D4 | Layer window chosen on test-split AUROC | Chosen by inner cross-validation; the nested estimate is reported | No selection leakage. `--layers auto` only. |
+| D5 | Window ranked by AUROC against model error | Ranked by AUROC against binarized SE; error AUROC still reported | Independent of the noisy correctness labeler; matches the probe's target. `--layers auto` only. |
+| D6 | About 2000 questions per dataset, several datasets | 500 TriviaQA questions | GPU budget. The cross-validation spread is reported so the noise is visible. |
+| D7 | Most-likely answer sampled at T = 0.1 (the text says greedy) | Greedy, T = 0 | Matches the paper's text and the repo's greedy answer. |
+| D8 | SE samples at T = 1.0, top-p 0.9, top-k 50 | T = 1.0 with the checkpoint's own top-p and top-k, recorded in the probe | The project's sampler. SE values are not directly comparable with the paper's. |
+| D9 | No escalation threshold | `SEP_THRESHOLD`, with a recommended value from Youden's J on out-of-fold rows | A product need; the paper reports AUROC only. |
+| D10 | max_iter = 100 | 1000, only if 100 did not converge | Pre-registered fallback. |
+| D11 | Best split over a 100-point grid ending at the largest SE | Exhaustive search over midpoints between distinct SE values | Exact, and no split can tie with a data value. |
+| D12 | No feature scaling | A standard scaler folded into the weights, only if max_iter = 1000 did not converge either | Pre-registered fallback. |
+| D13 | Layer 0 included | Layers 1..L | At TBG, layer 0 is the same vector for every prompt. |
+
+### What changed for an existing SEP setup?
+
+SEP was previously a ridge regression predicting SE in nats. If you used it:
+
+| You had | Do now |
+|---|---|
+| `ESCALATION_DETECTOR=semantic_entropy_probe` with `SE_THRESHOLD=…` | Set `SEP_THRESHOLD` (start from the probe's `recommended_threshold`). `SE_THRESHOLD` no longer affects SEP. |
+| A local `data/probes/<slug>.pt` | Retrain (`eval.collect_sep_dataset`, then `eval.train_sep_probe`); `.pt` probes are refused, not converted. |
+| `SEP_PROBE_PATH=…/x.pt` | Point it at a probe directory or an `hf://` reference. |
+| SEP on `SLM_PROVIDER=vllm` | Works only for a `--layers final` probe, and needs `VLLM_EMBED_BASE_URL`; otherwise use `hf_transformers`. Both are checked when the evaluator is built. |
+| SEP on `SLM_PROVIDER=vllm` with a model not in `demo/model_registry.py` | Add a registry entry; the layer count is read from it. |
+| Reading SEP in nats in the UI or CLI | It is now shown as a percentage, "P(high SE)". |
+| A custom `SamplingProvider` | Also implement `model_revision`, `num_hidden_layers`, `hidden_size`, `chat_template_sha256` and `check_hidden_state_request(layers)`; `pooled_hidden_state` takes the layers. |
+| A custom detector with `requires_hidden_state=True` | Implement `HiddenStateDetector.hidden_state_layers`; otherwise building the evaluator raises `TypeError`. |
+| Results files from an earlier `eval.run_benchmark` | Re-run it: the scoring scripts refuse rows without the `sep_probe` field it now records. |
+| A benchmark question without an `id`, run with SEP enabled | Give every question an `id`; a SEP run refuses it instead of skipping it. |
 
 ## How do I score samples from my own model?
 
@@ -696,8 +847,9 @@ result.final_answer  # greedy answer, or the judge's if it escalated
 [`examples/langrag_integration.py`](examples/langrag_integration.py) shows the
 translation layer for an existing RAG stack. If you would rather plug in a
 model and let the library drive sampling, implement the `SamplingProvider`
-protocol (`model_id`, `model_revision`, `num_hidden_layers`, `sample`, `greedy`,
-`pooled_hidden_state`) and use
+protocol (`model_id`, `model_revision`, `num_hidden_layers`, `hidden_size`,
+`chat_template_sha256`, `sample`, `greedy`, `check_hidden_state_request(layers)`
+and `pooled_hidden_state(prompt, layers)`) and use
 `ResponseEvaluator(slm=...).evaluate(prompt)`.
 
 ## How do I add my own detector?
@@ -717,7 +869,9 @@ next to PE and SE. To make one permanent: add its id to `DetectorName` in
 `src/hallucinations_math_lab/services/`, register it in
 `_build_default_detectors` (`evaluator.py`), and add a unit test. The
 benchmark, AUROC and comparison scripts pick it up with no further changes.
-See the
+A detector with `requires_hidden_state=True` also implements
+`HiddenStateDetector.hidden_state_layers`, the layers it reads; building the
+evaluator raises `TypeError` without it. See the
 [Developer Guide](knowledge/usage_guides/DEVELOPER_GUIDE.md#how-do-i-add-a-detector).
 
 ## What can I experiment with?
@@ -725,13 +879,13 @@ See the
 | Knob | Where | What to watch |
 |---|---|---|
 | Which model, or which set of models | `VLLM_MODEL_ID`; `TARGET_MODEL_IDS` with `--sweep` | how detectors behave per model size |
-| The "same meaning?" judge | pass any object with `bidirectional_entails(a, b)` to `SemanticEntropyDetector(scorer=...)`; default is DeBERTa-MNLI (`NLI_MODEL_ID`) | how cluster counts change on paraphrases |
+| The "same meaning?" judge | pass any object with `bidirectional_entails(a, b)` to `SemanticEntropyDetector(scorer=...)`; default is DeBERTa-MNLI (`NLI_MODEL_ID`, loaded at the commit in `NLI_REVISION`; change the two together) | how cluster counts change on paraphrases |
 | Number of samples N, temperature | `SAMPLE_N` (2–50), `SAMPLE_TEMPERATURE` | SE resolution: with N=10 the maximum is ln 10 ≈ 2.30 nats; every question costs N generations |
-| Escalation threshold | `SE_THRESHOLD`, or `escalation_threshold=` | escalation rate vs. missed hallucinations |
+| Escalation threshold | `SE_THRESHOLD` (SE, discrete SE, PE; nats), `SEP_THRESHOLD` (SEP; probability), or `escalation_threshold=` | escalation rate vs. missed hallucinations |
 | Escalation rule over several detectors | `AnyAbove`, `AllAbove`, `SingleDetector` | see [above](#when-does-it-escalate-and-how-do-i-tune-it) |
 | Your own detector | the `Detector` protocol; [`examples/custom_detector.py`](examples/custom_detector.py) | its AUROC next to PE and SE |
 | The question set | [`eval/datasets/`](eval/datasets/) — TriviaQA loader + an adversarial set | AUROC on easy vs. trick questions |
-| SEP probe | [`eval/train_sep_probe.py`](eval/train_sep_probe.py) | how much of SE's signal a single forward pass recovers |
+| SEP probe | [`eval/train_sep_probe.py`](eval/train_sep_probe.py) `--layers auto\|final\|<a>-<b>`, refit from a collected dataset on CPU | how much of SE's signal a single forward pass recovers, and at which layers |
 
 ## What does it look like on real questions?
 
@@ -774,10 +928,29 @@ comma-separated list. The same holds for `TARGET_MODEL_IDS` and
 Every id in `TARGET_MODEL_IDS` must match an entry in
 `demo/model_registry.py` exactly, including case.
 
-**Why does `SemanticEntropyProbeDetector` raise `FileNotFoundError`?**
-SEP is enabled but no probe exists for the model being run. Train one
-([above](#how-do-i-train-and-use-a-semantic-entropy-probe)) or set
+**Why does SEP raise `FileNotFoundError`?**
+SEP is enabled but no probe directory exists for the model being run. Train
+one ([above](#how-do-i-train-and-use-a-semantic-entropy-probe)) or set
 `SEP_PROBE_PATH` (single-model runs only).
+
+**Why is my `.pt` probe refused with `ObsoleteSEPProbeError`?**
+It is a pre-classifier ridge probe that predicts SE in nats; SEP now
+outputs p(high SE), and an old probe cannot be converted. Retrain
+(`eval.collect_sep_dataset`, then `eval.train_sep_probe`), or point
+`SEP_PROBE_PATH` at a probe directory or an `hf://` probe. Any other regular
+file is refused the same way: `SEP_PROBE_PATH` must name a directory.
+
+**Why does SEP raise `SEPProbeMismatchError` before any scoring?**
+The probe was trained on a different backbone or prompt than the one under
+test: model id, Hub revision, layer count, hidden size, answer instruction
+or chat template. The message lists every mismatch with both values. Use a
+probe trained for this exact model and `ANSWER_INSTRUCTION`, or retrain.
+
+**Why does SEP on vLLM raise `UnsupportedHiddenStateRequest`?**
+The vLLM embed runner pools only the last layer, and this probe reads other
+layers (or `VLLM_EMBED_BASE_URL` is unset, so no hidden states are
+available at all). Use `SLM_PROVIDER=hf_transformers`, or train the probe
+with `--layers final`.
 
 **Why do I get a connection error to `VLLM_BASE_URL`?**
 `SLM_PROVIDER=vllm` but the server is not reachable. Check with
@@ -825,7 +998,8 @@ demo/                          # CLI, SLM providers (vLLM, transformers), model 
 frontend/                      # the playground UI's source (Vite, React); only for UI work
 examples/                      # runnable playground scripts
 eval/                          # datasets, benchmark (one model or a sweep), model comparison,
-                               # success-criteria scoring, SEP probe training
+                               # success-criteria scoring, SEP dataset collection,
+                               # probe training and Hub publishing
 tests/unit/                    # math, dispatch, escalation, providers, benchmark loop
 serving/, terraform/           # vLLM container and GCP infrastructure
 knowledge/                     # developer / DevOps / QA guides, theory, caveats, plans

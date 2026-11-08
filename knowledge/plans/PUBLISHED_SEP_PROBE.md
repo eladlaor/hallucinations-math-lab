@@ -25,9 +25,13 @@
   `google/gemma-4-E2B-it` (the smallest model, the one most users can run),
   holding the probe weights, a config that pins the exact backbone it belongs to,
   the full training record, the measured metrics, and a model card.
-- **Companion dataset repo:** the calibration rows (question, the 11 answers,
-  their meaning clusters, the SE label, and the hidden state). With it, anyone
-  can refit or re-examine the probe on a laptop, no GPU.
+- **Companion dataset repo:** the calibration rows (question, the 10 sampled
+  answers plus the greedy answer, their meaning clusters, the SE values, and
+  every layer's hidden states at two token positions). With it, anyone can
+  refit or re-examine the probe on a laptop, no GPU.
+- **Status:** the code (items 1–6 and 8) is implemented by
+  [`SEP_CLASSIFIER.md`](SEP_CLASSIFIER.md) items 2–18. Item 7, the real run,
+  is open and needs the owner's Hub namespace and license decisions.
 - **Code:** the trainer writes its record to files (not only stdout), a
   publish script uploads, and the detector loads a probe straight from the Hub,
   refusing a probe whose backbone doesn't match the model under test.
@@ -53,13 +57,14 @@ part first. Concretely, a published probe:
 
 ## Terminology: is the probe a "linear classifier"?
 
-**Not today — it is a linear *regressor*.** The current trainer fits ridge
-regression: it predicts the SE value itself (a number in nats). A *classifier*
-predicts a category — "high SE" vs "low SE". The paper (Kossen et al., 2024)
-does the classifier version: it splits SE into high/low and fits logistic
-regression. **Decided 2026-11-05: we switch to the classifier**, so the
-published probe is a linear classifier. The general term covering both is
-**linear probe**.
+**Yes, now.** The original trainer fit ridge regression, a linear
+*regressor*: it predicted the SE value itself (a number in nats). A
+*classifier* predicts a category — "high SE" vs "low SE". The paper (Kossen
+et al., 2024) does the classifier version: it splits SE into high/low and fits
+logistic regression. **Decided 2026-11-05 and implemented by
+[`SEP_CLASSIFIER.md`](SEP_CLASSIFIER.md):** the probe is a logistic classifier
+whose score is p(high SE), so the published probe is a linear classifier. The
+general term covering both is **linear probe**.
 
 **"Training log" — what to expect.** A linear probe is fitted in one shot, not
 over many epochs, so there is no falling loss curve to show. The meaningful
@@ -74,21 +79,24 @@ what gets published as the training record.
 | File | Content |
 |---|---|
 | `probe.safetensors` | The linear layer's weights and bias. `safetensors`, the Hub's standard weight format, which cannot carry executable code. |
-| `probe_config.json` | Backbone model id **and commit hash**, hidden size, which layer and token the hidden state is taken from, the chat template used, recipe (logistic), its hyperparameters, the SE settings (N samples, temperature, NLI model), the high/low split point and the recommended threshold. |
-| `train_ids.json` | The existing sidecar: the training question ids, so `run_benchmark` can keep refusing overlap. |
-| `training_log.jsonl` | One line per calibration question: id, SE, cluster count, answer lengths, elapsed time. |
-| `metrics.json` | Cross-validated AUROC of the probe against binarized SE, with mean ± std per fold, plus the held-out benchmark AUROC of SEP next to PE and SE on the disjoint 200-question slice, with confidence intervals. |
+| `probe_config.json` | See [Artifact format](SEP_CLASSIFIER.md#artifact-format): the backbone (id, commit, depth, width), the layers and token position read, the prompt, the label and classifier settings, the recommended threshold, the training provenance and the active deviations from the paper. |
+| `train_ids.json` | The training question ids, so `run_benchmark` can keep refusing overlap. |
+| `training_log.jsonl` | One line per calibration question: id, SE (both estimators), cluster count, answer lengths, greedy correctness, elapsed time. |
+| `metrics.json` | The per-layer sweep at both token positions, the layer-window selection with its nested-CV AUROC against binarized SE (mean ± std per fold), the last-layer baseline (`final_layer_auroc`), the recommended threshold with its TPR, FPR and escalation rate, plus the held-out benchmark AUROC of SEP next to PE and SE on the disjoint 200-question slice, with confidence intervals. |
 | `README.md` | Model card: what it is, how to use it with this repo, the numbers, the limits (works only for this exact backbone; TriviaQA-style questions only; not a correctness oracle), the license, and citations. |
 
-**Dataset repo** `<hf-user>/sep-calibration-gemma-4-E2B-it`: one row per
-calibration question — question, the 11 sampled answers, their cluster ids,
-SE, and the pooled hidden state. Small (500 rows), and it is what turns "trust
-our probe" into "refit it yourself".
+**Dataset repo** `<hf-user>/sep-calibration-gemma-4-E2B-it`: `rows.parquet`
+(one row per calibration question: the question, the 10 sampled answers plus
+the greedy answer, their cluster ids, both SE values, greedy correctness),
+`hidden_states.safetensors` (every layer at two token positions, TBG and SLT)
+and `collection_config.json` (see
+[the dataset directory](SEP_CLASSIFIER.md#the-dataset-directory-companion-hub-dataset-repo)).
+500 rows, and it is what turns "trust our probe" into "refit it yourself".
 
 ## Prerequisites (ordering)
 
-1. **Switch SEP to the classifier recipe** (decided; implementation is the B2
-   item in TODO). Publishing the ridge probe first means republishing.
+1. ~~**Switch SEP to the classifier recipe.**~~ Done: implemented by
+   [`SEP_CLASSIFIER.md`](SEP_CLASSIFIER.md) items 1–17.
 2. **B2 label fixes** that change SE values: brief-answer prompt, correctness
    matching (for the benchmark AUROC), NLI label order.
 3. **B1 history cleanup / repo going public** — the model card links to the repo.
@@ -99,6 +107,9 @@ our probe" into "refit it yourself".
 
 Each item: failing test first, then the code.
 
+**Items 1–6 and 8 are implemented by [`SEP_CLASSIFIER.md`](SEP_CLASSIFIER.md)
+items 2–18**, with the changes noted in each item below. Item 7 stays here.
+
 1. **Trainer writes its record to files.** `train_sep_probe` writes
    `training_log.jsonl`, `metrics.json` and `probe_config.json` next to the probe.
    *Test:* with a fake provider, all three files exist, the log has one line per
@@ -107,25 +118,32 @@ Each item: failing test first, then the code.
    training records it. *Test:* the config contains a non-empty revision; a
    missing one raises.
 3. **Save as `safetensors`.** *Test:* round-trip save → load gives identical
-   scores; the `.pt` path keeps working for local probes or is removed (decide in item).
+   scores. The `.pt` path is **removed**, not kept: a `.pt` probe is refused
+   with a retrain hint (`ObsoleteSEPProbeError`).
 4. **Load from the Hub.** `SEP_PROBE_PATH=hf://<repo>[@revision]` downloads and
    loads. Fail fast if the probe's backbone id, revision or hidden size differs
    from the model under test. *Tests:* mismatch raises with both ids in the
    message; a matching local fixture loads (Hub download mocked).
-5. **Calibration dataset export.** Training optionally writes the rows above as
-   Parquet. *Test:* row count and columns; refitting from the export reproduces
-   the saved weights.
+5. **Calibration dataset export.** The export is **always** written, not
+   optional: `eval.collect_sep_dataset` writes the dataset directory, and it is
+   the fit step's only input (`eval.train_sep_probe --dataset DIR`). *Test:* row
+   count and columns; refitting from the export reproduces the saved weights.
 6. **Publish script.** `eval/publish_sep_probe.py --probe-dir … --repo …` renders
    the model card from `metrics.json` + `probe_config.json` and uploads both repos
    (`huggingface_hub`, token from `hf auth login`, never from the CLI args).
    *Test:* card rendering is pure and snapshot-tested; upload is mocked. Refuses
    to publish without `metrics.json` containing the held-out benchmark AUROC.
-7. **Run it for real.** Train on E2B, benchmark on the disjoint slice, publish
-   with a version tag (`v1`).
+7. **Run it for real.** Collect and train on E2B; the owner then reads the
+   layer and position sweep in `metrics.json` and picks the v1 token position
+   (only TBG is servable in v1); benchmark on the disjoint slice; publish with
+   a version tag (`v1`). The command sequence is in the
+   [DevOps Guide](../usage_guides/DEVOPS_GUIDE.md#publishing-a-sep-probe-to-the-hub).
+   Afterwards, replace the README's and the `.pt` refusal's generic `hf://`
+   hint with the published reference.
 8. **Docs.** README *How do I train and use a SEP?* gets a "Use the published
-   probe" path first and "Train your own" second; USER_GUIDE and the web
-   playground plan ([`WEB_PLAYGROUND.md`](WEB_PLAYGROUND.md)) point at it;
-   CHANGELOG entry.
+   probe" path first and "Train your own" second; the web playground plan
+   ([`WEB_PLAYGROUND.md`](WEB_PLAYGROUND.md)) points at it; CHANGELOG entry.
+   (The user guide is folded into the README.)
 
 ## Success criteria
 
@@ -137,6 +155,8 @@ Each item: failing test first, then the code.
 - [ ] Refitting from the published dataset reproduces the published weights.
 - [ ] The model card states the numbers, the limits and the license, and links
       back to the exact repo commit that trained it.
+- [ ] The README states the measured layer window and the `final_layer_auroc`
+      baseline.
 
 ## Out of scope
 

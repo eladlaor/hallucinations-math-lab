@@ -651,6 +651,9 @@ All of these are done in work item 18.
     layer".
 - **`knowledge/GLOSSARY.md`**: token position (TBG, SLT) vs layer; the layer-index convention;
   best-split binarization; linear probe vs linear classifier; nested CV; p(high SE).
+  *Deferred out of item 18:* the owner has uncommitted edits to the glossary in another
+  checkout, so these entries are a [`TODO.md`](TODO.md) item instead. Until then the README
+  and the walkthrough define each term where it is used.
 - **`knowledge/CAVEATS.md` §6**:
   - SEP imitates *binarized discrete* SE;
   - the probe is tied to a backbone **and revision** and to the prompt;
@@ -1303,6 +1306,22 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 - Everything in [Docs to update](#docs-to-update).
 - No test beyond the existing link checks.
 - Done when: it has been reviewed against that list.
+- *As implemented:*
+  - **Glossary deferred** (see [Docs to update](#docs-to-update)); a TODO item carries it.
+  - **Code comments** needed no change: items 6, 7 and 12 had already removed the "Matches
+    Kossen" comment, rewritten `_EMBED_POOLER_CONFIG`'s comment and the evaluator's
+    "last-layer" text.
+  - **The README** keeps the migration checklist as its own Q&A ("What changed for an
+    existing SEP setup?"), and the deviations table and the layer/token Q&A as subsections of
+    "How do I train and use a SEP?". Step 1 ("use the published probe") says none exists
+    yet; PSP 7 replaces it, and the `.pt` hint's generic `hf://` form, with the real
+    reference.
+  - **Also updated beyond the list:** `knowledge/theory/artifacts/TEACHING_THE_CHEAP_GAUGE.html`
+    still taught the ridge recipe; it now opens with a note pointing to the walkthrough's
+    new SEP section. The CHANGELOG's earlier Unreleased entries that described the ridge
+    probe (Pearson r, the `.train_ids.json` sidecar, `probe_path`, "SEP probes transfer
+    between providers") were rewritten, since none was ever released. `NLI_REVISION` is
+    documented in the README's knobs table and the CHANGELOG.
 
 ## Changes to PUBLISHED_SEP_PROBE.md
 

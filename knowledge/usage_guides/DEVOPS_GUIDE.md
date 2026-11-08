@@ -28,11 +28,12 @@ only paid resources and are gated behind `deploy_vertex_endpoint` (default
 
 One serving image (`serving/Dockerfile`, on `vllm/vllm-openai:v0.31.0-cu129`)
 serves one registry model with one vLLM *runner* per container: `generate`
-(chat completions with raw logprobs, for PE and SE) or `embed` (pooled hidden
-states, for SEP). Terraform puts each runner on its own **dedicated** Vertex
-endpoint and prints an OpenAI-compatible base URL for each; the client calls
-them with `VLLM_AUTH=google`. CI is a GitHub Actions workflow that needs no
-cloud access.
+(chat completions with raw logprobs, for PE and SE) or `embed` (the
+last-layer hidden state, for last-layer SEP probes only). Terraform puts
+each runner on its own **dedicated** Vertex endpoint and prints an
+OpenAI-compatible base URL for each; the client calls them with
+`VLLM_AUTH=google`. CI is a GitHub Actions workflow that needs no cloud
+access.
 
 ## Do I need any of this?
 
@@ -224,6 +225,21 @@ Each container loads its own copy of the weights and by default claims 90%
 of its GPU's memory (`VLLM_GPU_MEMORY_UTILIZATION`), so give each its own
 GPU. With one GPU, get SEP's hidden states from the local `hf_transformers`
 provider instead.
+
+**The embed runner serves last-layer probes only.** It pools the last
+token's vector after the final layer, so it can serve a probe trained with
+`eval.train_sep_probe --layers final` and nothing else. A probe that reads
+another layer window is refused when the evaluator is built, with
+`UnsupportedHiddenStateRequest`; serve such a probe through
+`SLM_PROVIDER=hf_transformers`. Whether the embed runner's vectors match the
+in-process transformers ones within tolerance has not been measured yet.
+
+**Both runners load a pinned checkpoint.** The registry's `revision` (a full
+commit sha) goes to `vllm serve` as `--revision` and `--tokenizer-revision`,
+so a server always loads the exact weights and chat template a probe was
+trained against. vLLM does not report which revision it loaded, so the
+launch flag is what the client trusts; to move to a newer checkpoint, update
+the registry entry (and retrain its probe), then rebuild the image.
 
 Without Docker, print the equivalent `vllm serve` command from the registry
 and run it in an environment that has vLLM 0.31:

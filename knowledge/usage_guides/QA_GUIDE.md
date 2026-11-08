@@ -4,6 +4,7 @@
 
 - [Summary](#summary)
 - [What does success look like for the detectors?](#what-does-success-look-like-for-the-detectors)
+  - [Why can't the layer choice see the test fold?](#why-cant-the-layer-choice-see-the-test-fold)
   - [Why AUROC and not accuracy at a threshold?](#why-auroc-and-not-accuracy-at-a-threshold)
   - [Why do the comparative criteria need a significance test as well as a bar?](#why-do-the-comparative-criteria-need-a-significance-test-as-well-as-a-bar)
   - [Why does criterion 4 need an effect size and not just p < 0.01?](#why-does-criterion-4-need-an-effect-size-and-not-just-p--001)
@@ -55,15 +56,33 @@ interval, the target, and whether it was met. The pass bars live in
 | 3b | The detector picks which questions to escalate better than chance | final accuracy − the expected accuracy of escalating the same number of questions at random > 0, with a paired-bootstrap 95% CI that excludes 0 | same command, `criteria.escalation_beats_random_pp` |
 | 4 | SE flags adversarial prompts | one-sided Mann-Whitney U p < 0.01 **and** effect size AUC ≥ 0.75 | `python -m eval.adversarial_separation --adversarial <adversarial results> --reference <triviaqa results>` |
 
-A fifth number is a diagnostic rather than a pass bar: how closely the
-Semantic Entropy Probe tracks SE on prompts it never saw, as a 5-fold
-cross-validated Pearson r (mean ± std), logged by
-`python -m eval.train_sep_probe` before it saves the probe.
+The Semantic Entropy Probe (SEP) adds two diagnostics rather than pass bars,
+both AUROCs of its p(high SE) score:
+
+- **Against binarized SE, by nested cross-validation** (mean ± std over the
+  outer folds, `metrics.json` → `selection`), written by
+  `python -m eval.train_sep_probe`: how well the one-pass probe predicts
+  whether the ten-sample SE would be high, on calibration questions it was
+  not fitted to.
+- **Against model error, on the held-out benchmark slice**: SEP's AUROC from
+  `eval.compute_auroc` next to PE and SE, on questions the probe never saw.
 
 **Status: not yet measured on real hardware.** The scripts are unit-tested
 on hand-built rows; no GPU benchmark run has been recorded. Run
 [the benchmark](../../README.md#how-do-i-evaluate-one-model) to produce the
 numbers.
+
+### Why can't the layer choice see the test fold?
+
+Because the best of many cross-validated scores is optimistic: pick the
+window of layers that scored highest and report that same score, and part
+of it is luck. So the trainer nests the choice: in each outer fold, an inner
+cross-validation picks the window on the outer-training rows only, and the
+outer test rows then score that pick. The high/low split point γ is also
+refitted from each fold's training rows. The reported score therefore
+includes the cost of choosing, and the window chosen in each outer fold is
+recorded as a stability check. The per-layer sweep in `metrics.json` is
+descriptive only; nothing is chosen from it.
 
 ### Why AUROC and not accuracy at a threshold?
 
@@ -114,9 +133,11 @@ fixed shuffle of the *unique* questions (TriviaQA lists most questions once
 per evidence source, so slicing rows would repeat questions across slices),
 so the calibration and benchmark sets are disjoint by construction; the
 default slices (questions 0–499 for calibration, 500–699 for the benchmark)
-are. And `train_sep_probe` writes `<probe>.train_ids.json` next to
-the probe; `run_benchmark` refuses to start if any benchmark question id is
-in it, or if a probe in use has no such file. A probe evaluated on the
+are. And `train_sep_probe` writes `train_ids.json` inside the probe
+directory; `run_benchmark` refuses to start if any benchmark question id is
+in it, if a probe in use has no such file, or if a benchmark question has no
+`id` to check. `eval.publish_sep_probe` repeats the check on the held-out
+report's question ids before anything is uploaded. A probe evaluated on the
 questions it was fit to would report an optimistic AUROC.
 
 ### Why isn't an accuracy uplift enough to credit the detector?
@@ -175,17 +196,24 @@ New features follow test-first: write the failing test that defines
 | `test_predictive_entropy.py` | PE formula against a hand computation, confidence ordering, empty and missing-logprob errors |
 | `test_semantic_entropy.py` | clustering by bidirectional entailment, question-conditioned NLI input, likelihood-weighted and discrete SE values against hand computations, length normalization, fail-fast on missing or non-finite logprobs, empty input |
 | `test_nli.py` | NLI label names read from the checkpoint's `id2label` in any order, softmax `label_probs`, argmax `classify`, fail-fast on unknown labels (fake model, no download) |
-| `test_semantic_entropy_probe.py` | SEP probe loading and forward pass, missing-file, missing-hidden-state and hidden-size-mismatch errors |
+| `test_semantic_entropy_probe.py` | SEP probe directory and `hf://` loading (Hub download mocked), the compatibility check naming both values for each backbone and prompt field, `.pt` and other files refused as obsolete, SLT probes refused in v1, the score as a sigmoid over the probe's layers in increasing order, the probe bytes hashed as loaded |
+| `test_sep_recipe.py` | best-split binarization (exhaustive midpoints, lower γ on ties, never on a data value, no worse than the paper's grid, rounding of summation-order noise), the logistic fit's paper defaults, convergence failure naming the next fallback, the folded scaler matching a scaler pipeline, p(high SE) as a sigmoid |
+| `test_sep_layer_selection.py` | single-layer sweep, window selection by nested CV that never fits on outer test rows, γ fitted per training fold, stratification without features, layer 0 excluded, deeper window on ties, fixed layers, a pure-noise AUROC near 0.5, out-of-fold probabilities and the Youden threshold |
+| `test_collect_sep_dataset.py` | the collector's rows (both SE estimators from one clustering), the HF-only and registry-revision requirements, every layer's hidden states, the finished questions written before a failure or Ctrl-C, one training-log line per question, calibration-set validation |
+| `test_sep_dataset_io.py` | the dataset directory round trip, tensor ids in parquet order, shapes checked against the backbone, unknown config fields and schema versions refused, an incomplete dataset refused unless allowed |
+| `test_train_sep_probe.py` | the five probe-directory files, the probe config's blocks and deviations, safetensors-only loading, a refit from the dataset reproducing the weights, `--layers final`, the pre-registered `--max-iter` values, repo commit and dirty state, the `metrics.json` schema |
+| `test_publish_sep_probe.py` | the model card (golden file), every publish refusal (no held-out report, probe hashes, model, dataset, dirty repo, training questions in the held-out set, bad repo id or tag), no token argument, the mocked upload and tagging of both repos, `--dry-run` uploading nothing |
+| `test_demo_cli.py` | SEP printed as "P(high SE)" with a percentage threshold, nats detectors as plain numbers |
 | `test_escalation.py` | `SingleDetector`, `AnyAbove`, `AllAbove` decisions and validation |
 | `test_evaluator.py` | `evaluate_responses` / `ResponseEvaluator` dispatch, prerequisites, judge escalation |
 | `test_model_registry.py` | registry entries, single local/deployed default, vLLM flags per runner (raw logprobs for generate, unnormalized last-token pooling for embed), tensor parallelism per GPU count, L4 context cap, every machine type able to carry its accelerator type and count |
 | `test_slm_provider.py` | vLLM provider against a mocked OpenAI client (sampling, chat-shaped embedding request, `VLLM_AUTH` modes), HF logprob extraction (raw distribution, first EOS kept, padding dropped), provider selection, sweep model-id validation |
 | `test_google_auth.py` | `GoogleAccessToken` reuse and refresh with fake credentials, plus a contract test against the **real** OpenAI client (fake HTTP transport) proving the token is refreshed on chat and embedding requests |
 | `test_serving_launch.py` | the container's `vllm serve` argv: default runner, Vertex port, fail-fast on missing model, unknown runner or unregistered model |
-| `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end; run config (incl. answer instruction) recorded per row; judge answer recorded on every row; SEP probe leakage guard (overlap and missing provenance refused) |
-| `test_eval_criteria.py` | statistics primitives (rank AUROC vs sklearn, deterministic bootstrap, exact McNemar); whole-token SQuAD-normalized correctness; each criterion met only with its significance or effect-size condition; escalation vs random escalation at the same rate, tie-averaged top-k, accuracy-vs-rate curve; answer-length distribution; run comparability; cross-validated SEP Pearson r; slice bounds; probe provenance |
+| `test_benchmark_pipeline.py` | `eval/run_benchmark.py` → `eval/compute_auroc.py` end to end; run config (incl. answer instruction) recorded per row; judge answer recorded on every row; SEP probe leakage guard (overlap, missing provenance and id-less questions refused); the probe's reference and hashes recorded per row |
+| `test_eval_criteria.py` | statistics primitives (rank AUROC vs sklearn, deterministic bootstrap, exact McNemar); whole-token SQuAD-normalized correctness; each criterion met only with its significance or effect-size condition; escalation vs random escalation at the same rate, tie-averaged top-k, accuracy-vs-rate curve; answer-length distribution; run comparability; slice bounds; probe provenance |
 | `test_model_comparison.py` | `run_benchmark --sweep` (one file per model, one model at a time, registry and per-model SEP probe checked before any scoring); SEP's default probe follows the evaluated model; `compare_models` accuracy and AUROC per model, refusing different questions, different sampling or a repeated model |
-| `test_calibrate_threshold.py` | τ by Youden's J under the strict `score > τ` rule, ties to the higher τ, dev/test overlap refused |
+| `test_calibrate_threshold.py` | τ by Youden's J under the strict `score > τ` rule, ties to the higher τ, dev/test overlap refused, the setting to use (`SE_THRESHOLD` or `SEP_THRESHOLD`) reported |
 | `test_gemini_judge.py` | `GeminiJudge` request shape and verdict parsing against a fake `google-genai` client |
 | `web/test_web_shell.py` | playground status (provider, model, judge readiness with its reason), presets equal the example's `SCENARIOS`, the UI served at `/`, JSON 404 for unknown API routes, fail-fast without a built UI, `127.0.0.1:8765` binding |
 | `web/test_web_score.py` | `/api/score`: the three presets give the example's PE / SE / cluster counts, clusters and SE for typed answers, PE null unless every answer carries logprobs, 422 on empty or blank input, NLI failures surfaced with their message |
@@ -295,6 +323,12 @@ A red `test` job that fails during install usually means `uv.lock` is stale
    7 clusters; moving the threshold slider sends no request; and
    `curl "http://127.0.0.1:8765/api/results/report?path=../../etc/passwd"` returns 400.
 7. Every command in the README and the usage guides still matches the code.
+8. Before publishing a SEP probe: the GPU-only assumptions in
+   [`SEP_CLASSIFIER.md`](../plans/SEP_CLASSIFIER.md#what-needs-a-real-gpu-run)
+   (hidden-state layer count, convergence at the paper's iteration limit,
+   class balance of the split, provider agreement) are checked on the real
+   run, and the README states the measured layer window and the
+   `final_layer_auroc` baseline.
 
 ## Bug triage and reporting
 

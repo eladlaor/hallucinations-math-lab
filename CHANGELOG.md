@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `SEP_THRESHOLD` (default `0.5`, a placeholder): SEP's own escalation
+  threshold on its probability scale. A trained probe records a
+  `recommended_threshold` (Youden's J on out-of-fold predictions), which is
+  logged next to the threshold in use but never applied implicitly.
+- SEP layer and token-position sweep: `metrics.json` reports a single-layer
+  AUROC for every layer at the prompt's last token and near the answer's end,
+  the last-layer baseline, and the selected window's nested cross-validated
+  AUROC.
+- `eval.collect_sep_dataset`: the SEP calibration dataset (sampled answers,
+  meaning clusters, discrete and likelihood-weighted SE, greedy correctness,
+  and every layer's hidden states) as `rows.parquet`,
+  `hidden_states.safetensors`, `collection_config.json` and
+  `training_log.jsonl`.
+- SEP probes load from the Hugging Face Hub with
+  `SEP_PROBE_PATH=hf://<owner>/<repo>[@<revision>]`.
+- `eval.publish_sep_probe`: checks a probe, its dataset and a held-out
+  benchmark report against each other, renders a model card, and uploads the
+  probe and dataset repos under one tag (`--dry-run` uploads nothing).
+- `eval.compute_auroc --json-out` writes the report, plus every scored
+  question's id, to a file.
 - Local web playground (`uv run python -m demo.web`, http://127.0.0.1:8765): a
   FastAPI app with a committed React UI, one tab per way in — score answers
   with their meaning clusters, PE and a client-side escalation threshold; ask
@@ -24,9 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time, registry and per-model SEP probes checked before any scoring), and
   `eval.compare_models` reports accuracy and per-detector AUROC with CIs side by
   side, refusing runs over different questions or sampling settings.
-- `eval/calibrate_threshold.py`: chooses `SE_THRESHOLD` on a dev slice by
-  Youden's J and refuses a dev slice that overlaps the test slice. The
-  default `1.0` is now documented as a placeholder.
+- `eval/calibrate_threshold.py`: chooses an escalation threshold on a dev
+  slice by Youden's J, refuses a dev slice that overlaps the test slice, and
+  reports the setting to use in `env_var` (`SE_THRESHOLD`, or `SEP_THRESHOLD`
+  for SEP). `--detector` accepts only detectors with an escalation threshold
+  (LLM judges are refused), and τ is printed unrounded. The default `1.0` is
+  now documented as a placeholder.
 - Criterion 3b in `eval/escalation_uplift.py`: the run's escalation is compared
   with escalating the same number of questions at random (exact expectation,
   paired-bootstrap CI), and `accuracy_vs_rate` gives accuracy at every
@@ -50,17 +73,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `examples/custom_detector.py` (a user-defined detector next to PE and SE).
 - Measurable research success criteria (QA Guide) with a script for each:
   `eval/compute_auroc.py` now reports the SE AUROC and SE-PE gap,
-  `eval/escalation_uplift.py`, `eval/adversarial_separation.py`, and a
-  held-out SEP-vs-SE Pearson r in `eval/train_sep_probe.py`.
+  `eval/escalation_uplift.py` and `eval/adversarial_separation.py`.
 - Statistical inference for the success criteria (`eval/inference_stats.py`):
   bootstrap 95% CIs for every AUROC, a paired-bootstrap CI for the SE-PE gap,
   McNemar's exact test and a paired CI for the escalation uplift, and the AUC
   effect size for adversarial separation.
-- `load_triviaqa --offset` for disjoint dataset slices; `train_sep_probe`
-  writes a `<probe>.train_ids.json` sidecar and `run_benchmark` refuses to
-  score a probe on its own training questions, or a probe without a sidecar.
+- `load_triviaqa --offset` for disjoint dataset slices; the SEP probe
+  directory holds `train_ids.json`, and `run_benchmark` refuses to score a
+  probe on its own training questions, a probe without that file, or (with
+  SEP enabled) a question without an `id`.
 - `ResponseEvaluator.slm` and `.detectors` read-only properties;
-  `SemanticEntropyProbeDetector.probe_path`.
+  `SemanticEntropyProbeDetector.probe_dir`, `.source` and `.config`.
 - `VLLM_AUTH=google`: the vLLM client sends a refreshing Google access token,
   so it can call a Vertex AI endpoint directly (`demo/google_auth.py`).
 - `EntailmentScorer` protocol: Semantic Entropy accepts any equivalence
@@ -83,7 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The "Computed semantic entropy." log record replaces the scalar `se_nats`
   and `estimator` fields with `se_nats_by_estimator`, a map from estimator to
   SE in nats.
-- `eval.run_benchmark --in` and `eval.train_sep_probe --calibration-set` are
+- `eval.run_benchmark --in` and `eval.collect_sep_dataset --calibration-set` are
   optional: without them, fixed non-overlapping TriviaQA slices (200
   benchmark, 500 calibration questions) are downloaded once to
   `data/questions/`.
@@ -120,7 +143,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   provider `~> 8.0`; the provider lock file is committed.
 - vLLM generation reports raw logprobs (`--logprobs-mode raw_logprobs`);
   embeddings are last-token, unnormalized, over the chat-templated prompt,
-  matching `HFTransformersProvider` so SEP probes transfer between providers.
+  the same position `HFTransformersProvider` reads; the embed runner serves
+  last-layer SEP probes only, and agreement with the HF provider's vectors is
+  unverified.
 - **Breaking:** success criteria 2-4 now also need significance or effect
   size: the SE-PE gap's CI must exclude zero, the escalation uplift must pass
   McNemar's test (p < 0.05), and adversarial separation needs an AUC effect
@@ -130,10 +155,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** benchmark rows record `model_id`, `sample_n` and
   `sample_temperature`; the scoring scripts refuse files that mix runs, rows
   written without these fields, and adversarial/reference runs that differ.
-- **Breaking:** `train_sep_probe` reads `load_triviaqa` output (`id`,
-  `question`) instead of a `prompt` field, and reports a 5-fold
-  cross-validated Pearson r (`--cv-folds`) instead of one held-out split
-  (`--holdout-fraction` removed).
+- **Breaking:** SEP follows Kossen et al.'s classifier recipe: the probe is a
+  logistic classifier on discrete SE split at the best-split point, and its
+  score is p(high SE) in [0, 1], not SE in nats. Layers are chosen by a sweep
+  (by default a 5-layer window chosen by cross-validation over all calibration
+  rows, with a nested cross-validation AUROC that includes the cost of
+  choosing) instead of fixed to the last one; deviations from the paper are
+  listed in the README and in each probe's config.
+- **Breaking:** a SEP probe is a directory (`probe.safetensors`,
+  `probe_config.json`, `train_ids.json`, `training_log.jsonl`, `metrics.json`)
+  that pins the backbone's model id, Hub revision, layer count, hidden size,
+  answer instruction and chat template; `SEP_PROBE_PATH` takes a directory or
+  `hf://<owner>/<repo>[@<revision>]`, and a mismatching probe is refused
+  (`SEPProbeMismatchError`) before any sample.
+- **Breaking:** training is two steps: `eval.collect_sep_dataset` (GPU) writes
+  the calibration dataset, and `eval.train_sep_probe --dataset DIR` (CPU) fits
+  from it alone, with `--layers auto|final|<a>-<b>` and the pre-registered
+  `--max-iter 1000` / `--standardize` fallbacks for non-convergence.
+- **Breaking:** the `SamplingProvider` protocol adds `model_revision`,
+  `num_hidden_layers`, `hidden_size`, `chat_template_sha256` and
+  `check_hidden_state_request(layers)`, and
+  `pooled_hidden_state(prompt, layers)` returns one row per requested layer. A
+  detector with `requires_hidden_state=True` must implement
+  `HiddenStateDetector.hidden_state_layers`, or building the evaluator raises
+  `TypeError`.
+- **Breaking:** SEP on `SLM_PROVIDER=vllm` serves only last-layer probes and
+  needs `VLLM_EMBED_BASE_URL`; both are checked when the evaluator is built
+  (`UnsupportedHiddenStateRequest`), not at the first request.
+- **Breaking:** benchmark rows record `sep_probe` (the probe's reference,
+  resolved Hub revision and the SHA-256 of its weights and config), and the
+  scoring scripts refuse results files without it; re-run `eval.run_benchmark`.
+  A SEP run refuses a question without an `id` instead of skipping it.
+- The web playground and `demo.cli` show SEP as a percentage, "P(high SE)",
+  and `/api/status` reports `sep_threshold` and the escalation threshold in
+  use.
+- Registry entries pin each model's Hub revision, layer count and hidden
+  size; both providers load that revision, and vLLM is launched with
+  `--revision` and `--tokenizer-revision`.
+- The NLI model is loaded at a pinned commit (`NLI_REVISION`); an explicit
+  `NLIScorer(model_id=...)` must pass its revision.
 - `escalation_uplift` reports how many answers escalation fixed and broke and
   the mean answer length on both sides, warning when final answers are much
   longer (substring matching rewards length).
@@ -161,6 +221,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Private talk-preparation and agent notes are no longer tracked.
 
 ### Removed
+- **Breaking:** Ridge `.pt` SEP probes, `--ridge-alpha` and the Pearson-r
+  report. A `.pt` probe (or any file given as `SEP_PROBE_PATH`) is refused
+  with `ObsoleteSEPProbeError` and a retrain hint; it is not converted.
+- `ModelEntry.sep_probe_path`, which nothing read.
 - `eval/vertex_genai_eval.py` and `EVAL_JUDGE_MODEL_ID`: it scored
   groundedness without any context to ground against, and its dependency
   pulled a `litellm` release with an open advisory.
@@ -169,6 +233,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `serving/deploy_vertex.sh` — replaced by the Terraform path.
 
 ### Fixed
+- Escalation with `ESCALATION_DETECTOR=semantic_entropy_probe` compared SEP's
+  score against `SE_THRESHOLD`; it now uses `SEP_THRESHOLD`, and settings
+  refuse escalating on SEP when SEP is not in `ENABLED_DETECTORS`.
 - `eval.datasets.load_triviaqa` loads `mandarjoshi/trivia_qa`; the bare
   `trivia_qa` name is rejected by current `datasets` releases.
 - TriviaQA slices are cut from unique questions: the validation split repeats

@@ -19,6 +19,11 @@
 - [Step 6 — How does a number become a verdict?](#step-6--how-does-a-number-become-a-verdict)
 - [What do real cases look like end to end?](#what-do-real-cases-look-like-end-to-end)
 - [Why does SE beat predictive entropy?](#why-does-se-beat-predictive-entropy)
+- [How does SEP get SE's signal from one forward pass?](#how-does-sep-get-ses-signal-from-one-forward-pass)
+  - [Why a classifier and not a regressor?](#why-a-classifier-and-not-a-regressor)
+  - [How does SEP turn SE into a yes/no target?](#how-does-sep-turn-se-into-a-yesno-target)
+  - [Why sweep layers instead of using the last one?](#why-sweep-layers-instead-of-using-the-last-one)
+  - [Isn't the middle layer always best?](#isnt-the-middle-layer-always-best)
 - [Where does it break?](#where-does-it-break)
 - [How do I run it myself?](#how-do-i-run-it-myself)
 
@@ -521,7 +526,9 @@ SE is a continuous score, not a boolean. The verdict is a threshold comparison.
 escalate  ⟺  H_SE > τ
 ```
 
-where `τ` ("tau") is `se_threshold` — default `1.0` nats (`src/hallucinations_math_lab/config.py:75`).
+where `τ` ("tau") is `se_threshold` — default `1.0` nats (`src/hallucinations_math_lab/config.py`).
+SEP escalates by the same rule against its own threshold, `sep_threshold`, because its
+score is a probability, not nats (see [below](#how-does-sep-get-ses-signal-from-one-forward-pass)).
 
 ### Python (`src/hallucinations_math_lab/escalation.py`)
 
@@ -664,7 +671,109 @@ The price is real: SE costs N generations plus `O(N·K)` NLI forward-pass pairs 
 question, against a single forward pass for predictive entropy. That cost is why
 **SEP** (Semantic Entropy Probes, `src/hallucinations_math_lab/services/semantic_entropy_probe.py`)
 exists as the third detector — it trains a probe on the model's hidden states to
-*predict* `H_SE` from one forward pass, trading some accuracy for most of SE's cost.
+predict, from one forward pass, whether `H_SE` would be high, trading some accuracy
+for most of SE's cost. The next section shows how.
+
+---
+
+## How does SEP get SE's signal from one forward pass?
+
+SEP follows Kossen et al. 2024 ([arXiv 2406.15927](https://arxiv.org/abs/2406.15927)).
+Offline, for each of 500 calibration questions, the repo computes SE the expensive way
+and stores the model's internal vectors at every layer. A logistic classifier then learns
+to read "will SE be high?" off those vectors. At run time only the vectors are needed:
+one forward pass over the prompt, before any answer is generated. The training code is
+`eval/collect_sep_dataset.py` (the expensive, GPU part) and `eval/train_sep_probe.py`
+(the CPU fit); the detector that scores with it is
+`src/hallucinations_math_lab/services/semantic_entropy_probe.py`.
+
+### Why a classifier and not a regressor?
+
+Because the paper uses one, and because escalation only needs a yes/no: "is SE high
+enough to hand the question to the judge?", not its exact value in nats. The probe's
+output is
+
+```
+p(high SE) = sigmoid(w · x + b)
+```
+
+where `x` is the hidden-state vectors of the chosen layers, laid end to end, and `w`, `b`
+are the fitted weights.
+
+**The misconception to head off: "a regressor keeps more information, so it must be
+better."** With N = 10 samples, discrete SE takes at most 42 distinct values (one per
+way of splitting 10 samples into clusters), in practice clumps at a few, and is noisy in
+the middle; predicting its exact value mostly means fitting that noise. The
+paper's own comparison metric is AUROC, a ranking measure, which a classifier's
+probability serves directly.
+
+**The consequence.** SEP's score is a probability in [0, 1], not nats, so SE's threshold
+does not carry over: SEP has its own, `SEP_THRESHOLD`.
+
+### How does SEP turn SE into a yes/no target?
+
+By the paper's **best-split** rule: choose the threshold γ that makes the two groups,
+"SE ≤ γ" and "SE > γ", as tight as possible, measured as the total squared distance of
+each group's SE values from that group's mean. Every question with SE > γ is labelled
+"high" (1), the rest "low" (0). The SE used is the **discrete** one, each cluster's share
+of the 10 samples, not the likelihood-weighted SE the SE detector reports.
+
+**A worked example on 8 questions.** Their cluster splits and discrete SE, sorted:
+
+| Cluster split | 10 | 10 | 9 + 1 | 9 + 1 | 5 + 5 | 7 + 2 + 1 | 4 + 3 + 2 + 1 | 1 × 10 |
+|---|---|---|---|---|---|---|---|---|
+| SE (nats) | 0.00 | 0.00 | 0.33 | 0.33 | 0.69 | 0.80 | 1.28 | 2.30 |
+
+The candidates for γ are the midpoints between consecutive distinct values. For each, the
+within-group squared error:
+
+| γ | low group | high group | total squared error |
+|---|---|---|---|
+| 0.16 | 2 rows | 6 rows | 2.81 |
+| 0.51 | 4 rows | 4 rows | 1.72 |
+| 0.75 | 5 rows | 3 rows | 1.51 |
+| **1.04** | **6 rows** | **2 rows** | **1.09** |
+| 1.79 | 7 rows | 1 row | 1.30 |
+
+So γ\* = 1.04: the "scattered" and "every answer different" questions are high SE, and
+the other six low. Two details are the repo's own (listed as deviations in the README):
+the paper searches a 100-point grid that ends exactly at the largest SE, where real
+data can sit on the threshold; midpoints never coincide with a data value, so every row
+gets a clean label. And γ is refitted inside every cross-validation fold from that fold's
+training rows only, so the held-out rows never shape their own labels.
+
+**The misconception to head off: "the split is at the median."** It isn't; the example's
+split leaves six questions low and two high. The best split follows the gaps in the data,
+which is why the class balance has to be checked on every new model.
+
+### Why sweep layers instead of using the last one?
+
+Because which layer holds the signal is an empirical question, and for Gemma 4 nobody has
+measured it. A transformer builds its vectors layer by layer; "layer k" here means the
+vector after k of the model's L layers (layer 0 is the raw token embedding, layer L the
+last). The trainer fits a single-layer probe at every layer from 1 to L, at two reading
+positions: the last prompt token before the answer (TBG, "token before generation") and
+a token near the end of the generated answer (SLT, "second-last token"). It records every
+one of those scores in `metrics.json` (`layer_sweep`), and the last-layer score on its
+own as the baseline (`final_layer_auroc`).
+
+The probe that ships reads a **window of 5 consecutive layers**, chosen by
+cross-validation over all calibration rows. The reported AUROC comes from nested
+cross-validation, which repeats that selection inside each outer fold using only its
+training rows, so the score includes the cost of choosing and is not the optimistic
+maximum of many tries. `--layers final` skips the search and reads layer L
+alone; that is the only probe the vLLM embed server can serve.
+
+### Isn't the middle layer always best?
+
+No, not in the setting this repo uses. In Kossen et al., mid-layer peaks show up for
+probes trained to predict *correctness* and for *long-form* answers. For short answers,
+the TriviaQA setting used here, their SEP scores rise toward the late layers, and the
+chosen windows are the last five layers for most of their models (one model, Phi-3, is
+the mid-to-late exception). That does not make "late" true for Gemma 4 either: the
+paper never tested it, and its prompt format differs from ours (a plain-text
+`...Answer:` prompt, where we use the Gemma chat template). Until the first GPU run's
+sweep exists, this repo claims neither; the sweep is how the question gets answered.
 
 ---
 

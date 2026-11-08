@@ -62,7 +62,10 @@ and a threshold slider flipping "escalate", teaches it faster than any table.
   escalation), mirroring `demo.cli detect` / `chat`.
 - Shows the greedy answer, the N samples grouped into clusters (same component
   as tab 1), the detector scores, escalated yes/no, the answer source, and the
-  judge's reasoning when it answered.
+  judge's reasoning when it answered. PE and SE are shown in nats; SEP, when
+  enabled, as a percentage, "P(high SE)", since its score is a probability.
+  The threshold line uses the run's own escalation threshold, so a
+  SEP-escalated run reads its threshold as a percentage too.
 - A status strip from `GET /api/status`: provider, model id, whether Google
   credentials are configured (for *Chat*). Missing prerequisites disable the
   action with the reason shown, linking to the README's hardware section.
@@ -109,7 +112,7 @@ frontend/            # Vite + React + TS source (dev only)
 
 | Method & path | Body / params | Returns | Backed by |
 |---|---|---|---|
-| `GET /api/status` | — | provider, model id, judge configured, SE threshold, NLI model id | `get_settings()` |
+| `GET /api/status` | — | provider, model id, judge configured, SE threshold (nats), SEP threshold (`sep_threshold`, p(high SE)), the escalation threshold `/ask` applies, NLI model id | `get_settings()` |
 | `GET /api/presets` | — | the three scenarios (question, answers, logprobs) | `examples/score_precollected_samples.SCENARIOS` |
 | `POST /api/score` | question, answers (+ optional per-answer token logprobs) | SE, PE or null, clusters (member indices + representative) | `evaluate_responses` with `NLIScorer` |
 | `POST /api/ask` | question, `mode: detect \| chat` | the `DetectionResult` fields the CLI prints | the same `ResponseEvaluator` path as `demo/cli.py` |

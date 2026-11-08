@@ -63,13 +63,15 @@ src/hallucinations_math_lab/
   custom_types/
     domain_types.py        # Sample, SampleSet, TokenLogprob, Cluster, DetectionResult
     llm_schemas.py         # JudgeVerdict (the judge's structured output)
+    sep_probe_types.py     # SEP probe and dataset configs, metrics, train ids (Pydantic, extra="forbid")
   services/
-    detector_protocol.py   # Detector, DetectionContext, DetectorScore, DetectorMetadata
+    detector_protocol.py   # Detector, HiddenStateDetector, DetectionContext, DetectorScore, DetectorMetadata
     predictive_entropy.py  # PE
     semantic_entropy.py    # SE + bidirectional-entailment clustering
-    semantic_entropy_probe.py  # SEP + the SEPProbe linear module
+    semantic_entropy_probe.py  # SEP detector: load a probe directory or hf:// probe, check compatibility
+    sep_probe_weights.py   # read/write probe.safetensors (no pickle, no sklearn)
     nli.py                 # EntailmentScorer protocol + DeBERTa-MNLI NLIScorer (lazy-loaded)
-    sampling_provider.py   # SamplingProvider protocol
+    sampling_provider.py   # SamplingProvider protocol, UnsupportedHiddenStateRequest
   judges/                  # Judge protocol + GeminiJudge (google-genai)
 demo/
   cli.py                   # `python -m demo.cli detect|chat`
@@ -88,7 +90,16 @@ eval/
   escalation_uplift.py     # criterion 3: accuracy gained by escalating
   adversarial_separation.py  # criterion 4: Mann-Whitney U, adversarial vs correct
   success_criteria.py      # the pass bars, as constants
-  train_sep_probe.py       # fit an SEP probe, report held-out Pearson r vs SE
+  calibrate_threshold.py   # choose SE_THRESHOLD or SEP_THRESHOLD on a dev slice
+  collect_sep_dataset.py   # GPU: SE labels + every layer's hidden states -> dataset directory
+  sep_dataset_io.py        # read/write the dataset directory (parquet + safetensors + config)
+  sep_recipe.py            # best-split binarization, the logistic fit, convergence fallbacks
+  sep_layer_selection.py   # layer sweep, window choice, nested-CV estimate, out-of-fold threshold
+  train_sep_probe.py       # CPU: dataset directory -> probe directory
+  sep_probe_provenance.py  # SEP probe provenance: training-id leakage guard and the per-row sep_probe record
+  repo_state.py            # repository commit and dirty flag, recorded in the probe
+  sep_model_card.py        # render the Hub model card (pure); template in templates/
+  publish_sep_probe.py     # check, stage and upload a probe and its dataset to the Hub
 examples/                  # runnable playground scripts
 serving/
   Dockerfile               # vllm/vllm-openai:v0.31.0-cu129 + registry + launcher
@@ -117,8 +128,13 @@ makes sense inside the repo.
 
 1. `ResponseEvaluator.evaluate(prompt)` asks the provider for N samples (if
    any detector `requires_samples`), a greedy answer, and a pooled hidden
-   state — the last layer's vector at the final prompt token — (if any
-   detector `requires_hidden_state`).
+   state — one vector per layer the probe reads, at the final prompt token,
+   shape `[len(layers), hidden_size]` — (if any detector
+   `requires_hidden_state`). With SEP enabled, the constructor has already
+   loaded the probe, asked the provider whether it can serve those layers
+   (`check_hidden_state_request`), and checked the probe against the model's
+   id, revision, depth, width, answer instruction and chat-template hash, so
+   a mismatch fails before the first sample.
 2. It calls `evaluate_responses(...)`, which validates that every detector's
    inputs are present (fail fast), builds one `DetectionContext`, and calls
    each detector's `score(ctx)`.
@@ -140,6 +156,20 @@ makes sense inside the repo.
 4. Export it from `__init__.py` if consumers should import it.
 5. Write the unit test first (see `tests/unit/test_semantic_entropy.py`):
    known inputs → known score, plus the missing-prerequisite error.
+
+A detector with `requires_hidden_state=True` must also implement
+`HiddenStateDetector.hidden_state_layers` (the layers it reads); the
+evaluator raises `TypeError` otherwise, and every hidden-state detector in
+one evaluator must read the same layers.
+
+**Implementing `SamplingProvider` yourself?** Besides `model_id`, `sample`
+and `greedy`, the protocol has `model_revision`, `num_hidden_layers`,
+`hidden_size`, `chat_template_sha256`, `check_hidden_state_request(layers)`
+and `pooled_hidden_state(prompt, layers)`. Layer k is the vector after k
+decoder layers (0 is the token embeddings, L the last layer): the index into
+the tuple transformers returns with `output_hidden_states=True`. A provider
+that cannot serve a layer raises `UnsupportedHiddenStateRequest` from
+`check_hidden_state_request`.
 
 `examples/custom_detector.py` is a working sketch of steps 2–3 without
 touching the library.
