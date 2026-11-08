@@ -52,7 +52,12 @@ import transformers
 from demo.model_registry import ProviderKind, get_model_entry
 from demo.slm_provider import SamplingTruncation, build_default_provider
 from eval.benchmark_results import ALIASES_FIELD, ID_FIELD, QUESTION_FIELD, is_correct
-from eval.datasets.default_question_sets import CALIBRATION_SLICE, ensure_question_set
+from eval.datasets.default_question_sets import (
+    CALIBRATION_SLICE,
+    QuestionLoader,
+    QuestionSlice,
+    ensure_question_set,
+)
 from eval.sep_dataset_io import (
     SEPDataset,
     SEPDatasetRow,
@@ -468,6 +473,17 @@ def _write_finished_questions(
     return f"the {n_finished} questions before it were written to {output_dir}"
 
 
+def resolve_calibration_path(
+    calibration_set: Path | None,
+    loader: QuestionLoader | None = None,
+    slice_: QuestionSlice = CALIBRATION_SLICE,
+) -> Path:
+    """The given calibration file, or the default calibration slice (built on first use)."""
+    if calibration_set is not None:
+        return calibration_set
+    return ensure_question_set(slice_, loader=loader)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Collect the SEP calibration dataset.")
     parser.add_argument(
@@ -487,9 +503,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    calibration_set = read_calibration_set(
-        args.calibration_set or ensure_question_set(CALIBRATION_SLICE)
-    )
+    calibration_set = read_calibration_set(resolve_calibration_path(args.calibration_set))
     provider = build_default_provider()
     output_dir = args.output_dir or Path(SEP_DATASET_DIR) / model_slug(provider.model_id)
     collect_sep_dataset(provider, calibration_set, output_dir)

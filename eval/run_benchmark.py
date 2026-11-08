@@ -240,7 +240,8 @@ def run(
 def _sweep_train_hint(model_id: str) -> str:
     """How to give `model_id` its own probe in a sweep, which refuses SEP_PROBE_PATH."""
     return (
-        f"Collect a dataset with `VLLM_MODEL_ID={model_id} uv run python -m "
+        "Collect a dataset with `SLM_PROVIDER=hf_transformers "
+        f"VLLM_MODEL_ID={model_id} uv run python -m "
         "eval.collect_sep_dataset`, then train with `uv run python -m "
         "eval.train_sep_probe --dataset DIR`, or drop semantic_entropy_probe from "
         "ENABLED_DETECTORS."

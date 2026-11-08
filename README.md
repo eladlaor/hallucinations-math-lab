@@ -61,7 +61,7 @@ same signal without the repeated sampling.
 | Detector | What it reads | Cost |
 |---|---|---|
 | **SE** — Semantic Entropy ([Farquhar et al., *Nature* 2024](https://www.nature.com/articles/s41586-024-07421-0)) | how many *different meanings* appear across N samples | N generations + NLI checks |
-| **SEP** — Semantic Entropy Probes ([Kossen et al., 2024](https://arxiv.org/abs/2406.15927)) | p(high SE) from a logistic probe over the model's hidden states, before it answers | one extra dot product |
+| **SEP** — Semantic Entropy Probes ([Kossen et al., 2024](https://arxiv.org/abs/2406.15927)) | p(high SE) from a logistic probe over the model's hidden states, before it answers | one extra forward pass over the prompt, plus a dot product |
 | **PE** — Predictive Entropy | the token probabilities of the samples | free (a by-product of generation) |
 
 **The two measurements this repo produces:**
@@ -386,7 +386,8 @@ works and when it silently fails.
   unlike the training set. (c) The provider does not expose hidden states
   (most hosted APIs). (d) The SE labels it was trained on were themselves
   miscalibrated.
-- **Cost.** One dot product and a sigmoid — the cheapest by far.
+- **Cost.** One forward pass over the prompt (on vLLM, served by a second
+  embed server) and a dot product with a sigmoid; no sampling and no NLI.
 
 **How they relate.** PE is the floor (free, wording-only). SE is the signal
 ceiling at real cost. SEP tries to buy most of SE's signal at PE's price by

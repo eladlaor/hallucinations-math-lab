@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from eval.collect_sep_dataset import build_parser as build_collect_parser
+from eval.collect_sep_dataset import resolve_calibration_path
 from eval.datasets.default_question_sets import (
     BENCHMARK_SLICE,
     CALIBRATION_SLICE,
@@ -77,4 +79,29 @@ def test_benchmark_with_in_uses_that_file_untouched(tmp_path: Path) -> None:
     args = build_benchmark_parser().parse_args(["--in", str(own), "--out", "x.jsonl"])
     calls: list[tuple[int, int, Path]] = []
     assert resolve_questions_path(args.in_path, loader=_fake_loader(calls)) == own
+    assert calls == []
+
+
+def test_collection_without_calibration_set_uses_the_default_slice(tmp_path: Path) -> None:
+    args = build_collect_parser().parse_args([])
+    calls: list[tuple[int, int, Path]] = []
+    s = QuestionSlice(name="calibration", offset=0, n=2, directory=tmp_path)
+    assert args.calibration_set is None
+    assert (
+        resolve_calibration_path(args.calibration_set, loader=_fake_loader(calls), slice_=s)
+        == s.path
+    )
+    assert calls == [(2, 0, s.path)]
+
+
+def test_collection_resolves_to_the_calibration_slice_by_default() -> None:
+    assert resolve_calibration_path.__defaults__ == (None, CALIBRATION_SLICE)
+    assert (CALIBRATION_SLICE.offset, CALIBRATION_SLICE.n) == (0, 500)
+
+
+def test_collection_with_calibration_set_uses_that_file_untouched(tmp_path: Path) -> None:
+    own = tmp_path / "mine.jsonl"
+    args = build_collect_parser().parse_args(["--calibration-set", str(own)])
+    calls: list[tuple[int, int, Path]] = []
+    assert resolve_calibration_path(args.calibration_set, loader=_fake_loader(calls)) == own
     assert calls == []

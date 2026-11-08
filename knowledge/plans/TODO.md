@@ -131,7 +131,8 @@ destructive before it.
 - [ ] **`eval/check_hidden_state_parity.py`.** Automate the HF-vs-vLLM
   hidden-state check (cosine similarity at TBG, agreement of probe
   probabilities and AUROC; item 7 of SEP_CLASSIFIER's "What needs a real GPU
-  run"), recording the result in `metrics.json["provider_parity"]`.
+  run"), recording the result in CAVEATS (adding a `provider_parity` field to
+  `SEPProbeMetrics` first if it should live in `metrics.json`).
 - [ ] **A resumable one-command release orchestrator**
   (`eval/release_sep_probe.py`) wrapping collect → train → benchmark → score →
   publish.

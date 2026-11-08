@@ -205,8 +205,8 @@ a **pre-registered fallback**:
    is recorded as D12. A column with σ = 0 scales to near-zeros rather than exact zeros, since
    its mean carries rounding error; the L2 fit leaves its w' at (near-)0, and no mask is applied.
 
-The same `--standardize` flag can also be run as a **reported ablation** on the CPU refit
-(`metrics.json["ablations"]`). It is never the default.
+The same `--standardize` flag could also be run as a reported ablation on the CPU refit. It is
+never the default. No ablation is recorded in `metrics.json` (not implemented; see item 10).
 
 Constants (in `constants.py`): `SEP_LOGREG_C = 1.0`, `SEP_LOGREG_L1_RATIO = 0.0`,
 `SEP_LOGREG_SOLVER = "lbfgs"`, `SEP_LOGREG_MAX_ITER = 100`, `SEP_LOGREG_FALLBACK_MAX_ITER = 1000`,
@@ -412,7 +412,8 @@ nowhere else) is removed.
 ## Deviations from the paper
 
 This table goes into the README, the model card, and `probe_config.deviations_from_paper`.
-A test asserts that the list is present. No other deviation is allowed silently.
+Tests assert that `probe_config` and the model card list them and that the README table lists
+exactly the `SEPPaperDeviation` IDs. No other deviation is allowed silently.
 
 | ID | Paper | Ours | Why |
 |---|---|---|---|
@@ -521,7 +522,6 @@ disk and on the Hub**.
 - **`selection[position]`**: `{window, inner_cv_auroc, nested_cv_auroc_vs_binarized_se: {mean, std, per_fold, window_per_fold}, nested_cv_auroc_vs_error}`
 - **`threshold`**: `{recommended, tpr, fpr, escalation_rate, source: "oof_youden"}`
 - **`converged`**, **`n_iter`**
-- **`ablations`**: optional.
 - **`heldout_benchmark`**: added at publish time; holds compute_auroc's output for SEP, PE, SE and discrete SE with bootstrap CIs, and the run config, whose `sep_probe` holds the probe's `weights_sha256` (of `probe.safetensors`) and `config_sha256` (of `probe_config.json`); publish_sep_probe checks both against the directory it publishes. It also holds `question_ids` (compute_auroc `--json-out` only), and the publisher refuses any that is a training id.
 
 ### The dataset directory (companion Hub dataset repo)
@@ -1304,7 +1304,8 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
 **18. Docs (PSP 8).**
 
 - Everything in [Docs to update](#docs-to-update).
-- No test beyond the existing link checks.
+- No link check exists; `tests/unit/test_readme_deviations.py` ties the README's deviation
+  table to `SEPPaperDeviation`.
 - Done when: it has been reviewed against that list.
 - *As implemented:*
   - **Glossary deferred** (see [Docs to update](#docs-to-update)); a TODO item carries it.
@@ -1360,7 +1361,7 @@ All of these are stated as **assumptions** until the first run.
 6. Teacher-forced SLT agrees with generate-time SLT within tolerance.
 7. HF index L vs the vLLM embed runner at TBG: cosine similarity, and agreement of probe
    probabilities and AUROC. Placeholder bars are cosine ≥ 0.999 and |Δp| ≤ 0.02. Record the
-   result in `metrics.json["provider_parity"]` and CAVEATS. This is a manual check for now;
+   result in CAVEATS (`SEPProbeMetrics` forbids extra keys, so not in `metrics.json`). This is a manual check for now;
    the script is deferred.
 8. vLLM `--revision` works together with `--language-model-only` on the v0.31 image.
 9. CPU time of the nested sweep, and disk use (about 110 MB per position for E2B).
