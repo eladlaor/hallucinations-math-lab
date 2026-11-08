@@ -26,6 +26,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `eval.publish_sep_probe`: checks a probe, its dataset and a held-out
   benchmark report against each other, renders a model card, and uploads the
   probe and dataset repos under one tag (`--dry-run` uploads nothing).
+- The SEP model card states its license: `license: apache-2.0` with the Gemma 4
+  `license_link`, plus a license section covering the base model's terms, the
+  repo's MIT code license at the fitting commit, and the backbone restriction.
+  TriviaQA question ids keep TriviaQA's terms wherever they appear
+  (`train_ids.json`, `training_log.jsonl`, and `heldout_benchmark` in
+  `metrics.json`). A backbone with no recorded license is refused.
+- A dataset card (`README.md`) for the SEP calibration dataset repo. It covers
+  the files and columns, the refit command, provenance, and the license and
+  attribution: derived columns are Apache 2.0, and the questions are credited to
+  TriviaQA (Joshi et al., 2017), whose terms users must check.
 - `eval.compute_auroc --json-out` writes the report, plus every scored
   question's id, to a file.
 - `eval.rescore_benchmark`: re-runs PE, SE and discrete SE on a saved

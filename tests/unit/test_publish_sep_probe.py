@@ -12,7 +12,8 @@ Contract pinned here:
     path, is refused; so is a malformed repo id or tag, before anything is written.
   - The card describes nested CV only for a probe whose layers were selected.
   - The token comes from `hf auth login`, never from the command line.
-  - A real run creates both repos, uploads both folders and tags both commits;
+  - A real run creates both repos, uploads the probe folder with its card and the
+    dataset folder with its own card (README.md), and tags both commits;
     a dry run uploads nothing, a tag either repo already has uploads nothing, and
     a failed model tag deletes the dataset tag it follows.
 """
@@ -27,11 +28,11 @@ from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
-from huggingface_hub import CommitInfo, GitRefInfo, GitRefs
+from huggingface_hub import CommitInfo, CommitOperationAdd, GitRefInfo, GitRefs
 
 from eval import publish_sep_probe
 from eval.publish_sep_probe import (
-    MODEL_CARD_FILE,
+    CARD_FILE,
     build_parser,
     check_target,
     load_heldout,
@@ -39,9 +40,19 @@ from eval.publish_sep_probe import (
     stage_release,
 )
 from eval.sep_dataset_io import SEPDataset, SEPDatasetRow, write_sep_dataset
-from eval.sep_model_card import REFIT_COMMAND, PublishTarget, refit_command, render_model_card
+from eval.sep_model_card import (
+    GEMMA_4_LICENSE_URL,
+    REFIT_COMMAND,
+    REPO_URL,
+    PublishTarget,
+    ReleaseCards,
+    refit_command,
+    render_dataset_card,
+    render_model_card,
+)
 from hallucinations_math_lab.constants import (
     SEP_COLLECTION_CONFIG_FILE,
+    SEP_DATASET_DIR_FILES,
     SEP_DATASET_ROWS_FILE,
     SEP_DATASET_TENSORS_FILE,
     SEP_METRICS_FILE,
@@ -69,7 +80,6 @@ from hallucinations_math_lab.custom_types.sep_probe_types import (
     SEPThresholdMetrics,
 )
 from tests.unit.sep_probe_fixtures import (
-    PROBE_MODEL_ID,
     PROBE_NUM_HIDDEN_LAYERS,
     probe_config,
     write_probe_dir,
@@ -80,6 +90,8 @@ _GOLDEN_CARD = Path(__file__).parent / "fixtures" / "sep_model_card.golden.md"
 _TARGET = PublishTarget(
     model_repo="owner/sep-probe-model", dataset_repo="owner/sep-calibration-model", tag="v1"
 )
+# The card states the backbone's license, so the release is for a backbone with one recorded.
+_MODEL_ID = "google/gemma-4-E2B-it"
 _WINDOW = (1, 2)
 _N_ROWS = 10
 _IDS = [f"q{i}" for i in range(_N_ROWS)]
@@ -88,7 +100,7 @@ _HELDOUT_ROWS = 200
 
 
 def _config(**training: Any) -> SEPProbeConfig:
-    config = probe_config(layers=_WINDOW)
+    config = probe_config(layers=_WINDOW, model_id=_MODEL_ID)
     if not training:
         return config
     return config.model_copy(update={"training": config.training.model_copy(update=training)})
@@ -192,7 +204,7 @@ def _sha256(path: Path) -> str:
 
 def _heldout(probe_dir: Path, **sep_probe: Any) -> dict[str, Any]:
     """compute_auroc --json-out's report for a run that scored the probe in `probe_dir`."""
-    model_id = sep_probe.pop("model_id", PROBE_MODEL_ID)
+    model_id = sep_probe.pop("model_id", _MODEL_ID)
 
     def detector(auroc: float) -> dict[str, Any]:
         return {
@@ -255,7 +267,7 @@ class _Release:
         self.heldout_path = _write_json(root / "heldout.json", _heldout(self.probe_dir))
         self.staging_dir = root / "staging"
 
-    def stage(self) -> str:
+    def stage(self) -> ReleaseCards:
         return stage_release(
             self.probe_dir, self.dataset_dir, self.heldout_path, _TARGET, self.staging_dir
         )
@@ -290,6 +302,30 @@ def test_model_card_snapshot(release: _Release) -> None:
     assert card == _GOLDEN_CARD.read_text()
 
 
+def test_model_card_carries_the_backbone_license_and_links_the_code_license(
+    release: _Release,
+) -> None:
+    raw, heldout = load_heldout(release.heldout_path)
+    metrics = SEPPublishedMetrics(**_metrics().model_dump(), heldout_benchmark=raw)
+    config = _config()
+    card = render_model_card(config, metrics, heldout, _TARGET)
+    _, front, _ = card.split("---\n", 2)
+    assert "license: apache-2.0" in front.splitlines()
+    assert f"license_link: {GEMMA_4_LICENSE_URL}" in front.splitlines()
+    assert f"{REPO_URL}/blob/{config.training.repo_commit}/LICENSE" in card
+    # Every file that carries TriviaQA ids is named as keeping TriviaQA's terms.
+    _, license_section = card.split("## What license is it under?", 1)
+    for name in (SEP_TRAIN_IDS_FILE, SEP_TRAINING_LOG_FILE, SEP_METRICS_FILE):
+        assert f"`{name}`" in license_section.split("\n\n")[1]
+
+
+def test_model_card_refuses_a_backbone_without_a_recorded_license(release: _Release) -> None:
+    raw, heldout = load_heldout(release.heldout_path)
+    metrics = SEPPublishedMetrics(**_metrics().model_dump(), heldout_benchmark=raw)
+    with pytest.raises(ValueError, match="org/model"):
+        render_model_card(probe_config(layers=_WINDOW), metrics, heldout, _TARGET)
+
+
 def _classifier(config: SEPProbeConfig, **classifier: Any) -> SEPProbeConfig:
     return config.model_copy(update={"classifier": config.classifier.model_copy(update=classifier)})
 
@@ -320,11 +356,13 @@ def test_card_refit_command_refuses_a_non_contiguous_window() -> None:
         refit_command(probe_config(layers=(1, 3), num_hidden_layers=3))
 
 
-def test_stage_writes_the_probe_files_card_and_merged_metrics(release: _Release) -> None:
-    card = release.stage()
+def test_stage_writes_the_probe_files_and_merged_metrics(release: _Release) -> None:
+    cards = release.stage()
     staged = release.staging_dir
-    assert {p.name for p in staged.iterdir()} == {*SEP_PROBE_DIR_FILES, MODEL_CARD_FILE}
-    assert (staged / MODEL_CARD_FILE).read_text() == card
+    # The cards are uploaded from memory, so the staged folder holds only the probe's files.
+    assert {p.name for p in staged.iterdir()} == set(SEP_PROBE_DIR_FILES)
+    assert cards.model == _GOLDEN_CARD.read_text()
+    assert cards.dataset == render_dataset_card(_config(), _TARGET)
     for name in (SEP_PROBE_WEIGHTS_FILE, SEP_PROBE_CONFIG_FILE):
         assert (staged / name).read_bytes() == (release.probe_dir / name).read_bytes()
     published = SEPPublishedMetrics.model_validate_json((staged / SEP_METRICS_FILE).read_text())
@@ -437,16 +475,21 @@ def test_publish_has_no_token_arg() -> None:
 
 def _mock_hf_api(
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[MagicMock, MagicMock, dict[str, set[str]]]:
-    """Replace HfApi; returns the class, its instance, and per repo type the files uploaded."""
-    uploaded: dict[str, set[str]] = {}
+) -> tuple[MagicMock, MagicMock, dict[str, dict[str, bytes]]]:
+    """Replace HfApi; returns the class, its instance, and per repo type the files uploaded
+    (path in the repo -> content)."""
+    uploaded: dict[str, dict[str, bytes]] = {}
 
-    def upload_folder(**kwargs: Any) -> CommitInfo:
-        patterns = kwargs.get("allow_patterns")
+    def create_commit(**kwargs: Any) -> CommitInfo:
+        operations: list[CommitOperationAdd] = kwargs["operations"]
+        assert all(isinstance(op, CommitOperationAdd) for op in operations)
         uploaded[kwargs["repo_type"]] = {
-            p.name
-            for p in Path(kwargs["folder_path"]).iterdir()
-            if patterns is None or p.name in patterns
+            op.path_in_repo: (
+                op.path_or_fileobj
+                if isinstance(op.path_or_fileobj, bytes)
+                else Path(str(op.path_or_fileobj)).read_bytes()
+            )
+            for op in operations
         }
         return CommitInfo(
             commit_url=f"https://huggingface.co/{kwargs['repo_id']}/commit/abc",
@@ -456,7 +499,7 @@ def _mock_hf_api(
         )
 
     api = MagicMock()
-    api.upload_folder.side_effect = upload_folder
+    api.create_commit.side_effect = create_commit
     api.repo_exists.return_value = False
     api_class = MagicMock(return_value=api)
     monkeypatch.setattr(publish_sep_probe, "HfApi", api_class)
@@ -476,7 +519,7 @@ def test_upload_calls_mocked_hfapi_with_both_repos_and_tag(
         (c.kwargs["repo_id"], c.kwargs["repo_type"]) for c in api.create_repo.call_args_list
     } == repos
     assert {
-        (c.kwargs["repo_id"], c.kwargs["repo_type"]) for c in api.upload_folder.call_args_list
+        (c.kwargs["repo_id"], c.kwargs["repo_type"]) for c in api.create_commit.call_args_list
     } == repos
     assert {
         (c.args[0], c.kwargs["repo_type"], c.kwargs["tag"], c.kwargs["revision"])
@@ -485,13 +528,18 @@ def test_upload_calls_mocked_hfapi_with_both_repos_and_tag(
         (_TARGET.model_repo, "model", _TARGET.tag, "oid-model"),
         (_TARGET.dataset_repo, "dataset", _TARGET.tag, "oid-dataset"),
     }
-    assert uploaded["model"] == {*SEP_PROBE_DIR_FILES, MODEL_CARD_FILE}
-    assert uploaded["dataset"] == {
+    assert set(uploaded["model"]) == {*SEP_PROBE_DIR_FILES, CARD_FILE}
+    assert set(uploaded["dataset"]) == {
         SEP_DATASET_ROWS_FILE,
         SEP_DATASET_TENSORS_FILE,
         SEP_COLLECTION_CONFIG_FILE,
         SEP_TRAINING_LOG_FILE,
+        CARD_FILE,
     }
+    assert uploaded["model"][CARD_FILE].decode() == _GOLDEN_CARD.read_text()
+    assert uploaded["dataset"][CARD_FILE].decode() == render_dataset_card(_config(), _TARGET)
+    for name in SEP_DATASET_DIR_FILES:
+        assert uploaded["dataset"][name] == (release.dataset_dir / name).read_bytes()
 
 
 def test_dry_run_never_uploads(
@@ -500,7 +548,9 @@ def test_dry_run_never_uploads(
     api_class, _, _ = _mock_hf_api(monkeypatch)
     assert main(release.argv("--dry-run")) == 0
     api_class.assert_not_called()
-    assert f"hf://{_TARGET.model_repo}@{_TARGET.tag}" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert f"hf://{_TARGET.model_repo}@{_TARGET.tag}" in out
+    assert render_dataset_card(_config(), _TARGET) in out
 
 
 def test_upload_failure_names_the_repo_and_tags_nothing(
@@ -525,7 +575,7 @@ def test_dataset_upload_failure_leaves_the_model_repo_untouched(
     api.create_repo.side_effect = create_repo
     with pytest.raises(RuntimeError, match=_TARGET.dataset_repo):
         main(release.argv())
-    api.upload_folder.assert_not_called()
+    api.create_commit.assert_not_called()
     api.create_tag.assert_not_called()
 
 
@@ -547,7 +597,7 @@ def test_existing_tag_is_refused_before_any_upload(
     api.list_repo_refs.side_effect = list_repo_refs
     with pytest.raises(ValueError, match="already has tag"):
         main(release.argv())
-    api.upload_folder.assert_not_called()
+    api.create_commit.assert_not_called()
     api.create_tag.assert_not_called()
 
 
@@ -556,7 +606,7 @@ def test_upload_commit_messages_name_the_tag_not_the_staging_dir(
 ) -> None:
     _, api, _ = _mock_hf_api(monkeypatch)
     assert main(release.argv()) == 0
-    messages = [c.kwargs["commit_message"] for c in api.upload_folder.call_args_list]
+    messages = [c.kwargs["commit_message"] for c in api.create_commit.call_args_list]
     assert len(messages) == 2
     assert all(_TARGET.tag in m and "tmp" not in m for m in messages)
 

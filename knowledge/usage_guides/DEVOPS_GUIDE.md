@@ -265,8 +265,9 @@ before Terraform removes the endpoints. No manual `gcloud` step is needed.
 ## Publishing a SEP probe to the Hub
 
 The release sequence for a trained SEP probe and its calibration dataset. No probe has been
-published yet; the first release also needs the owner's Hub namespace and Gemma-license
-decisions ([`PUBLISHED_SEP_PROBE.md`](../plans/PUBLISHED_SEP_PROBE.md)).
+published yet. The owner made both release decisions on 2026-11-08: the Hub namespace is
+`eladlaor`, and the probe is released under Apache 2.0, the base model's license
+([`PUBLISHED_SEP_PROBE.md`](../plans/PUBLISHED_SEP_PROBE.md#risks-and-decisions)).
 
 Prerequisites: a GPU host that fits the backbone, `SLM_PROVIDER=hf_transformers` and
 `VLLM_MODEL_ID=<model>` in `.env`, `uv sync --all-extras`, and `hf auth login` with write
@@ -285,11 +286,24 @@ ENABLED_DETECTORS='["predictive_entropy","semantic_entropy_probe","semantic_entr
 # 4. Score it to JSON, with every scored question's id.
 uv run python -m eval.compute_auroc --in eval/results/sep_heldout.jsonl \
   --json-out eval/results/sep_heldout_auroc.json
-# 5. Check everything and print the model card; then run again without --dry-run.
+# 5. Create both Hub repos private first: the publisher creates a missing repo with the
+#    account's default visibility. They go public with the GitHub repo (TODO.md, B1).
+hf repo create eladlaor/sep-probe-gemma-4-E2B-it --private
+hf repo create eladlaor/sep-calibration-gemma-4-E2B-it --repo-type dataset --private
+# 6. Check everything and print both cards; then run again without --dry-run.
 uv run python -m eval.publish_sep_probe --probe-dir data/probes/<slug> \
   --dataset data/sep_datasets/<slug> --heldout eval/results/sep_heldout_auroc.json \
-  --repo <owner>/<model repo> --dataset-repo <owner>/<dataset repo> --tag v1 --dry-run
+  --repo eladlaor/sep-probe-gemma-4-E2B-it \
+  --dataset-repo eladlaor/sep-calibration-gemma-4-E2B-it --tag v1 --dry-run
 ```
+
+Both cards state the license. The probe is released under its backbone's license, which
+the Hub lists as Apache 2.0 for the Gemma 4 family (`license_link`
+https://ai.google.dev/gemma/docs/gemma_4_license). The dataset card releases the derived
+columns under Apache 2.0 and credits TriviaQA for the questions, whose Hub license is
+listed as unknown. A backbone without an entry in `BACKBONE_LICENSES`
+(`eval/sep_model_card.py`) renders no card, so add its Hub license there before
+publishing a probe for it.
 
 The publisher refuses, before writing or uploading anything:
 
@@ -308,8 +322,9 @@ The publisher refuses, before writing or uploading anything:
   backbone, prompt, calibration set or question ids that differ from the probe's.
 
 A real run uploads the probe directory (with the held-out report merged into
-`metrics.json` and the rendered `README.md`) to the model repo and the dataset directory to
-the dataset repo, then tags both commits. A `--tag` that either repo already has is
+`metrics.json` and the rendered `README.md`) to the model repo, and the dataset directory
+with its own rendered dataset card (`README.md`) to the dataset repo, one commit each. It
+then tags both commits. A `--tag` that either repo already has is
 refused before anything is uploaded; publish under a new tag. If tagging the model repo
 fails, the publisher deletes the dataset repo's new tag, so the same `--tag` can be retried.
 If that deletion fails too, the error names the tag left behind: delete it on the Hub before

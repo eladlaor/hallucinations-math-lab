@@ -1,5 +1,7 @@
 ---
 base_model: $model_id
+license: $license
+license_link: $backbone_license_url
 datasets:
 - $dataset_repo
 tags:
@@ -10,7 +12,7 @@ tags:
 # Semantic Entropy Probe for $model_id
 
 A linear classifier (logistic regression) that reads one hidden state of
-[$model_id](https://huggingface.co/$model_id) and predicts whether the model's
+[$model_id]($hub_url/$model_id) and predicts whether the model's
 semantic entropy (SE) on the question would be high. It replaces SE's N sampled answers
 and their pairwise meaning checks with a single forward pass over the prompt.
 
@@ -20,7 +22,7 @@ probability and **not** in nats.
 
 Fitted with [hallucinations-math-lab]($repo_url) at commit
 [`$repo_commit`]($repo_url/tree/$repo_commit), from the calibration dataset
-[$dataset_repo](https://huggingface.co/datasets/$dataset_repo).
+[$dataset_repo]($hub_url/datasets/$dataset_repo).
 
 ## How do I use it?
 
@@ -157,6 +159,23 @@ $refit_command
 ```
 
 The trainer's options are the ones this probe was fitted with.
+
+## What license is it under?
+
+The probe weights and config (`probe.safetensors`, `probe_config.json`), and the training
+record and metrics beside them, are released under the [$license_name]($license_url), the
+same license as the base model. The exception is the TriviaQA question ids, wherever
+they appear (`$train_ids_file`, each line of `$training_log_file`, and
+`heldout_benchmark` in `$metrics_file`): they come from TriviaQA and keep its terms, as
+the calibration dataset's card explains.
+
+- **Base model:** [$model_id]($hub_url/$model_id) is by $backbone_licensor, released
+  under the $backbone_license_name ([its license page]($backbone_license_url)).
+- **Code:** [hallucinations-math-lab]($repo_url), the code that trained the probe, is under
+  the $code_license_name license ([LICENSE]($code_license_url) at the fitting commit).
+- **Backbone:** the probe is only meaningful with `$model_id` at revision `$revision`. It
+  scores that model's hidden states, so using it means running that model under its own
+  license.
 
 ## Citation
 

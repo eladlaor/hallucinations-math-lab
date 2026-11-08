@@ -58,8 +58,9 @@ items 1–6 and 8, and changes it as listed in
 convergence at `max_iter=100`, and HF-vs-vLLM agreement. Until measured, all of these are
 assumptions. See [What needs a real GPU run](#what-needs-a-real-gpu-run).
 
-**Owner decisions:** the Hub namespace, the Gemma license treatment, which token position v1
-publishes (after the sweep), and how to serve a non-last-layer probe on vLLM.
+**Owner decisions:** the Hub namespace (`eladlaor`) and the Gemma license treatment (the cards
+carry Apache 2.0) were decided on 2026-11-08. Still open until the sweep: which token position
+v1 publishes, and how to serve a non-last-layer probe on vLLM.
 
 **Verify every item with:**
 
@@ -1257,9 +1258,18 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
     cross-validated AUROCs (described as nested CV only when `layer_selection` is
     `nested_cv`; a fixed-layer probe's CV has no inner loop) and layer-L AUROCs for both
     positions, the recommended threshold, the full deviations
-    table with the probe's active IDs, the limits, citations and the commit link. It has **no
-    license field**: that waits for owner decision 2, and the template gains it before PSP 7.
-    The dataset repo gets no card of its own in this item.
+    table with the probe's active IDs, the limits, citations and the commit link. **License
+    (added after owner decision 2, 2026-11-08):** `license: apache-2.0` and the Gemma 4
+    `license_link` go in the front matter, and a license section states the base model's
+    terms, links the repo's MIT `LICENSE` at the fitting commit, and says the probe is only
+    meaningful with its backbone. Both come from `BACKBONE_LICENSES` in
+    `eval/sep_model_card.py`; a backbone missing from it renders no card.
+  - **Dataset card (added 2026-11-08).** `render_dataset_card` fills
+    `eval/templates/SEP_DATASET_CARD.md`. The dataset repo receives it as `README.md` in the
+    same commit as the dataset files (`create_commit`), and `--dry-run` prints it. It covers
+    the files, the columns with each one's source, the probe's refit command, provenance,
+    and the license and attribution: the derived columns are Apache 2.0, and the questions
+    come from TriviaQA (Joshi et al. 2017), whose Hub license is listed as unknown.
   - `SEP_DATASET_DIR_FILES` joins `constants.py`, beside `SEP_PROBE_DIR_FILES`.
   - Extra tests beyond the list: staging contents, absolute `ref`, model mismatch in the
     held-out report (the named test covers the dataset), a dataset that did not train the
@@ -1348,8 +1358,9 @@ Apply these edits to that plan in item 18. They change it as follows:
 All of these are stated as **assumptions** until the first run.
 
 1. Collect the 500 E2B calibration rows (TBG and SLT, all layers), then fit, benchmark the
-   disjoint 200-question slice, and publish `v1`. This is PSP 7, and it needs the owner's
-   namespace and license decisions first.
+   disjoint 200-question slice, and publish `v1` to `eladlaor/sep-probe-gemma-4-E2B-it` and
+   `eladlaor/sep-calibration-gemma-4-E2B-it`. This is PSP 7. The namespace and license
+   decisions were made on 2026-11-08.
 2. The actual best window and position for Gemma 4 E2B/E4B, and whether chat-template TBG
    reaches useful AUROC at all. **Publish the result even if it is weak.**
 3. lbfgs convergence at `max_iter=100` on unscaled Gemma hidden states. If it fails, run the
@@ -1380,8 +1391,13 @@ Add these to [`TODO.md`](TODO.md):
 
 ## Open decisions for the owner
 
-1. **Hub namespace:** personal account or an org. Needed before PSP 7.
-2. **Gemma license:** whether the model card must carry the Gemma terms. Needed before PSP 7.
+1. ~~**Hub namespace:** personal account or an org.~~ **Decided 2026-11-08:** the personal
+   account `eladlaor`, so the repos are `eladlaor/sep-probe-gemma-4-E2B-it` and
+   `eladlaor/sep-calibration-gemma-4-E2B-it`.
+2. ~~**Gemma license:** whether the model card must carry the Gemma terms.~~ **Decided
+   2026-11-08:** yes. The Hub lists the Gemma 4 family as `apache-2.0`, ungated, with
+   `license_link` https://ai.google.dev/gemma/docs/gemma_4_license. The probe is therefore
+   released under Apache 2.0, and both cards carry the license (see item 15's card notes).
 3. **v1 token position:** TBG (recommended, because the product is pre-generation detection)
    or SLT. Decide after seeing the sweep. Both sets of numbers are published either way, and
    only TBG is servable in v1.

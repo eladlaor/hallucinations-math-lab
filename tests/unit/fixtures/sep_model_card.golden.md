@@ -1,5 +1,7 @@
 ---
-base_model: org/model
+base_model: google/gemma-4-E2B-it
+license: apache-2.0
+license_link: https://ai.google.dev/gemma/docs/gemma_4_license
 datasets:
 - owner/sep-calibration-model
 tags:
@@ -7,10 +9,10 @@ tags:
 - hallucination-detection
 ---
 
-# Semantic Entropy Probe for org/model
+# Semantic Entropy Probe for google/gemma-4-E2B-it
 
 A linear classifier (logistic regression) that reads one hidden state of
-[org/model](https://huggingface.co/org/model) and predicts whether the model's
+[google/gemma-4-E2B-it](https://huggingface.co/google/gemma-4-E2B-it) and predicts whether the model's
 semantic entropy (SE) on the question would be high. It replaces SE's N sampled answers
 and their pairwise meaning checks with a single forward pass over the prompt.
 
@@ -41,7 +43,7 @@ chat template and answer instruction.
 
 | | |
 |---|---|
-| Backbone | `org/model` at revision `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` (bfloat16) |
+| Backbone | `google/gemma-4-E2B-it` at revision `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` (bfloat16) |
 | Decoder layers (L) | 2 |
 | Hidden size | 4 |
 | Token position | TBG |
@@ -136,7 +138,7 @@ It follows Kossen et al. (2024), with these deviations. Active for this probe:
 
 ## What are its limits?
 
-- It works only with `org/model` at revision `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, with the chat template and
+- It works only with `google/gemma-4-E2B-it` at revision `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, with the chat template and
   answer instruction above. Any other model, revision or prompt moves the hidden states;
   the detector refuses them rather than score.
 - It imitates binarized discrete SE. Where SE misses a hallucination (a confidently
@@ -161,6 +163,23 @@ uv run python -m eval.train_sep_probe --dataset sep-dataset --output-dir sep-pro
 ```
 
 The trainer's options are the ones this probe was fitted with.
+
+## What license is it under?
+
+The probe weights and config (`probe.safetensors`, `probe_config.json`), and the training
+record and metrics beside them, are released under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0), the
+same license as the base model. The exception is the TriviaQA question ids, wherever
+they appear (`train_ids.json`, each line of `training_log.jsonl`, and
+`heldout_benchmark` in `metrics.json`): they come from TriviaQA and keep its terms, as
+the calibration dataset's card explains.
+
+- **Base model:** [google/gemma-4-E2B-it](https://huggingface.co/google/gemma-4-E2B-it) is by Google, released
+  under the Apache License 2.0 ([its license page](https://ai.google.dev/gemma/docs/gemma_4_license)).
+- **Code:** [hallucinations-math-lab](https://github.com/eladlaor/hallucinations-math-lab), the code that trained the probe, is under
+  the MIT license ([LICENSE](https://github.com/eladlaor/hallucinations-math-lab/blob/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee/LICENSE) at the fitting commit).
+- **Backbone:** the probe is only meaningful with `google/gemma-4-E2B-it` at revision `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`. It
+  scores that model's hidden states, so using it means running that model under its own
+  license.
 
 ## Citation
 

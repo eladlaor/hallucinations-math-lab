@@ -768,8 +768,11 @@ fallback between sources. Before the first sample, it refuses a probe whose
 model id, revision, layer count, width, answer instruction or chat template
 differs from the model under test, naming both values.
 
-**1. Use a published probe.** None exists yet. Once one is published, set
-`SEP_PROBE_PATH=hf://<owner>/<repo>@<tag>` and enable SEP as in step 2.4
+**1. Use a published probe.** None exists yet. The first will be
+`eladlaor/sep-probe-gemma-4-E2B-it` (Apache 2.0, the base model's license),
+with its calibration data in `eladlaor/sep-calibration-gemma-4-E2B-it`. Once it
+is published, set `SEP_PROBE_PATH=hf://eladlaor/sep-probe-gemma-4-E2B-it@<tag>`
+and enable SEP as in step 2.4
 below; nothing else is needed, on any machine that runs the model with
 `hf_transformers` (or with vLLM for a last-layer probe).
 
@@ -820,7 +823,9 @@ fits the model (collection runs 500 questions × 11 generations).
 **3. Refit from a published dataset, no GPU.** The dataset repo holds every
 input the fit needs, so the CPU step can be rerun anywhere: download it,
 check out the commit the probe card names, and run step 2.3 on it. The
-model card prints the exact commands.
+model card and the dataset card both print the exact commands. The questions
+in the dataset come from TriviaQA, whose Hub license is listed as unknown;
+the dataset card says what is Apache 2.0 and what is not.
 
 A probe trained on one model is meaningless on another. To include SEP in a
 model comparison, train one probe per model (rerun steps 2.2–2.3 with each

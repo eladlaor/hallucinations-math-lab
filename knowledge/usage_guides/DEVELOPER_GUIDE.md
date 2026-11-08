@@ -98,7 +98,7 @@ eval/
   train_sep_probe.py       # CPU: dataset directory -> probe directory
   sep_probe_provenance.py  # SEP probe provenance: training-id leakage guard and the per-row sep_probe record
   repo_state.py            # repository commit and dirty flag, recorded in the probe
-  sep_model_card.py        # render the Hub model card (pure); template in templates/
+  sep_model_card.py        # render the Hub model and dataset cards and their licenses (pure); templates in templates/
   publish_sep_probe.py     # check, stage and upload a probe and its dataset to the Hub
 examples/                  # runnable playground scripts
 serving/

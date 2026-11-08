@@ -25,7 +25,7 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
 - **Next actions, in order:**
   1. Finish the method blockers (B2), test-first.
   2. Fix B3.
-  3. Get the owner's decision on B1.
+  3. B1 is decided (2026-11-08); it runs last, at the release step.
   4. Train and publish the first SEP probe (see Major, high priority).
 
   Verify with `uv sync --locked --all-extras && uv run pytest -q && uv run mypy && uvx ruff@0.17.0 check . && uvx ruff@0.17.0 format --check .`
@@ -54,8 +54,8 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
 
 ## Blockers
 
-**B1. Git history would leak private material.** Needs owner approval; do nothing
-destructive before it.
+**B1. Git history would leak private material.** Decision recorded 2026-11-08 (see
+**Decision and execution order** below). Do nothing destructive before the release step.
 - **What is in history:**
   - Files that are now gitignored: `.claude/`, `knowledge/lectures/`,
     `knowledge/submissions/` (which includes the organizers' email).
@@ -71,6 +71,20 @@ destructive before it.
   trailers. The alternative is a fresh single-commit repo. Either way, delete the
   remote tag and branch.
 - **Secrets:** none found by regex scan. gitleaks and trufflehog were not run.
+- **Decision and execution order (2026-11-08):** the owner delegated B1 to the
+  assistant, who chose to rewrite the existing repo with `git filter-repo`. That keeps
+  the URL and history; it was chosen over a fresh repo. Execution order, all at the
+  release step:
+  1. Merge every branch to `main`.
+  2. Finish the GPU run, then upload both Hub repos **private** and verify that the
+     probe loads from the Hub.
+  3. Take a full mirror backup of the repo.
+  4. Rewrite with `git filter-repo` (paths, project id, trailers, as above).
+  5. Run gitleaks and trufflehog on the result.
+  6. Force-push the rewritten `main` and tags. This needs the owner's explicit
+     go-ahead at execution time.
+  7. Delete the remote `v0.1.0` tag and the `claude/load-bearing-words-*` branch.
+  8. Make the GitHub repo and both Hub repos public together.
 
 **B2. Evaluation-method flaws.** Remaining items:
 - [x] **Brief-answer prompt.** Done 2026-11-03: `ANSWER_INSTRUCTION`, recorded per row; `compute_auroc` reports answer lengths.
@@ -123,8 +137,8 @@ destructive before it.
   a model card, and the calibration dataset. Plan:
   [`PUBLISHED_SEP_PROBE.md`](PUBLISHED_SEP_PROBE.md). The code is done (the
   classifier recipe, the dataset export, `hf://` loading and the publish
-  script); what remains is the GPU run (PSP item 7), which needs the owner's
-  Hub namespace and Gemma-license decisions.
+  script); what remains is the GPU run (PSP item 7). The Hub namespace and the
+  license were decided on 2026-11-08.
 - [ ] **Serving SLT probes.** The collection and the sweep cover the
   second-last-token position, but the loader refuses an SLT probe in v1:
   serving one needs the greedy answer passed through to the hidden-state read.
@@ -225,7 +239,6 @@ destructive before it.
 
 | Decision | What it blocks |
 |---|---|
-| History cleanup: `filter-repo` plus force-push, or a fresh single-commit repo. | Going public (B1). Needs explicit owner approval. |
 | Correctness labeling: normalized token match, or an LLM judge. | Every AUROC number. |
 | Version: 0.2.0, or a re-cut clean 0.1.0. | The CHANGELOG release block and tag. |
 | Whether to run a real L4 benchmark before going public. | The README results story. |
@@ -238,6 +251,9 @@ destructive before it.
 | 2026-10 | Keep the repo private for now. | The release is being prepared, not published. |
 | 2026-10 | Private files stay gitignored on disk, never deleted. | They are the owner's working material. |
 | 2026-10 | Package `hallucinations_math_lab`, MIT license. | Matches the distribution name. |
+| 2026-11-08 | Hub namespace `eladlaor`: `eladlaor/sep-probe-gemma-4-E2B-it` and `eladlaor/sep-calibration-gemma-4-E2B-it`. | Owner's choice. |
+| 2026-11-08 | Release the probe under Apache 2.0, the base model's license; the model card carries it. The dataset card credits TriviaQA. | The Hub lists the Gemma 4 family as `apache-2.0`, ungated. |
+| 2026-11-08 | B1: `git filter-repo` rewrite of the existing repo, run last (see B1). | Keeps the URL and history. |
 | 2026-10 | Serve Gemma 4 on `vllm/vllm-openai:v0.31.0-cu129`. | Gemma 4 support starts at v0.19, and cu129 runs on Vertex's R535+ drivers. |
 | 2026-10 | Vertex invoke route (`"/*"`), dedicated endpoints, numeric ids. | The OpenAI paths pass through unchanged, and Vertex rejects non-numeric ids. |
 | 2026-10 | Judge is `gemini-3.5-flash-lite`, controlled by thinking level. | Gemini 2.5 retires on 2026-10-20, and 3.5 ignores sampling parameters. |

@@ -31,7 +31,8 @@
   refit or re-examine the probe on a laptop, no GPU.
 - **Status:** the code (items 1–6 and 8) is implemented by
   [`SEP_CLASSIFIER.md`](SEP_CLASSIFIER.md) items 2–18. Item 7, the real run,
-  is open and needs the owner's Hub namespace and license decisions.
+  is open. The Hub namespace and license decisions were made on 2026-11-08 (see
+  [Risks and decisions](#risks-and-decisions)), and both cards now carry the licenses.
 - **Code:** the trainer writes its record to files (not only stdout), a
   publish script uploads, and the detector loads a probe straight from the Hub,
   refusing a probe whose backbone doesn't match the model under test.
@@ -74,7 +75,7 @@ what gets published as the training record.
 
 ## What gets published
 
-**Model repo** `<hf-user>/sep-probe-gemma-4-E2B-it`:
+**Model repo** `eladlaor/sep-probe-gemma-4-E2B-it`:
 
 | File | Content |
 |---|---|
@@ -85,12 +86,15 @@ what gets published as the training record.
 | `metrics.json` | The per-layer sweep at both token positions, the layer-window selection with its nested-CV AUROC against binarized SE (mean ± std per fold), the last-layer baseline (`final_layer_auroc`), the recommended threshold with its TPR, FPR and escalation rate, plus the held-out benchmark AUROC of SEP next to PE and SE on the disjoint 200-question slice, with confidence intervals. |
 | `README.md` | Model card: what it is, how to use it with this repo, the numbers, the limits (works only for this exact backbone; TriviaQA-style questions only; not a correctness oracle), the license, and citations. |
 
-**Dataset repo** `<hf-user>/sep-calibration-gemma-4-E2B-it`: `rows.parquet`
+**Dataset repo** `eladlaor/sep-calibration-gemma-4-E2B-it`: `rows.parquet`
 (one row per calibration question: the question, the 10 sampled answers plus
 the greedy answer, their cluster ids, both SE values, greedy correctness),
 `hidden_states.safetensors` (every layer at two token positions, TBG and SLT)
 and `collection_config.json` (see
-[the dataset directory](SEP_CLASSIFIER.md#the-dataset-directory-companion-hub-dataset-repo)).
+[the dataset directory](SEP_CLASSIFIER.md#the-dataset-directory-companion-hub-dataset-repo)),
+plus `training_log.jsonl` and a dataset card (`README.md`, rendered from
+`eval/templates/SEP_DATASET_CARD.md`). The card covers the files and columns, the refit
+command, provenance, and the license and TriviaQA attribution.
 500 rows, and it is what turns "trust our probe" into "refit it yourself".
 
 ## Prerequisites (ordering)
@@ -100,6 +104,15 @@ and `collection_config.json` (see
 2. **B2 label fixes** that change SE values: brief-answer prompt, correctness
    matching (for the benchmark AUROC), NLI label order.
 3. **B1 history cleanup / repo going public** — the model card links to the repo.
+   Decided 2026-11-08 (the owner delegated it): rewrite the existing repo with
+   `git filter-repo`, which keeps its URL and history. This runs **last**, after every
+   branch is merged to `main`, the GPU run is done, and the probe has been verified
+   loading from the Hub (both Hub repos are uploaded private first). Before the rewrite,
+   take a full mirror backup. After it, run gitleaks and trufflehog on the result, then
+   force-push the rewritten `main` and tags (this needs the owner's explicit go-ahead at
+   execution time), then delete the remote `v0.1.0` tag and the
+   `claude/load-bearing-words-*` branch. The GitHub repo and both Hub repos then go
+   public together.
 4. **A GPU run** that fits E2B (README hardware tiers). This is also the
    project's first real-hardware run.
 
@@ -169,7 +182,7 @@ items 2–18**, with the changes noted in each item below. Item 7 stays here.
 
 | Item | Note |
 |---|---|
-| **Gemma license** | The probe is trained on Gemma's internal states. Check whether the Gemma terms treat the probe as a derivative that must carry them; if so, the model card ships the terms. Decide before item 7. |
+| **Gemma license** | **Decided 2026-11-08: the model card carries the base model's license terms.** The Hub lists `google/gemma-4-E2B-it` (and the rest of the Gemma 4 family) as `apache-2.0`, ungated, with `license_link` https://ai.google.dev/gemma/docs/gemma_4_license, which redirects to Google's Apache 2.0 page. So the probe weights and config are released under Apache 2.0, the base model's license. The model card states this (`license: apache-2.0` and `license_link` in its front matter, plus a license section), and this repo's code stays MIT. The dataset card releases the derived columns under Apache 2.0 and credits TriviaQA (Joshi et al. 2017) for the questions. The Hub lists TriviaQA's license as unknown, so users must check its terms before redistributing the questions. |
 | **Silent backbone drift** | A re-uploaded or updated Gemma checkpoint changes hidden states and quietly breaks the probe. Mitigated by pinning the revision (item 2) and refusing a mismatch (item 4). |
 | **The result may be weak** | Publish it anyway, with the numbers. The value is that it is checkable. |
-| **Hub namespace** | Personal account vs an org. Needs the owner's choice before item 7. |
+| **Hub namespace** | **Decided 2026-11-08: the personal account `eladlaor`.** The repos are `eladlaor/sep-probe-gemma-4-E2B-it` and `eladlaor/sep-calibration-gemma-4-E2B-it`. |

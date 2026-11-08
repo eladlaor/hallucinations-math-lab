@@ -1,8 +1,11 @@
-"""The model card of a published SEP probe, and the held-out report it shows.
+"""The Hub cards of a published SEP probe: the model card, the held-out report it
+shows, the dataset card, and the license terms both state.
 
-`render_model_card` is pure: it fills eval/templates/SEP_MODEL_CARD.md from the
-probe's config and metrics, compute_auroc's held-out report, and where the
-release goes. eval.publish_sep_probe checks those inputs agree before calling it.
+`render_model_card` and `render_dataset_card` are pure: they fill
+eval/templates/SEP_MODEL_CARD.md and SEP_DATASET_CARD.md from the probe's config
+(the model card also from its metrics and compute_auroc's held-out report) and
+where the release goes. eval.publish_sep_probe checks those inputs agree before
+calling them. A backbone with no entry in BACKBONE_LICENSES renders no card.
 """
 
 from __future__ import annotations
@@ -15,11 +18,19 @@ from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from eval.datasets.load_triviaqa import DATASET_CONFIG, DATASET_NAME, DATASET_SPLIT
+from eval.sep_dataset_io import TENSOR_IDS_METADATA_KEY
 from eval.sep_recipe import MAX_ITER_FLAG, STANDARDIZE_FLAG
 from hallucinations_math_lab.constants import (
+    SEP_COLLECTION_CONFIG_FILE,
+    SEP_DATASET_ROWS_FILE,
+    SEP_DATASET_TENSORS_FILE,
     SEP_LAYERS_FLAG,
     SEP_LOGREG_MAX_ITER,
+    SEP_METRICS_FILE,
     SEP_SERVED_TOKEN_POSITION,
+    SEP_TRAIN_IDS_FILE,
+    SEP_TRAINING_LOG_FILE,
     DetectorName,
     SEPLayerSelection,
     SEPLayersMode,
@@ -33,10 +44,18 @@ from hallucinations_math_lab.custom_types.sep_probe_types import (
 )
 from hallucinations_math_lab.services.semantic_entropy_probe import HubProbeRef
 
-# Where the card's template lives.
-MODEL_CARD_TEMPLATE: Final[Path] = Path(__file__).parent / "templates" / "SEP_MODEL_CARD.md"
-# The code the card links to: the commit that fitted the probe, in this repository.
+# Where the cards' templates live.
+_TEMPLATES_DIR: Final[Path] = Path(__file__).parent / "templates"
+MODEL_CARD_TEMPLATE: Final[Path] = _TEMPLATES_DIR / "SEP_MODEL_CARD.md"
+DATASET_CARD_TEMPLATE: Final[Path] = _TEMPLATES_DIR / "SEP_DATASET_CARD.md"
+# The code the cards link to: the commit that fitted the probe, in this repository.
 REPO_URL: Final[str] = "https://github.com/eladlaor/hallucinations-math-lab"
+# This repository's own license, and its file, which the cards link at the fitting commit.
+CODE_LICENSE_NAME: Final[str] = "MIT"
+CODE_LICENSE_FILE: Final[str] = "LICENSE"
+HUB_URL: Final[str] = "https://huggingface.co"
+# The license the Hub lists for the TriviaQA repo the calibration questions come from.
+QUESTIONS_SOURCE_HUB_LICENSE: Final[str] = "unknown"
 # Kossen et al. label the same hidden-state tuple 1-based, so our layer k is
 # probably their layer k + 1 (likely, not verified); the card prints both.
 PAPER_LAYER_OFFSET: Final[int] = 1
@@ -48,6 +67,68 @@ REFIT_COMMAND: Final[str] = (
 # eval.train_sep_probe's `--layers <a>-<b>` range form.
 _LAYER_RANGE_SEPARATOR: Final[str] = "-"
 _PERCENT: Final[int] = 100
+
+
+@dataclass(frozen=True)
+class ReleaseLicense:
+    """A license as the Hub names it (`license:` front matter) and as a reader reads it."""
+
+    hub_id: str
+    name: str
+    url: str
+
+
+@dataclass(frozen=True)
+class BackboneLicense:
+    """Who released a backbone, under which license, and the backbone's own license page."""
+
+    licensor: str
+    license: ReleaseLicense
+    terms_url: str
+
+
+APACHE_2_0: Final[ReleaseLicense] = ReleaseLicense(
+    hub_id="apache-2.0",
+    name="Apache License 2.0",
+    url="https://www.apache.org/licenses/LICENSE-2.0",
+)
+# The license_link every Gemma 4 checkpoint's Hub repo lists; it redirects to Google's
+# Apache 2.0 page.
+GEMMA_4_LICENSE_URL: Final[str] = "https://ai.google.dev/gemma/docs/gemma_4_license"
+_GEMMA_4_LICENSE: Final[BackboneLicense] = BackboneLicense(
+    licensor="Google", license=APACHE_2_0, terms_url=GEMMA_4_LICENSE_URL
+)
+# Per backbone, the terms its Hub repo lists. A probe is released under its backbone's
+# license; a backbone missing here is refused rather than published under unstated terms.
+BACKBONE_LICENSES: Final[dict[str, BackboneLicense]] = {
+    "google/gemma-4-E2B-it": _GEMMA_4_LICENSE,
+    "google/gemma-4-E4B-it": _GEMMA_4_LICENSE,
+    "google/gemma-4-26B-A4B-it": _GEMMA_4_LICENSE,
+    "google/gemma-4-31B-it": _GEMMA_4_LICENSE,
+}
+# The license of the calibration data this repo derives: sampled answers, cluster ids,
+# SE labels, hidden states and logs. The questions themselves are TriviaQA's.
+DERIVED_DATA_LICENSE: Final[ReleaseLicense] = APACHE_2_0
+
+
+def backbone_license(model_id: str) -> BackboneLicense:
+    """The license terms recorded for `model_id`; raises if none is recorded."""
+    terms = BACKBONE_LICENSES.get(model_id)
+    if terms is None:
+        raise ValueError(
+            f"No license is recorded for backbone {model_id} (known: "
+            f"{sorted(BACKBONE_LICENSES)}). Add the license its Hub repo lists to "
+            "eval.sep_model_card.BACKBONE_LICENSES before publishing a probe for it."
+        )
+    return terms
+
+
+@dataclass(frozen=True)
+class ReleaseCards:
+    """The two rendered cards of a release: the model repo's and the dataset repo's."""
+
+    model: str
+    dataset: str
 
 
 @dataclass(frozen=True)
@@ -204,6 +285,39 @@ def refit_command(config: SEPProbeConfig) -> str:
     return " ".join((REFIT_COMMAND, *options))
 
 
+def _render(template: Path, fields: dict[str, object]) -> str:
+    """`template` with every field filled; a field the template names but `fields` lacks fails."""
+    try:
+        return Template(template.read_text()).substitute(fields)
+    except (OSError, KeyError, ValueError) as e:
+        raise RuntimeError(f"Cannot render the card from {template}: {e!r}") from e
+
+
+def _shared_fields(config: SEPProbeConfig, target: PublishTarget) -> dict[str, object]:
+    """The fields both cards show: where the release goes, the backbone and its license,
+    the code that fitted the probe, and the command that refits the probe."""
+    backbone, training = config.backbone, config.training
+    terms = backbone_license(backbone.model_id)
+    return {
+        "model_repo": target.model_repo,
+        "dataset_repo": target.dataset_repo,
+        "tag": target.tag,
+        "hub_url": HUB_URL,
+        "model_id": backbone.model_id,
+        "revision": backbone.revision,
+        "num_hidden_layers": backbone.num_hidden_layers,
+        "hidden_size": backbone.hidden_size,
+        "backbone_licensor": terms.licensor,
+        "backbone_license_name": terms.license.name,
+        "backbone_license_url": terms.terms_url,
+        "repo_url": REPO_URL,
+        "repo_commit": training.repo_commit,
+        "code_license_name": CODE_LICENSE_NAME,
+        "code_license_url": f"{REPO_URL}/blob/{training.repo_commit}/{CODE_LICENSE_FILE}",
+        "refit_command": refit_command(config),
+    }
+
+
 def render_model_card(
     config: SEPProbeConfig,
     metrics: SEPPublishedMetrics,
@@ -214,15 +328,17 @@ def render_model_card(
     and where the release goes. Every template field must be filled."""
     backbone, features, labels = config.backbone, config.features, config.labels
     classifier, training, threshold = config.classifier, config.training, metrics.threshold
+    # The probe is released under its backbone's license.
+    release_license = backbone_license(backbone.model_id).license
     fields = {
-        "model_repo": target.model_repo,
-        "dataset_repo": target.dataset_repo,
-        "tag": target.tag,
+        **_shared_fields(config, target),
+        "license": release_license.hub_id,
+        "license_name": release_license.name,
+        "license_url": release_license.url,
         "probe_uri": target.probe_uri,
-        "model_id": backbone.model_id,
-        "revision": backbone.revision,
-        "num_hidden_layers": backbone.num_hidden_layers,
-        "hidden_size": backbone.hidden_size,
+        "train_ids_file": SEP_TRAIN_IDS_FILE,
+        "training_log_file": SEP_TRAINING_LOG_FILE,
+        "metrics_file": SEP_METRICS_FILE,
         "dtype": backbone.dtype,
         "token_position": str(features.token_position).upper(),
         "layers": _layers(features.layers),
@@ -263,12 +379,42 @@ def render_model_card(
         "provider": training.provider,
         "transformers_version": training.transformers_version,
         "created_at": training.created_at.isoformat(),
-        "repo_url": REPO_URL,
-        "repo_commit": training.repo_commit,
-        "refit_command": refit_command(config),
         "deviations": ", ".join(str(d) for d in config.deviations_from_paper),
     }
-    try:
-        return Template(MODEL_CARD_TEMPLATE.read_text()).substitute(fields)
-    except (OSError, KeyError, ValueError) as e:
-        raise RuntimeError(f"Cannot render the model card from {MODEL_CARD_TEMPLATE}: {e!r}") from e
+    return _render(MODEL_CARD_TEMPLATE, fields)
+
+
+def render_dataset_card(config: SEPProbeConfig, target: PublishTarget) -> str:
+    """The dataset repo's card: pure, from the config of the probe the dataset trained
+    (eval.publish_sep_probe checks they agree) and where the release goes."""
+    backbone, labels, training = config.backbone, config.labels, config.training
+    fields = {
+        **_shared_fields(config, target),
+        "license": DERIVED_DATA_LICENSE.hub_id,
+        "license_name": DERIVED_DATA_LICENSE.name,
+        "license_url": DERIVED_DATA_LICENSE.url,
+        "source_dataset": DATASET_NAME,
+        "source_dataset_config": DATASET_CONFIG,
+        "source_dataset_split": DATASET_SPLIT,
+        "source_dataset_hub_license": QUESTIONS_SOURCE_HUB_LICENSE,
+        "n_rows": training.n_rows,
+        "num_states": backbone.num_hidden_layers + 1,
+        "tbg": TokenPosition.TBG,
+        "slt": TokenPosition.SLT,
+        "ids_metadata_key": TENSOR_IDS_METADATA_KEY,
+        "rows_file": SEP_DATASET_ROWS_FILE,
+        "tensors_file": SEP_DATASET_TENSORS_FILE,
+        "collection_config_file": SEP_COLLECTION_CONFIG_FILE,
+        "training_log_file": SEP_TRAINING_LOG_FILE,
+        "sample_n": labels.sample_n,
+        "temperature": labels.temperature,
+        "top_p": labels.top_p,
+        "top_k": labels.top_k,
+        "max_tokens": labels.max_tokens,
+        "nli_model_id": labels.nli_model_id,
+        "nli_revision": labels.nli_revision,
+        # The trainer copies these two from the dataset's collection config.
+        "provider": training.provider,
+        "transformers_version": training.transformers_version,
+    }
+    return _render(DATASET_CARD_TEMPLATE, fields)

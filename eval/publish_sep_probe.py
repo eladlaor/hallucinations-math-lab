@@ -17,11 +17,11 @@ code that fitted it. The repo ids and the tag are checked first.
 The model repo receives the probe directory with the held-out report merged
 into metrics.json as `heldout_benchmark`, plus a model card (README.md)
 rendered by eval.sep_model_card. The dataset repo receives the dataset
-directory, uploaded first so the model repo never links to a dataset that has
-not landed. Both uploads are tagged `--tag` once both have landed; a `--tag`
-either repo already has is refused before anything is uploaded. If tagging the
-model repo fails, the dataset repo's new tag is deleted, so a retry with the same
-`--tag` is not refused.
+directory plus its own dataset card (README.md), uploaded first so the model
+repo never links to a dataset that has not landed. Both uploads are tagged
+`--tag` once both have landed; a `--tag` either repo already has is refused
+before anything is uploaded. If tagging the model repo fails, the dataset repo's
+new tag is deleted, so a retry with the same `--tag` is not refused.
 
 The Hub token is the one `hf auth login` stored; it is never a command-line
 argument, so it never lands in shell history or process listings.
@@ -31,7 +31,7 @@ Usage:
         --heldout auroc.json --repo OWNER/NAME --dataset-repo OWNER/NAME --tag v1
         [--dry-run]
 
-`--dry-run` runs every check, renders the card and prints it, and uploads nothing.
+`--dry-run` runs every check, renders both cards and prints them, and uploads nothing.
 """
 
 from __future__ import annotations
@@ -48,11 +48,17 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
 
-from huggingface_hub import CommitInfo, HfApi
+from huggingface_hub import CommitInfo, CommitOperationAdd, HfApi
 from pydantic import ValidationError
 
 from eval.sep_dataset_io import SEPDataset, load_sep_dataset
-from eval.sep_model_card import HeldoutReport, PublishTarget, render_model_card
+from eval.sep_model_card import (
+    HeldoutReport,
+    PublishTarget,
+    ReleaseCards,
+    render_dataset_card,
+    render_model_card,
+)
 from eval.sep_probe_provenance import MAX_IDS_IN_ERROR
 from hallucinations_math_lab.constants import (
     LOG_EXTRA_KEY,
@@ -79,8 +85,8 @@ from hallucinations_math_lab.services.semantic_entropy_probe import (
 
 logger = logging.getLogger("publish_sep_probe")
 
-# The Hub renders a repo's README.md as its model card.
-MODEL_CARD_FILE: Final[str] = "README.md"
+# The Hub renders a repo's README.md as its model or dataset card.
+CARD_FILE: Final[str] = "README.md"
 MODEL_REPO_TYPE: Final[str] = "model"
 DATASET_REPO_TYPE: Final[str] = "dataset"
 _JSON_INDENT: Final[int] = 2
@@ -276,10 +282,11 @@ def verify_staged(
 
 def stage_release(
     probe_dir: Path, dataset_dir: Path, heldout_path: Path, target: PublishTarget, staging_dir: Path
-) -> str:
+) -> ReleaseCards:
     """Check the three inputs agree, then write the model repo's folder to `staging_dir`
-    (absent or empty): the probe's files, metrics.json with the held-out report merged in,
-    and the model card, which is returned. The inputs are checked before anything is written."""
+    (absent or empty): the probe's files and metrics.json with the held-out report merged
+    in. The inputs are checked before anything is written. Returns both cards, which are
+    uploaded from memory as each repo's README.md."""
     check_target(target)
     probe = load_probe_dir(probe_dir)
     metrics = _load_metrics(probe_dir)
@@ -289,7 +296,10 @@ def stage_release(
     check_dataset(load_sep_dataset(dataset_dir), dataset_dir, probe, probe_dir)
 
     published = SEPPublishedMetrics(**metrics.model_dump(), heldout_benchmark=raw_heldout)
-    card = render_model_card(probe.config, published, heldout, target)
+    cards = ReleaseCards(
+        model=render_model_card(probe.config, published, heldout, target),
+        dataset=render_dataset_card(probe.config, target),
+    )
     if staging_dir.exists() and any(staging_dir.iterdir()):
         raise FileExistsError(f"Staging directory {staging_dir} is not empty.")
     try:
@@ -300,7 +310,6 @@ def stage_release(
         (staging_dir / SEP_METRICS_FILE).write_text(
             published.model_dump_json(indent=_JSON_INDENT) + "\n"
         )
-        (staging_dir / MODEL_CARD_FILE).write_text(card)
     except OSError as e:
         raise RuntimeError(f"Cannot stage the SEP probe release in {staging_dir}: {e!s}") from e
     verify_staged(staging_dir, probe, probe_dir, dataset_dir)
@@ -318,7 +327,7 @@ def stage_release(
             }
         },
     )
-    return card
+    return cards
 
 
 def _hub_error(action: str, repo_id: str, repo_type: str, error: OSError) -> RuntimeError:
@@ -355,22 +364,32 @@ def _check_tag_free(api: HfApi, repo_id: str, repo_type: str, tag: str) -> None:
 
 
 def _upload(
-    api: HfApi, repo_id: str, repo_type: str, folder: Path, files: Sequence[str], message: str
+    api: HfApi,
+    repo_id: str,
+    repo_type: str,
+    folder: Path,
+    files: Sequence[str],
+    card: str,
+    message: str,
 ) -> str:
-    """Create the repo if needed and upload `files` from `folder`; returns the commit sha."""
+    """Create the repo if needed and upload, in one commit, `files` from `folder` and `card`
+    as the repo's README.md; returns the commit sha."""
+    operations = [
+        *(CommitOperationAdd(path_in_repo=name, path_or_fileobj=folder / name) for name in files),
+        CommitOperationAdd(path_in_repo=CARD_FILE, path_or_fileobj=card.encode()),
+    ]
     try:
         api.create_repo(repo_id=repo_id, repo_type=repo_type, exist_ok=True)
-        info = api.upload_folder(
+        info = api.create_commit(
             repo_id=repo_id,
             repo_type=repo_type,
-            folder_path=folder,
-            allow_patterns=list(files),
+            operations=operations,
             commit_message=message,
         )
     except OSError as e:  # HfHubHTTPError is an OSError
         raise _hub_error("upload to", repo_id, repo_type, e) from e
     if not isinstance(info, CommitInfo):
-        raise TypeError(f"upload_folder returned {type(info).__name__} for {repo_id}.")
+        raise TypeError(f"create_commit returned {type(info).__name__} for {repo_id}.")
     logger.info(
         "Uploaded to the Hub.",
         extra={LOG_EXTRA_KEY: {"repo_id": repo_id, "repo_type": repo_type, "commit": info.oid}},
@@ -400,10 +419,12 @@ def _tag_all(api: HfApi, commits: dict[tuple[str, str], str], tag: str) -> None:
         tagged.append((repo_id, repo_type))
 
 
-def upload_release(api: HfApi, staging_dir: Path, dataset_dir: Path, target: PublishTarget) -> None:
-    """Refuse a tag either repo already has, then upload the dataset, then the staged model
-    folder, then tag both commits. The dataset goes first so the model repo, the one users
-    load, never links to a dataset that has not landed."""
+def upload_release(
+    api: HfApi, staging_dir: Path, dataset_dir: Path, cards: ReleaseCards, target: PublishTarget
+) -> None:
+    """Refuse a tag either repo already has, then upload the dataset with its card, then the
+    staged model folder with its card, then tag both commits. The dataset goes first so the
+    model repo, the one users load, never links to a dataset that has not landed."""
     repos = ((target.dataset_repo, DATASET_REPO_TYPE), (target.model_repo, MODEL_REPO_TYPE))
     for repo_id, repo_type in repos:
         _check_tag_free(api, repo_id, repo_type, target.tag)
@@ -414,6 +435,7 @@ def upload_release(api: HfApi, staging_dir: Path, dataset_dir: Path, target: Pub
             DATASET_REPO_TYPE,
             dataset_dir,
             SEP_DATASET_DIR_FILES,
+            cards.dataset,
             f"Release SEP calibration dataset {target.tag}",
         ),
         (target.model_repo, MODEL_REPO_TYPE): _upload(
@@ -421,7 +443,8 @@ def upload_release(api: HfApi, staging_dir: Path, dataset_dir: Path, target: Pub
             target.model_repo,
             MODEL_REPO_TYPE,
             staging_dir,
-            (*SEP_PROBE_DIR_FILES, MODEL_CARD_FILE),
+            SEP_PROBE_DIR_FILES,
+            cards.model,
             f"Release SEP probe {target.tag}",
         ),
     }
@@ -449,7 +472,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-repo", required=True, help="Dataset repo, <owner>/<name>.")
     parser.add_argument("--tag", required=True, help="Tag for both commits, e.g. v1.")
     parser.add_argument(
-        "--dry-run", action="store_true", help="Check and print the card; upload nothing."
+        "--dry-run", action="store_true", help="Check and print both cards; upload nothing."
     )
     return parser
 
@@ -458,14 +481,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     target = PublishTarget(model_repo=args.repo, dataset_repo=args.dataset_repo, tag=args.tag)
     with tempfile.TemporaryDirectory() as staging:
-        card = stage_release(args.probe_dir, args.dataset, args.heldout, target, Path(staging))
+        cards = stage_release(args.probe_dir, args.dataset, args.heldout, target, Path(staging))
         if args.dry_run:
-            print(card)
+            print(cards.model)
+            print(cards.dataset)
             logger.info(
                 "Dry run: nothing uploaded.", extra={LOG_EXTRA_KEY: {"probe_uri": target.probe_uri}}
             )
             return 0
-        upload_release(HfApi(), Path(staging), args.dataset, target)
+        upload_release(HfApi(), Path(staging), args.dataset, cards, target)
     return 0
 
 
