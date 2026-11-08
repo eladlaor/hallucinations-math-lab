@@ -57,6 +57,9 @@ class DetectionResult(BaseModel):
     prompt: str
     greedy_answer: str
     samples: list[str]
+    # Per-sample token logprobs, aligned with `samples`; lets a saved run be
+    # re-scored offline by the sample-based detectors (eval/rescore_benchmark.py).
+    sample_token_logprobs: list[list[TokenLogprob]] = Field(default_factory=list)
     detector_scores: dict[DetectorName, float]
     clusters: list[Cluster] | None = None
     escalation_detector: DetectorName

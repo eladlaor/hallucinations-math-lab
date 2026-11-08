@@ -37,8 +37,12 @@ Two modes:
     exist, never have seen these questions, and match the model's registry
     entry (the chat template is checked when each model is built).
 
+Every row also keeps each sample's token logprobs (`sample_token_logprobs`),
+so rescore_benchmark.py can re-run the sample-based detectors on the saved
+answers without the model.
+
 Downstream: compute_auroc.py, escalation_uplift.py, adversarial_separation.py,
-compare_models.py (for a sweep).
+compare_models.py (for a sweep), rescore_benchmark.py.
 """
 
 from __future__ import annotations
@@ -61,6 +65,7 @@ from eval.benchmark_results import (
     QUESTION_FIELD,
     SAMPLE_N_FIELD,
     SAMPLE_TEMPERATURE_FIELD,
+    SAMPLE_TOKEN_LOGPROBS_FIELD,
     SEP_PROBE_FIELD,
     RunConfig,
 )
@@ -224,6 +229,10 @@ def run(
                         "escalated": result.escalated,
                         "n_clusters": len(result.clusters) if result.clusters else None,
                         "samples": result.samples,
+                        SAMPLE_TOKEN_LOGPROBS_FIELD: [
+                            [t.model_dump() for t in sample]
+                            for sample in result.sample_token_logprobs
+                        ],
                     }
                 )
                 + "\n"

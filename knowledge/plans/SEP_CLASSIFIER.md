@@ -973,7 +973,7 @@ here and are not repeated there; its item 7 (the real run) stays in that plan.
   removed") is decided: **removed**.
 - *As implemented:*
   - **CLI.** `--dataset DIR` is required; the trainer reads no calibration file (the
-    collector does), so `resolve_calibration_path` and its test are gone. `--output-dir` defaults to `data/probes/<model slug>/` and, like the dataset
+    collector does), so `resolve_calibration_path` and its test moved to the collector. `--output-dir` defaults to `data/probes/<model slug>/` and, like the dataset
     directory, must be empty or absent. `--layers`, `--max-iter` and `--standardize` use the
     spellings the vLLM refusal and the convergence error print (`SEP_LAYERS_FLAG`,
     `MAX_ITER_FLAG`, `STANDARDIZE_FLAG`); the vLLM refusal now ends "or train the probe

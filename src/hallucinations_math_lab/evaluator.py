@@ -180,6 +180,7 @@ def evaluate_responses(
         prompt=prompt,
         greedy_answer=greedy_answer,
         samples=[s.text for s in samples.samples] if samples else [],
+        sample_token_logprobs=[s.token_logprobs for s in samples.samples] if samples else [],
         detector_scores=scores,
         clusters=clusters,
         escalation_detector=escalation_detector,

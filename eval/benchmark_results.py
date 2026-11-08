@@ -25,9 +25,15 @@ FINAL_ANSWER_SOURCE_FIELD: Final[str] = "final_answer_source"
 # enabled (not only escalated rows), so escalation can be compared to random.
 JUDGE_ANSWER_FIELD: Final[str] = "judge_answer"
 DETECTOR_SCORES_FIELD: Final[str] = "detector_scores"
+ESCALATION_FIELD: Final[str] = "escalation"
+N_CLUSTERS_FIELD: Final[str] = "n_clusters"
+QUESTION_FIELD: Final[str] = "question"
+SAMPLES_FIELD: Final[str] = "samples"
+# Each sample's token logprobs, aligned with SAMPLES_FIELD, as
+# [{"token": ..., "logprob": ...}, ...]; what rescore_benchmark.py needs.
+SAMPLE_TOKEN_LOGPROBS_FIELD: Final[str] = "sample_token_logprobs"
 ESCALATED_FIELD: Final[str] = "escalated"
 ID_FIELD: Final[str] = "id"
-QUESTION_FIELD: Final[str] = "question"
 # What produced the scores. Two runs are comparable only if these match.
 MODEL_ID_FIELD: Final[str] = "model_id"
 SAMPLE_N_FIELD: Final[str] = "sample_n"
