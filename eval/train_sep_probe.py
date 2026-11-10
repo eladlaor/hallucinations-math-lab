@@ -318,6 +318,8 @@ def build_probe_config(
         training=SEPTrainingRecord(
             provider=collected.provider,
             transformers_version=collected.transformers_version,
+            torch_version=collected.torch_version,
+            torch_cuda_version=collected.torch_cuda_version,
             n_rows=se.size,
             calibration_set_sha256=collected.calibration_set_sha256,
             repo_commit=repo.commit,

@@ -116,6 +116,8 @@ def probe_config(
         training=SEPTrainingRecord(
             provider="hf_transformers",
             transformers_version="5.0.0",
+            torch_version="2.14.1+cu126",
+            torch_cuda_version="12.6",
             n_rows=_N_HIGH + _N_LOW,
             calibration_set_sha256="d" * 64,
             repo_commit="e" * 40,

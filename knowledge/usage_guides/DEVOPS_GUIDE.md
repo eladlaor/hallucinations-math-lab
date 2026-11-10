@@ -275,6 +275,23 @@ access to the target namespace (the publisher reads that stored token; it takes 
 command line). Commit and push before step 2: a probe fitted from uncommitted code is refused,
 and the model card links to the fitting commit.
 
+On a GPU pod whose NVIDIA driver is older than the locked torch build needs (the locked
+PyPI build targets CUDA 13; RunPod hosts currently run older drivers), install the CUDA 12.6
+build of the same torch version after syncing, and from then on run every command with
+`uv run --no-sync`: a plain `uv run` re-syncs the environment back to the locked build.
+
+```bash
+uv sync --frozen --all-extras
+uv pip install --reinstall "torch==<locked version>" \
+  --index-url https://download.pytorch.org/whl/cu126
+uv run --no-sync python -c "import torch; print(torch.__version__, torch.version.cuda)"
+```
+
+The swap is recorded, not hidden: the collector writes `torch.__version__` (e.g.
+`2.14.1+cu126`) and `torch.version.cuda` (`None` for a CPU-only build) into the dataset's
+collection config, the trainer copies both into the probe's config, and both Hub cards
+print the build.
+
 ```bash
 # 1. Collect the calibration rows: SE labels and every layer's hidden states (GPU).
 uv run python -m eval.collect_sep_dataset

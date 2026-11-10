@@ -79,7 +79,7 @@ The trainer's options are the ones the published probe was fitted with.
 - **Backbone:** `$model_id` at revision `$revision`, $num_hidden_layers decoder layers,
   hidden size $hidden_size.
 - **Collection:** hidden states collected with the `$provider` provider under
-  transformers $transformers_version.
+  transformers $transformers_version and torch $torch_build.
 - **Questions:** the `$source_dataset_config` configuration of TriviaQA's
   `$source_dataset_split` split, [$source_dataset]($hub_url/datasets/$source_dataset).
 - **Code:** the probe was fitted with [hallucinations-math-lab]($repo_url) at commit

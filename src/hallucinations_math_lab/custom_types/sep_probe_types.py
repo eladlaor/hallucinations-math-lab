@@ -105,6 +105,11 @@ class SEPCollectionConfig(_StrictBlock):
     # states; the fit runs neither, so the probe copies both from here.
     provider: str = Field(min_length=1)
     transformers_version: str = Field(min_length=1)
+    # The torch build that ran the backbone: its version string carries a local
+    # tag such as "+cu126" when it is not the locked PyPI build, and its CUDA
+    # release is None for a CPU-only build. The probe copies both too.
+    torch_version: str = Field(min_length=1)
+    torch_cuda_version: str | None = Field(min_length=1)
     backbone: SEPBackbone
     prompt: SEPPromptSpec
     labels: SEPCollectionLabels
@@ -185,6 +190,10 @@ class SEPTrainingRecord(_StrictBlock):
 
     provider: str = Field(min_length=1)
     transformers_version: str = Field(min_length=1)
+    # Copied from the collection config: the torch build and its CUDA release
+    # (None for CPU-only) that produced the hidden states.
+    torch_version: str = Field(min_length=1)
+    torch_cuda_version: str | None = Field(min_length=1)
     n_rows: int = Field(ge=2)
     calibration_set_sha256: str = Field(pattern=_SHA256_HEX_PATTERN)
     repo_commit: str = Field(pattern=GIT_COMMIT_SHA_PATTERN)

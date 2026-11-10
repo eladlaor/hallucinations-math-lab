@@ -109,7 +109,8 @@ set with `eval.calibrate_threshold`.
 - **Classifier:** logistic regression, C = $C, $penalty penalty, $solver solver,
   max_iter = $max_iter (converged in $n_iter iterations), feature scaling: $standardization.
 - **Software:** hidden states collected with the `$provider` provider under transformers
-  $transformers_version; fitted with scikit-learn $sklearn_version on $created_at.
+  $transformers_version and torch $torch_build; fitted with scikit-learn $sklearn_version
+  on $created_at.
 
 ## How does it differ from the paper?
 

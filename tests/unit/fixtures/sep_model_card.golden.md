@@ -113,7 +113,8 @@ set with `eval.calibrate_threshold`.
 - **Classifier:** logistic regression, C = 1.0, l2 penalty, lbfgs solver,
   max_iter = 100 (converged in 12 iterations), feature scaling: none.
 - **Software:** hidden states collected with the `hf_transformers` provider under transformers
-  5.0.0; fitted with scikit-learn 1.8.0 on 2026-11-07T00:00:00+00:00.
+  5.0.0 and torch 2.14.1+cu126 (CUDA 12.6); fitted with scikit-learn 1.8.0
+  on 2026-11-07T00:00:00+00:00.
 
 ## How does it differ from the paper?
 

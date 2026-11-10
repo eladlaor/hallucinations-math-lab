@@ -163,6 +163,8 @@ def _write_dataset(directory: Path, config: SEPProbeConfig, ids: list[str] = _ID
         n_questions_requested=len(ids),
         provider=config.training.provider,
         transformers_version=config.training.transformers_version,
+        torch_version=config.training.torch_version,
+        torch_cuda_version=config.training.torch_cuda_version,
         backbone=config.backbone,
         prompt=config.prompt,
         labels=SEPCollectionLabels(
@@ -300,6 +302,23 @@ def test_model_card_snapshot(release: _Release) -> None:
     metrics = SEPPublishedMetrics(**_metrics().model_dump(), heldout_benchmark=raw)
     card = render_model_card(_config(), metrics, heldout, _TARGET)
     assert card == _GOLDEN_CARD.read_text()
+
+
+@pytest.mark.parametrize(
+    ("torch_version", "cuda_version", "shown"),
+    [
+        ("2.14.1+cu126", "12.6", "torch 2.14.1+cu126 (CUDA 12.6)"),
+        ("2.14.1+cpu", None, "torch 2.14.1+cpu (CPU-only)"),
+    ],
+)
+def test_model_card_names_the_torch_build(
+    release: _Release, torch_version: str, cuda_version: str | None, shown: str
+) -> None:
+    raw, heldout = load_heldout(release.heldout_path)
+    metrics = SEPPublishedMetrics(**_metrics().model_dump(), heldout_benchmark=raw)
+    config = _config(torch_version=torch_version, torch_cuda_version=cuda_version)
+    card = render_model_card(config, metrics, heldout, _TARGET)
+    assert " ".join(card.split()).count(shown) == 1
 
 
 def test_model_card_carries_the_backbone_license_and_links_the_code_license(

@@ -282,6 +282,8 @@ def test_dataset_rows_and_columns(tmp_path: Path) -> None:
     assert config.n_questions_requested == len(_QUESTIONS)
     assert config.provider == ProviderKind.HF_TRANSFORMERS
     assert config.transformers_version == transformers.__version__
+    assert config.torch_version == torch.__version__
+    assert config.torch_cuda_version == torch.version.cuda
     assert config.backbone.model_id == E2B_ID
     assert config.backbone.revision == _E2B.revision
     assert config.backbone.num_hidden_layers == _E2B.num_hidden_layers
@@ -365,6 +367,24 @@ def test_collect_writes_the_finished_questions_when_interrupted(tmp_path: Path) 
         _collect(tmp_path, provider)
     dataset = load_sep_dataset(tmp_path / "dataset", allow_incomplete=True)
     assert [r.id for r in dataset.rows] == ["q0", "q1"]
+
+
+@pytest.mark.parametrize(
+    ("torch_version", "cuda_version"), [("2.14.1+cu126", "12.6"), ("2.14.1+cpu", None)]
+)
+def test_collection_config_records_the_torch_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    torch_version: str,
+    cuda_version: str | None,
+) -> None:
+    """A pod that swaps in another torch build says so in the provenance."""
+    monkeypatch.setattr(torch, "__version__", torch_version)
+    monkeypatch.setattr(torch.version, "cuda", cuda_version)
+    _collect(tmp_path, _FakeCollectionProvider())
+    config = load_sep_dataset(tmp_path / "dataset").config
+    assert config.torch_version == torch_version
+    assert config.torch_cuda_version == cuda_version
 
 
 def test_a_failed_salvage_write_still_names_the_failed_question(

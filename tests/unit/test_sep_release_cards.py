@@ -105,3 +105,16 @@ def test_dataset_card_names_the_fitting_commit_not_a_collection_commit() -> None
     assert "fitted with [hallucinations-math-lab]" in card
     assert "the commit that collected the data is not recorded" in card.lower()
     assert "built the data" not in card
+
+
+def test_dataset_card_names_a_cpu_only_torch_build() -> None:
+    config = _config()
+    cpu = config.model_copy(
+        update={
+            "training": config.training.model_copy(
+                update={"torch_version": "2.14.1+cpu", "torch_cuda_version": None}
+            )
+        }
+    )
+    assert "torch 2.14.1+cu126 (CUDA 12.6)" in render_dataset_card(config, _TARGET)
+    assert "torch 2.14.1+cpu (CPU-only)" in render_dataset_card(cpu, _TARGET)

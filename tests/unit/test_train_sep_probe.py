@@ -97,13 +97,15 @@ _PROBE_FILES = {
 }
 
 
-def _collection_config() -> SEPCollectionConfig:
+def _collection_config(torch_cuda_version: str | None = "12.6") -> SEPCollectionConfig:
     return SEPCollectionConfig(
         calibration_set="calibration.jsonl",
         calibration_set_sha256="d" * 64,
         n_questions_requested=_ROWS,
         provider="hf_transformers",
         transformers_version="5.0.0",
+        torch_version="2.14.1+cu126",
+        torch_cuda_version=torch_cuda_version,
         backbone=SEPBackbone(
             model_id="org/model",
             revision="a" * 40,
@@ -124,7 +126,7 @@ def _collection_config() -> SEPCollectionConfig:
     )
 
 
-def _write_dataset(directory: Path) -> SEPDataset:
+def _write_dataset(directory: Path, torch_cuda_version: str | None = "12.6") -> SEPDataset:
     """A dataset whose SE is linearly readable from one layer per position and
     whose greedy answers are wrong mostly when SE is high."""
     rng = np.random.default_rng(0)
@@ -150,7 +152,9 @@ def _write_dataset(directory: Path) -> SEPDataset:
         )
         for i in range(_ROWS)
     ]
-    dataset = SEPDataset(config=_collection_config(), rows=rows, hidden_states=states)
+    dataset = SEPDataset(
+        config=_collection_config(torch_cuda_version), rows=rows, hidden_states=states
+    )
     directory.mkdir(parents=True)
     for row in rows:
         append_training_log(
@@ -227,6 +231,8 @@ def test_config_holds_backbone_revision_layers_position_gamma_classifier_prompt(
     assert config.classifier.seed == RANDOM_SEED
     assert config.training.provider == ProviderKind.HF_TRANSFORMERS
     assert config.training.transformers_version == "5.0.0"
+    assert config.training.torch_version == "2.14.1+cu126"
+    assert config.training.torch_cuda_version == "12.6"
     assert config.training.n_rows == _ROWS
     assert config.training.calibration_set_sha256 == "d" * 64
     assert config.training.created_at == _CREATED_AT
@@ -463,6 +469,20 @@ def test_config_records_the_given_repo_state(dataset_dir: Path, tmp_path: Path) 
     training = _config(tmp_path / "probe").training
     assert training.repo_commit == "f" * 40
     assert training.repo_dirty is True
+
+
+def test_config_copies_a_cpu_only_torch_build(tmp_path: Path) -> None:
+    _write_dataset(tmp_path / "dataset", torch_cuda_version=None)
+    train_sep_probe(
+        tmp_path / "dataset",
+        tmp_path / "probe",
+        layers=SEPLayersMode.FINAL,
+        repo=_REPO,
+        created_at=_CREATED_AT,
+    )
+    training = _config(tmp_path / "probe").training
+    assert training.torch_version == "2.14.1+cu126"
+    assert training.torch_cuda_version is None
 
 
 def test_metrics_json_matches_schema(probe_dir: Path) -> None:

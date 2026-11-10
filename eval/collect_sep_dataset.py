@@ -275,6 +275,8 @@ def build_collection_config(
         n_questions_requested=len(calibration_set.questions),
         provider=str(provider.provider_kind),
         transformers_version=transformers.__version__,
+        torch_version=torch.__version__,
+        torch_cuda_version=torch.version.cuda,
         backbone=SEPBackbone(
             model_id=entry.model_id,
             revision=entry.revision,

@@ -41,6 +41,7 @@ from hallucinations_math_lab.custom_types.sep_probe_types import (
     SEPProbeConfig,
     SEPProbeMetrics,
     SEPPublishedMetrics,
+    SEPTrainingRecord,
 )
 from hallucinations_math_lab.services.semantic_entropy_probe import HubProbeRef
 
@@ -233,6 +234,14 @@ def _number(value: float) -> str:
     return f"{value:.{CARD_DECIMALS}f}"
 
 
+def _torch_build(training: SEPTrainingRecord) -> str:
+    """The torch build that produced the hidden states, as the cards print it:
+    "2.14.1+cu126 (CUDA 12.6)", or "2.14.1 (CPU-only)" for a build without CUDA."""
+    cuda = training.torch_cuda_version
+    runtime = "CPU-only" if cuda is None else f"CUDA {cuda}"
+    return f"{training.torch_version} ({runtime})"
+
+
 def _layers(layers: Sequence[int], offset: int = 0) -> str:
     return ", ".join(str(layer + offset) for layer in layers)
 
@@ -378,6 +387,7 @@ def render_model_card(
         "sklearn_version": classifier.sklearn_version,
         "provider": training.provider,
         "transformers_version": training.transformers_version,
+        "torch_build": _torch_build(training),
         "created_at": training.created_at.isoformat(),
         "deviations": ", ".join(str(d) for d in config.deviations_from_paper),
     }
@@ -413,8 +423,9 @@ def render_dataset_card(config: SEPProbeConfig, target: PublishTarget) -> str:
         "max_tokens": labels.max_tokens,
         "nli_model_id": labels.nli_model_id,
         "nli_revision": labels.nli_revision,
-        # The trainer copies these two from the dataset's collection config.
+        # The trainer copies these from the dataset's collection config.
         "provider": training.provider,
         "transformers_version": training.transformers_version,
+        "torch_build": _torch_build(training),
     }
     return _render(DATASET_CARD_TEMPLATE, fields)

@@ -79,7 +79,7 @@ The trainer's options are the ones the published probe was fitted with.
 - **Backbone:** `google/gemma-4-E2B-it` at revision `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, 2 decoder layers,
   hidden size 4.
 - **Collection:** hidden states collected with the `hf_transformers` provider under
-  transformers 5.0.0.
+  transformers 5.0.0 and torch 2.14.1+cu126 (CUDA 12.6).
 - **Questions:** the `rc.nocontext` configuration of TriviaQA's
   `validation` split, [mandarjoshi/trivia_qa](https://huggingface.co/datasets/mandarjoshi/trivia_qa).
 - **Code:** the probe was fitted with [hallucinations-math-lab](https://github.com/eladlaor/hallucinations-math-lab) at commit

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- SEP provenance records the torch build that produced the hidden states:
+  `torch_version` and `torch_cuda_version` (None for CPU-only) in the dataset's
+  collection config and the probe's training record, shown on both Hub cards;
+  the DevOps guide documents swapping in the CUDA 12.6 build on older-driver pods.
 - Playground clustering replay: the *Score answers* and *Ask the model* tabs
   step through the real SE clustering run, one NLI comparison at a time
   (the answer, the meaning cluster's representative, both directional
