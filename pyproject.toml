@@ -15,7 +15,7 @@ requires-python = ">=3.12,<3.14"
 # DeBERTa-MNLI NLI detector. Everything provider/judge/demo/eval specific is an
 # optional extra below.
 dependencies = [
-    "pydantic>=2.7",
+    "pydantic>=2.12",
     "pydantic-settings>=2.3",
     "torch>=2.3",
     "transformers>=4.56",

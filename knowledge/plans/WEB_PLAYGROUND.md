@@ -7,6 +7,7 @@
 - [Scope: three tabs, one per way in](#scope-three-tabs-one-per-way-in)
 - [Architecture](#architecture)
 - [API](#api)
+  - [The SE trace (`se_trace`)](#the-se-trace-se_trace)
 - [Design direction](#design-direction)
 - [Work items (TDD)](#work-items-tdd)
 - [Success criteria](#success-criteria)
@@ -115,13 +116,44 @@ frontend/            # Vite + React + TS source (dev only)
 |---|---|---|---|
 | `GET /api/status` | — | provider, model id, judge configured, SE threshold (nats), SEP threshold (`sep_threshold`, p(high SE)), the escalation threshold `/ask` applies, NLI model id | `get_settings()` |
 | `GET /api/presets` | — | the three scenarios (question, answers, logprobs) | `examples/score_precollected_samples.SCENARIOS` |
-| `POST /api/score` | question, answers (+ optional per-answer token logprobs) | SE, PE or null, clusters (member indices + representative) | `evaluate_responses` with `NLIScorer` |
-| `POST /api/ask` | question, `mode: detect \| chat` | the `DetectionResult` fields the CLI prints | the same `ResponseEvaluator` path as `demo/cli.py` |
+| `POST /api/score` | question, answers (+ optional per-answer token logprobs), optional `se_trace` | SE, `se_estimator`, PE or null, clusters (member indices + representative); `se_trace` when asked | `evaluate_responses` with `NLIScorer` |
+| `POST /api/ask` | question, `mode: detect \| chat`, optional `se_trace` | the `DetectionResult` fields the CLI prints; `se_trace` when asked | the same `ResponseEvaluator` path as `demo/cli.py` |
 | `GET /api/results` | — | results files and sweep dirs under `eval/results/` | filesystem |
 | `GET /api/results/report` | `path` (relative) | AUROC report, or comparison report for a dir | `auroc_report`, `comparison_report` |
 
 `path` is resolved and must stay inside `eval/results/`; anything else is a
 400. The server binds `127.0.0.1` only.
+
+### The SE trace (`se_trace`)
+
+`se_trace: true` on `/api/score` or `/api/ask` returns the clustering replay's
+data, recorded by the real clustering run (`cluster_with_trace` in
+`services/semantic_entropy.py`), not re-simulated:
+
+| Field | What it holds |
+|---|---|
+| `clustering.comparisons` | every NLI comparison in the order it ran: `answer_index`, `cluster_index`, `representative_index` (the cluster's first answer), `forward` (representative → answer) and `backward` (answer → representative) labels, `joined` |
+| `clustering.placements` | one per answer, in answer order: `cluster_index` and `opened_new_cluster` |
+| `estimator` | `likelihood_weighted` or `discrete`, the same as `se_estimator` |
+| `answer_likelihoods` | each answer's exp(mean token logprob) for the likelihood-weighted estimator; null for discrete |
+| `cluster_probabilities` | the p(c) SE was computed from, aligned with `clusters` |
+
+`backward` is null when it never ran: as in `NLIScorer.bidirectional_entails`,
+the reverse direction is judged only when the forward one is entailment, and
+an answer stops at the first cluster it joins. Off by default; without the
+flag the responses, and the NLI calls, are unchanged. The trace needs a scorer
+with per-direction labels (`DirectionalEntailmentScorer.classify`, which
+`NLIScorer` has); both routes refuse it (400) up front when the scorer has
+none, and `/api/ask` also refuses it (400) when no SE detector is in
+`ENABLED_DETECTORS`.
+
+On `/api/ask` either SE estimator can supply the trace. With both
+`semantic_entropy` and `discrete_semantic_entropy` enabled, each records one
+(the clustering is the same; only `estimator`, `answer_likelihoods` and
+`cluster_probabilities` differ). The response carries the trace of the
+`ESCALATION_DETECTOR` when it is one of them, so the replay's last step shows
+the SE value that drove escalation; otherwise it carries the trace of the one
+listed last in `ENABLED_DETECTORS`.
 
 ## Design direction
 

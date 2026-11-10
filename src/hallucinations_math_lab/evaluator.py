@@ -24,7 +24,11 @@ import logging
 
 from hallucinations_math_lab.config import get_settings
 from hallucinations_math_lab.constants import LOG_EXTRA_KEY, AnswerSource, DetectorName
-from hallucinations_math_lab.custom_types.domain_types import DetectionResult, SampleSet
+from hallucinations_math_lab.custom_types.domain_types import (
+    DetectionResult,
+    SampleSet,
+    SemanticEntropyTrace,
+)
 from hallucinations_math_lab.escalation import EscalationPolicy, SingleDetector
 from hallucinations_math_lab.judges.protocol import Judge
 from hallucinations_math_lab.services.detector_protocol import (
@@ -53,6 +57,7 @@ def evaluate_responses(
     judge: Judge | None = None,
     greedy_answer: str | None = None,
     escalation_policy: EscalationPolicy | None = None,
+    trace_semantic_entropy: bool = False,
 ) -> DetectionResult:
     """Score a set of already-sampled responses against the configured detectors.
 
@@ -87,6 +92,9 @@ def evaluate_responses(
         baseline); the richer human-readable reason lives in the result's
         escalation_policy_desc. When None, behavior is byte-identical to the
         historical single-detector path (escalation_detector > threshold).
+      trace_semantic_entropy: when True, SE records its clustering comparison
+        by comparison and the result carries it as `se_trace`, for a
+        step-by-step replay. Off by default; it never changes the clusters.
 
     Raises:
       ValueError: if escalation_detector is not in the detectors list, or if
@@ -127,15 +135,20 @@ def evaluate_responses(
         prompt=prompt,
         samples=samples,
         pooled_hidden_state=pooled_hidden_state,
+        trace_semantic_entropy=trace_semantic_entropy,
     )
 
     scores: dict[DetectorName, float] = {}
     clusters = None
+    se_traces: dict[DetectorName, SemanticEntropyTrace] = {}
     for detector in detectors:
         result = detector.score(ctx)
         scores[result.name] = result.score
         if result.clusters is not None:
             clusters = result.clusters
+        if result.se_trace is not None:
+            se_traces[result.name] = result.se_trace
+    se_trace = _pick_se_trace(se_traces, escalation_detector)
 
     policy = (
         escalation_policy
@@ -192,7 +205,19 @@ def evaluate_responses(
         escalation_policy_desc=(
             None if escalation_policy is None else escalation_policy.describe()
         ),
+        se_trace=se_trace,
     )
+
+
+def _pick_se_trace(
+    se_traces: dict[DetectorName, SemanticEntropyTrace], escalation_detector: DetectorName
+) -> SemanticEntropyTrace | None:
+    """The trace of the escalation detector when it recorded one, so the
+    replay ends on the SE value that drove escalation; otherwise the last one
+    recorded (both SE estimators share the clustering, only p(c) differs)."""
+    if escalation_detector in se_traces:
+        return se_traces[escalation_detector]
+    return next(reversed(se_traces.values()), None)
 
 
 def _build_default_detectors(enabled: list[DetectorName], model_id: str) -> list[Detector]:
@@ -381,7 +406,9 @@ class ResponseEvaluator:
         """The judge escalated prompts go to, or None (read-only)."""
         return self._judge
 
-    def evaluate(self, prompt: str) -> DetectionResult:
+    def evaluate(self, prompt: str, *, trace_semantic_entropy: bool = False) -> DetectionResult:
+        """Sample, score and (optionally) judge one prompt. `trace_semantic_entropy`
+        is passed to `evaluate_responses`."""
         try:
             need_samples = any(d.requires_samples for d in self._detectors)
 
@@ -403,6 +430,7 @@ class ResponseEvaluator:
                 judge=self._judge,
                 greedy_answer=greedy,
                 escalation_policy=self._escalation_policy,
+                trace_semantic_entropy=trace_semantic_entropy,
             )
         except Exception as e:
             raise RuntimeError(

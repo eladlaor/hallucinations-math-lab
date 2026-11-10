@@ -34,6 +34,7 @@ from demo.web.constants import (
     ROUTE_RESULTS_REPORT,
     ROUTE_SCORE,
     ROUTE_STATUS,
+    SE_TRACE_DETECTORS,
     STATIC_DIR,
     STATIC_MOUNT_NAME,
     STATIC_MOUNT_PATH,
@@ -44,9 +45,11 @@ from demo.web.results_reports import ResultsPathError, build_report, list_result
 from hallucinations_math_lab import (
     DetectionResult,
     DetectorName,
+    DirectionalEntailmentScorer,
     DiscreteSemanticEntropyDetector,
     EntailmentScorer,
     Judge,
+    NLILabel,
     PredictiveEntropyDetector,
     ResponseEvaluator,
     Sample,
@@ -66,6 +69,15 @@ JUDGE_UNAVAILABLE_REASON = (
     "GCP_PROJECT_ID is not set in .env. The Gemini judge needs it, plus Google "
     "Application Default Credentials, to answer escalated questions."
 )
+SE_TRACE_NEEDS_DIRECTION_DETAIL = (
+    "se_trace needs an NLI scorer that labels one direction at a time "
+    "(classify(premise, hypothesis)); the configured scorer has only bidirectional_entails."
+)
+
+
+SE_TRACE_NEEDS_SE_DETAIL = (
+    "se_trace needs Semantic Entropy, but ENABLED_DETECTORS {enabled} has neither {se_detectors}."
+)
 
 
 class LockedEntailmentScorer:
@@ -82,6 +94,22 @@ class LockedEntailmentScorer:
     def bidirectional_entails(self, a: str, b: str) -> bool:
         with self._lock:
             return self._scorer.bidirectional_entails(a, b)
+
+    @property
+    def supports_direction(self) -> bool:
+        """Whether the wrapped scorer labels one direction at a time, as the SE trace needs."""
+        return isinstance(self._scorer, DirectionalEntailmentScorer)
+
+    def classify(self, premise: str, hypothesis: str) -> NLILabel:
+        """One direction, for the SE trace. Raises TypeError if the wrapped scorer has none."""
+        scorer = self._scorer
+        if not isinstance(scorer, DirectionalEntailmentScorer):
+            raise TypeError(
+                f"The SE trace needs per-direction NLI labels, but {type(scorer).__name__} "
+                "has no classify(premise, hypothesis)."
+            )
+        with self._lock:
+            return scorer.classify(premise, hypothesis)
 
 
 class LazyOnce[T]:
@@ -107,13 +135,17 @@ class LazyOnce[T]:
 def build_ask_detectors(
     enabled: list[DetectorName], model_id: str, scorer: EntailmentScorer
 ) -> list[Detector]:
-    """The detectors `demo.cli` would run (ENABLED_DETECTORS), with SE on the shared scorer."""
-    return [
-        SemanticEntropyDetector(scorer=scorer)
-        if name == DetectorName.SEMANTIC_ENTROPY
-        else _build_default_detectors([name], model_id)[0]
-        for name in enabled
-    ]
+    """The detectors `demo.cli` would run (ENABLED_DETECTORS), with both SE
+    estimators on the shared scorer (its lock, and its `classify` for the trace)."""
+    detectors: list[Detector] = []
+    for name in enabled:
+        if name == DetectorName.SEMANTIC_ENTROPY:
+            detectors.append(SemanticEntropyDetector(scorer=scorer))
+        elif name == DetectorName.DISCRETE_SEMANTIC_ENTROPY:
+            detectors.append(DiscreteSemanticEntropyDetector(scorer=scorer))
+        else:
+            detectors.append(_build_default_detectors([name], model_id)[0])
+    return detectors
 
 
 def judge_unavailable_reason(settings: Settings) -> str | None:
@@ -123,7 +155,7 @@ def judge_unavailable_reason(settings: Settings) -> str | None:
 
 def _api_router(
     *,
-    scorer: EntailmentScorer,
+    scorer: LockedEntailmentScorer,
     provider: LazyOnce[SamplingProvider],
     judge: LazyOnce[Judge],
     results_dir: Path,
@@ -131,6 +163,17 @@ def _api_router(
 ) -> APIRouter:
     router = APIRouter(prefix=API_PREFIX)
     model_lock = threading.Lock()
+
+    def refuse_trace_without_direction(ctx: dict[str, object]) -> None:
+        """400 before any work when a trace is asked of a scorer that cannot label one
+        direction at a time, instead of a 500 from inside the clustering."""
+        if scorer.supports_direction:
+            return
+        logger.warning(
+            "SE trace refused: the NLI scorer has no classify.", extra={LOG_EXTRA_KEY: ctx}
+        )
+        raise HTTPException(status_code=400, detail=SE_TRACE_NEEDS_DIRECTION_DETAIL)
+
     evaluators: dict[AskMode, ResponseEvaluator] = {}
 
     def evaluator_for(mode: AskMode) -> ResponseEvaluator:
@@ -176,8 +219,11 @@ def _api_router(
         ctx = {
             "n_answers": len(request.answers),
             "has_logprobs": has_logprobs,
+            "se_trace": request.se_trace,
             "question": request.question[:80],
         }
+        if request.se_trace:
+            refuse_trace_without_direction(ctx)
         logger.info("Scoring answers.", extra={LOG_EXTRA_KEY: ctx})
         started = time.perf_counter()
         # Likelihood-weighted SE needs every answer's logprobs; typed answers
@@ -201,6 +247,7 @@ def _api_router(
                 escalation_detector=se.name,
                 escalation_threshold=settings.escalation_threshold_for(se.name),
                 greedy_answer=samples[0].text,
+                trace_semantic_entropy=request.se_trace,
             )
         except Exception as e:
             logger.error("Scoring failed.", extra={LOG_EXTRA_KEY: {**ctx, "error": str(e)}})
@@ -224,11 +271,27 @@ def _api_router(
             clusters=result.clusters,
             n_answers=len(samples),
             se_threshold=settings.se_threshold,
+            se_trace=result.se_trace,
         )
 
     @router.post(ROUTE_ASK, response_model=DetectionResult)
     def ask(request: AskRequest) -> DetectionResult:
-        ctx = {"mode": str(request.mode), "question": request.question[:80]}
+        ctx = {
+            "mode": str(request.mode),
+            "se_trace": request.se_trace,
+            "question": request.question[:80],
+        }
+        if request.se_trace and not SE_TRACE_DETECTORS & set(settings.enabled_detectors):
+            logger.warning("SE trace refused: SE is not enabled.", extra={LOG_EXTRA_KEY: ctx})
+            raise HTTPException(
+                status_code=400,
+                detail=SE_TRACE_NEEDS_SE_DETAIL.format(
+                    enabled=[str(d) for d in settings.enabled_detectors],
+                    se_detectors=" nor ".join(sorted(SE_TRACE_DETECTORS)),
+                ),
+            )
+        if request.se_trace:
+            refuse_trace_without_direction(ctx)
         if request.mode == AskMode.CHAT:
             reason = judge_unavailable_reason(settings)
             if reason is not None:
@@ -238,7 +301,9 @@ def _api_router(
         started = time.perf_counter()
         try:
             with model_lock:
-                result = evaluator_for(request.mode).evaluate(request.question)
+                result = evaluator_for(request.mode).evaluate(
+                    request.question, trace_semantic_entropy=request.se_trace
+                )
         except Exception as e:
             logger.error("Ask failed.", extra={LOG_EXTRA_KEY: {**ctx, "error": str(e)}})
             raise HTTPException(status_code=500, detail=str(e)) from e

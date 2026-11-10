@@ -1,8 +1,19 @@
-"""Domain types: SampleSet, Cluster, DetectionResult."""
+"""Domain types: SampleSet, Cluster, the SE trace, DetectionResult."""
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from hallucinations_math_lab.constants import AnswerSource, DetectorName
+from hallucinations_math_lab.constants import (
+    AnswerSource,
+    DetectorName,
+    NLILabel,
+    SemanticEntropyEstimator,
+)
+
+
+def is_none(value: object) -> bool:
+    """`exclude_if` predicate: leave an opt-in field out of the serialized
+    model when it is absent, so untraced payloads keep their old shape."""
+    return value is None
 
 
 class TokenLogprob(BaseModel):
@@ -42,6 +53,54 @@ class Cluster(BaseModel):
         return len(self.member_indices)
 
 
+class ClusteringComparison(BaseModel):
+    """One NLI comparison the greedy clustering ran: an answer against a cluster's
+    representative (its first member), both prefixed with the question.
+
+    `forward` judges representative -> answer, `backward` answer -> representative.
+    `backward` is None when it never ran: the clustering stops at the first
+    direction that is not entailment. `joined` is True iff both are entailment.
+    """
+
+    answer_index: int
+    cluster_index: int
+    representative_index: int
+    forward: NLILabel
+    backward: NLILabel | None
+    joined: bool
+
+
+class ClusterPlacement(BaseModel):
+    """Where one answer ended up: the cluster it joined, or the one it opened."""
+
+    answer_index: int
+    cluster_index: int
+    opened_new_cluster: bool
+
+
+class ClusteringTrace(BaseModel):
+    """The clustering run, step by step: every comparison in the order it ran,
+    then one placement per answer, in answer order."""
+
+    comparisons: list[ClusteringComparison]
+    placements: list[ClusterPlacement]
+
+
+class SemanticEntropyTrace(BaseModel):
+    """Everything needed to replay one SE computation.
+
+    `cluster_probabilities` is the p(c) SE was computed from, aligned with the
+    clusters. `answer_likelihoods` is each answer's length-normalized sequence
+    likelihood, exp(mean token logprob), when the estimator weighs by it;
+    None for the discrete estimator, whose p(c) is |c| / N.
+    """
+
+    clustering: ClusteringTrace
+    estimator: SemanticEntropyEstimator
+    answer_likelihoods: list[float] | None
+    cluster_probabilities: list[float]
+
+
 class DetectionResult(BaseModel):
     """Output of the detector orchestrator for a single prompt.
 
@@ -69,3 +128,6 @@ class DetectionResult(BaseModel):
     final_answer_source: AnswerSource
     judge_reasoning: str | None = None
     escalation_policy_desc: str | None = None
+    # Opt-in (`trace_semantic_entropy`); left out of the serialized result when
+    # absent, so untraced results serialize exactly as before the trace existed.
+    se_trace: SemanticEntropyTrace | None = Field(default=None, exclude_if=is_none)

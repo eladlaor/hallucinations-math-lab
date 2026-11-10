@@ -33,7 +33,11 @@ from typing import Protocol, runtime_checkable
 import torch
 
 from hallucinations_math_lab.constants import DetectorCategory, DetectorName
-from hallucinations_math_lab.custom_types.domain_types import Cluster, SampleSet
+from hallucinations_math_lab.custom_types.domain_types import (
+    Cluster,
+    SampleSet,
+    SemanticEntropyTrace,
+)
 
 
 @dataclass(frozen=True)
@@ -46,11 +50,15 @@ class DetectionContext:
     reads, at the last prompt token, in increasing layer order (see
     `services/sampling_provider.py` for the layer convention). It is None
     when the provider does not expose hidden states (e.g. plain vLLM
-    OpenAI-compat without an embed endpoint configured)."""
+    OpenAI-compat without an embed endpoint configured).
+
+    `trace_semantic_entropy` asks SE detectors to record their clustering for a
+    step-by-step replay (`DetectorScore.se_trace`); other detectors ignore it."""
 
     prompt: str
     samples: SampleSet | None
     pooled_hidden_state: torch.Tensor | None
+    trace_semantic_entropy: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,7 +98,8 @@ class DetectorScore:
     itself, not by the orchestrator, because only the detector knows its
     own resource model (NLI GPU time, Vertex endpoint $/hr, etc.).
 
-    `clusters` is populated only by SE.
+    `clusters` is populated only by SE, `se_trace` only by SE when the context
+    asks for a trace.
     """
 
     name: DetectorName
@@ -98,6 +107,7 @@ class DetectorScore:
     cost_usd: float
     latency_ms: float
     clusters: list[Cluster] | None = None
+    se_trace: SemanticEntropyTrace | None = None
     extra: dict[str, object] = field(default_factory=dict)
 
 

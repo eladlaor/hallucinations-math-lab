@@ -4,6 +4,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Final
 
+from hallucinations_math_lab.constants import DetectorName
+
 # Network: localhost only, never a public interface.
 DEFAULT_HOST: Final[str] = "127.0.0.1"
 DEFAULT_PORT: Final[int] = 8765
@@ -28,6 +30,11 @@ RESULTS_DIR: Final[Path] = REPO_ROOT / "eval" / "results"
 # The example whose SCENARIOS are the Score tab's presets (imported, never copied).
 PRESETS_MODULE: Final[str] = "examples.score_precollected_samples"
 PRESETS_ATTRIBUTE: Final[str] = "SCENARIOS"
+
+# The detectors that can return an SE trace (`se_trace`): both SE estimators.
+SE_TRACE_DETECTORS: Final[frozenset[DetectorName]] = frozenset(
+    {DetectorName.SEMANTIC_ENTROPY, DetectorName.DISCRETE_SEMANTIC_ENTROPY}
+)
 
 
 class AskMode(StrEnum):

@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Opt-in SE trace for a step-by-step replay of the clustering: `se_trace: true`
+  on the playground's `/api/score` and `/api/ask` returns every NLI
+  comparison in the order it ran (each direction's label), where each answer
+  ended up, and the p(c) SE was computed from. In the library,
+  `cluster_with_trace`, `trace=True` on `compute_semantic_entropy`, and
+  `trace_semantic_entropy` on `evaluate_responses` / `ResponseEvaluator.evaluate`
+  produce it; per-direction labels come from the new
+  `DirectionalEntailmentScorer` protocol, which `NLIScorer` satisfies. Without
+  the flag, clusters, NLI calls and responses are unchanged.
 - `SEP_THRESHOLD` (default `0.5`, a placeholder): SEP's own escalation
   threshold on its probability scale. A trained probe records a
   `recommended_threshold` (Youden's J on out-of-fold predictions), which is
@@ -118,6 +127,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the real OpenAI client) and the HF logprob extraction.
 
 ### Changed
+- The minimum pydantic is now 2.12 (was 2.7): untraced results leave
+  `se_trace` out of their JSON through `Field(exclude_if=...)`, which older
+  pydantic ignores.
+- The playground's Ask tab runs discrete SE on the app's shared NLI scorer,
+  as it already did for likelihood-weighted SE.
 - The "Computed semantic entropy." log record replaces the scalar `se_nats`
   and `estimator` fields with `se_nats_by_estimator`, a map from estimator to
   SE in nats.

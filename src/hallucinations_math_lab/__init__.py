@@ -34,9 +34,11 @@ plug in any model that implements the `Judge` protocol.
 from hallucinations_math_lab.constants import AnswerSource, DetectorName, NLILabel
 from hallucinations_math_lab.custom_types.domain_types import (
     Cluster,
+    ClusteringTrace,
     DetectionResult,
     Sample,
     SampleSet,
+    SemanticEntropyTrace,
     TokenLogprob,
 )
 from hallucinations_math_lab.escalation import AllAbove, AnyAbove, EscalationPolicy, SingleDetector
@@ -49,7 +51,11 @@ from hallucinations_math_lab.services.detector_protocol import (
     DetectorScore,
     HiddenStateDetector,
 )
-from hallucinations_math_lab.services.nli import EntailmentScorer, NLIScorer
+from hallucinations_math_lab.services.nli import (
+    DirectionalEntailmentScorer,
+    EntailmentScorer,
+    NLIScorer,
+)
 from hallucinations_math_lab.services.predictive_entropy import PredictiveEntropyDetector
 from hallucinations_math_lab.services.sampling_provider import SamplingProvider
 from hallucinations_math_lab.services.semantic_entropy import (
@@ -66,6 +72,7 @@ __all__ = [
     "Detector",
     "HiddenStateDetector",
     "EntailmentScorer",
+    "DirectionalEntailmentScorer",
     "Judge",
     "SamplingProvider",
     # Escalation policies
@@ -90,6 +97,9 @@ __all__ = [
     "SampleSet",
     "TokenLogprob",
     "Cluster",
+    # Opt-in SE trace (step-by-step replay of the clustering)
+    "ClusteringTrace",
+    "SemanticEntropyTrace",
     # Enums
     "AnswerSource",
     "DetectorName",

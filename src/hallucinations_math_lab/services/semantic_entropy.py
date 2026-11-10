@@ -13,6 +13,11 @@ Algorithm:
        - discrete: p(c) = |c| / N (the paper's black-box variant).
      SE = -Σ p(c) log p(c), in nats.
 
+Opt-in trace: `cluster_with_trace` runs the same clustering while recording
+every comparison, with each direction's NLI verdict, for a step-by-step
+replay (the web playground's). The clusters are identical either way for any
+scorer that keeps the `DirectionalEntailmentScorer` contract, as `NLIScorer` does.
+
 High SE = answers disagree in MEANING -> likely hallucination.
 Low SE  = answers agree in meaning -> likely confident.
 """
@@ -20,6 +25,7 @@ Low SE  = answers agree in meaning -> likely confident.
 import logging
 import math
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -29,9 +35,17 @@ from hallucinations_math_lab.constants import (
     SE_NLI_INPUT_TEMPLATE,
     DetectorCategory,
     DetectorName,
+    NLILabel,
     SemanticEntropyEstimator,
 )
-from hallucinations_math_lab.custom_types.domain_types import Cluster, SampleSet
+from hallucinations_math_lab.custom_types.domain_types import (
+    Cluster,
+    ClusteringComparison,
+    ClusteringTrace,
+    ClusterPlacement,
+    SampleSet,
+    SemanticEntropyTrace,
+)
 from hallucinations_math_lab.services.detector_protocol import (
     DetectionContext,
     Detector,
@@ -39,7 +53,11 @@ from hallucinations_math_lab.services.detector_protocol import (
     DetectorPrerequisiteError,
     DetectorScore,
 )
-from hallucinations_math_lab.services.nli import EntailmentScorer, get_nli_scorer
+from hallucinations_math_lab.services.nli import (
+    DirectionalEntailmentScorer,
+    EntailmentScorer,
+    get_nli_scorer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +66,7 @@ logger = logging.getLogger(__name__)
 class SemanticEntropyResult:
     semantic_entropy: float
     clusters: list[Cluster]
+    trace: SemanticEntropyTrace | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +75,12 @@ class SemanticEntropyByEstimator:
 
     by_estimator: dict[SemanticEntropyEstimator, float]
     clusters: list[Cluster]
+    clustering_trace: ClusteringTrace | None = None
+
+
+# Decides whether an answer joins a cluster: (representative NLI text, answer NLI
+# text, answer index, cluster index, representative index) -> joined.
+_JoinTest = Callable[[str, str, int, int, int], bool]
 
 
 def cluster_by_bidirectional_entailment(
@@ -70,10 +95,85 @@ def cluster_by_bidirectional_entailment(
     starts a new one. When `question` is given, NLI judges question-prefixed answers;
     `representative_text` is always the bare answer.
     """
+    _require_answers(answers)
+    nli = scorer or get_nli_scorer()
+    return _greedy_cluster(
+        answers,
+        question,
+        lambda rep_text, answer_text, *_: nli.bidirectional_entails(rep_text, answer_text),
+    )
+
+
+def cluster_with_trace(
+    answers: list[str],
+    scorer: EntailmentScorer | None = None,
+    question: str | None = None,
+) -> tuple[list[Cluster], ClusteringTrace]:
+    """`cluster_by_bidirectional_entailment`, recording every comparison it runs.
+
+    Each comparison is judged one direction at a time with the scorer's
+    `classify`, with the same short-circuit as `NLIScorer.bidirectional_entails`
+    (the backward direction runs only if the forward one is entailment). The
+    join decision therefore comes from `classify`, never `bidirectional_entails`:
+    the clusters and the NLI work match the untraced run for any scorer whose
+    `bidirectional_entails` is `classify(a, b)` and `classify(b, a)` both
+    entailment, as `NLIScorer`'s is. A scorer with its own bidirectional rule
+    (e.g. a probability threshold) may cluster differently when traced; nothing
+    checks this at runtime. Raises TypeError if the scorer has no `classify`
+    (see `DirectionalEntailmentScorer`).
+    """
+    _require_answers(answers)
+    nli = scorer or get_nli_scorer()
+    if not isinstance(nli, DirectionalEntailmentScorer):
+        raise TypeError(
+            "Tracing SE clustering needs a scorer with classify(premise, hypothesis) for "
+            f"per-direction verdicts; {type(nli).__name__} has only bidirectional_entails."
+        )
+    comparisons: list[ClusteringComparison] = []
+
+    def joins(
+        rep_text: str, answer_text: str, answer_idx: int, cluster_idx: int, rep_idx: int
+    ) -> bool:
+        forward = nli.classify(rep_text, answer_text)
+        backward = nli.classify(answer_text, rep_text) if forward == NLILabel.ENTAILMENT else None
+        joined = backward == NLILabel.ENTAILMENT
+        comparisons.append(
+            ClusteringComparison(
+                answer_index=answer_idx,
+                cluster_index=cluster_idx,
+                representative_index=rep_idx,
+                forward=forward,
+                backward=backward,
+                joined=joined,
+            )
+        )
+        return joined
+
+    clusters = _greedy_cluster(answers, question, joins)
+    cluster_of = {i: c_idx for c_idx, cl in enumerate(clusters) for i in cl.member_indices}
+    placements = [
+        ClusterPlacement(
+            answer_index=i,
+            cluster_index=cluster_of[i],
+            opened_new_cluster=clusters[cluster_of[i]].member_indices[0] == i,
+        )
+        for i in range(len(answers))
+    ]
+    return clusters, ClusteringTrace(comparisons=comparisons, placements=placements)
+
+
+def _require_answers(answers: list[str]) -> None:
     if not answers:
         raise ValueError("Cannot cluster empty answer list.")
 
-    nli = scorer or get_nli_scorer()
+
+def _greedy_cluster(answers: list[str], question: str | None, joins: _JoinTest) -> list[Cluster]:
+    """The greedy loop shared by the traced and untraced entry points.
+
+    Each answer is tested against each cluster's representative, in cluster
+    order, and joins the first one `joins` accepts; otherwise it opens a new
+    cluster.
+    """
     nli_texts = (
         answers
         if question is None
@@ -84,9 +184,9 @@ def cluster_by_bidirectional_entailment(
 
     for idx, ans in enumerate(answers):
         placed = False
-        for cl, rep_nli_text in zip(clusters, rep_nli_texts, strict=True):
+        for cluster_idx, (cl, rep_nli_text) in enumerate(zip(clusters, rep_nli_texts, strict=True)):
             try:
-                if nli.bidirectional_entails(rep_nli_text, nli_texts[idx]):
+                if joins(rep_nli_text, nli_texts[idx], idx, cluster_idx, cl.member_indices[0]):
                     cl.member_indices.append(idx)
                     placed = True
                     break
@@ -149,13 +249,16 @@ def compute_semantic_entropies(
     sample_set: SampleSet,
     estimators: tuple[SemanticEntropyEstimator, ...],
     scorer: EntailmentScorer | None = None,
+    *,
+    trace: bool = False,
 ) -> SemanticEntropyByEstimator:
     """Cluster the samples once and score every requested estimator on those clusters.
 
     The NLI clustering is the expensive part, so asking for several estimators costs
-    no extra NLI calls. Raises if the sample set or `estimators` is empty, or if the
-    likelihood-weighted estimator is requested for samples without finite logprobs
-    (checked before any NLI call).
+    no extra NLI calls. With `trace`, the clustering is recorded (`cluster_with_trace`).
+    Raises if the sample set or `estimators` is empty, or if the likelihood-weighted
+    estimator is requested for samples without finite logprobs (checked before any
+    NLI call).
     """
     if not sample_set.samples:
         raise ValueError(
@@ -169,9 +272,15 @@ def compute_semantic_entropies(
         _sample_log_weights(sample_set)  # validate before paying for NLI calls
 
     answers = [s.text.strip() for s in sample_set.samples]
-    clusters = cluster_by_bidirectional_entailment(
-        answers, scorer=scorer, question=sample_set.prompt
-    )
+    clustering_trace: ClusteringTrace | None = None
+    if trace:
+        clusters, clustering_trace = cluster_with_trace(
+            answers, scorer=scorer, question=sample_set.prompt
+        )
+    else:
+        clusters = cluster_by_bidirectional_entailment(
+            answers, scorer=scorer, question=sample_set.prompt
+        )
     by_estimator = {
         estimator: _entropy_nats(_cluster_probs(clusters, sample_set, estimator))
         for estimator in estimators
@@ -185,23 +294,46 @@ def compute_semantic_entropies(
                 "n_clusters": len(clusters),
                 "n_samples": len(answers),
                 "prompt": sample_set.prompt[:80],
+                "traced": trace,
             }
         },
     )
 
-    return SemanticEntropyByEstimator(by_estimator=by_estimator, clusters=clusters)
+    return SemanticEntropyByEstimator(
+        by_estimator=by_estimator, clusters=clusters, clustering_trace=clustering_trace
+    )
 
 
 def compute_semantic_entropy(
     sample_set: SampleSet,
     scorer: EntailmentScorer | None = None,
     estimator: SemanticEntropyEstimator = SemanticEntropyEstimator.LIKELIHOOD_WEIGHTED,
+    *,
+    trace: bool = False,
 ) -> SemanticEntropyResult:
     """Compute SE for a sample set with one estimator. Raises if the sample set is
-    empty, or if the likelihood-weighted estimator gets samples without finite logprobs."""
-    result = compute_semantic_entropies(sample_set, (estimator,), scorer=scorer)
+    empty, or if the likelihood-weighted estimator gets samples without finite logprobs.
+
+    With `trace`, the result also carries a `SemanticEntropyTrace`: the recorded
+    clustering, the p(c) the entropy was computed from and, for the
+    likelihood-weighted estimator, each answer's likelihood."""
+    result = compute_semantic_entropies(sample_set, (estimator,), scorer=scorer, trace=trace)
+    se_trace = (
+        None
+        if result.clustering_trace is None
+        else SemanticEntropyTrace(
+            clustering=result.clustering_trace,
+            estimator=estimator,
+            answer_likelihoods=(
+                None
+                if estimator is SemanticEntropyEstimator.DISCRETE
+                else np.exp(_sample_log_weights(sample_set)).tolist()
+            ),
+            cluster_probabilities=_cluster_probs(result.clusters, sample_set, estimator).tolist(),
+        )
+    )
     return SemanticEntropyResult(
-        semantic_entropy=result.by_estimator[estimator], clusters=result.clusters
+        semantic_entropy=result.by_estimator[estimator], clusters=result.clusters, trace=se_trace
     )
 
 
@@ -237,7 +369,10 @@ class SemanticEntropyDetector(Detector):
         # wall-clock cost so the Pareto frontier still ranks SE realistically.
         start = time.perf_counter()
         result = compute_semantic_entropy(
-            ctx.samples, scorer=self._scorer, estimator=self.estimator
+            ctx.samples,
+            scorer=self._scorer,
+            estimator=self.estimator,
+            trace=ctx.trace_semantic_entropy,
         )
         elapsed_ms = (time.perf_counter() - start) * 1000.0
         return DetectorScore(
@@ -246,6 +381,7 @@ class SemanticEntropyDetector(Detector):
             cost_usd=0.0,
             latency_ms=elapsed_ms,
             clusters=result.clusters,
+            se_trace=result.trace,
         )
 
 

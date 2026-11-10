@@ -5,8 +5,9 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from demo.web.constants import AskMode, ResultsEntryKind
-from hallucinations_math_lab import Cluster, Sample, TokenLogprob
+from hallucinations_math_lab import Cluster, Sample, SemanticEntropyTrace, TokenLogprob
 from hallucinations_math_lab.constants import SemanticEntropyEstimator
+from hallucinations_math_lab.custom_types.domain_types import is_none
 
 
 class StatusResponse(BaseModel):
@@ -50,8 +51,11 @@ class ScoreAnswer(BaseModel):
 
 
 class ScoreRequest(BaseModel):
+    """`se_trace` asks for the SE clustering step by step (`ScoreResponse.se_trace`)."""
+
     question: str = Field(min_length=1)
     answers: list[ScoreAnswer] = Field(min_length=1)
+    se_trace: bool = False
 
 
 class ScoreResponse(BaseModel):
@@ -60,6 +64,9 @@ class ScoreResponse(BaseModel):
     `se_estimator` names how SE weighed the clusters: by the answers'
     likelihoods when every answer carries logprobs (the paper's estimator),
     otherwise by counting answers per cluster (discrete SE).
+
+    `se_trace` is present only when the request asked for it: the clustering
+    comparison by comparison, and the p(c) SE was computed from.
     """
 
     semantic_entropy: float
@@ -68,11 +75,16 @@ class ScoreResponse(BaseModel):
     clusters: list[Cluster]
     n_answers: int
     se_threshold: float
+    se_trace: SemanticEntropyTrace | None = Field(default=None, exclude_if=is_none)
 
 
 class AskRequest(BaseModel):
+    """`se_trace` asks for the SE clustering step by step (`DetectionResult.se_trace`);
+    it needs SE among the enabled detectors."""
+
     question: str = Field(min_length=1)
     mode: AskMode
+    se_trace: bool = False
 
 
 class ResultsEntry(BaseModel):

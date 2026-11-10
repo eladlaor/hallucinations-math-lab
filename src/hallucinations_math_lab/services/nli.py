@@ -4,7 +4,7 @@ import logging
 import re
 from collections.abc import Mapping
 from functools import lru_cache
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 import torch
 from transformers import (
@@ -29,6 +29,18 @@ class EntailmentScorer(Protocol):
     """
 
     def bidirectional_entails(self, a: str, b: str) -> bool: ...
+
+
+@runtime_checkable
+class DirectionalEntailmentScorer(EntailmentScorer, Protocol):
+    """An `EntailmentScorer` that also labels one direction at a time.
+
+    Only the opt-in SE trace needs it, to show each direction's verdict. Its
+    labels must agree with `bidirectional_entails`: that is True iff
+    `classify(a, b)` and `classify(b, a)` are both entailment.
+    """
+
+    def classify(self, premise: str, hypothesis: str) -> NLILabel: ...
 
 
 class NLIScorer:

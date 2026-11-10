@@ -5,6 +5,8 @@ Contract pinned here:
     the checkpoint uses; there is no hardcoded index order.
   - `label_probs` is a softmax over the three labels and sums to 1.
   - `classify` is the argmax of `label_probs`.
+  - `bidirectional_entails` is `classify` entailment in both directions (what
+    the SE trace relies on).
   - A label that is not entailment / neutral / contradiction fails fast and
     names the model id.
   - The tokenizer and model load at the pinned `nli_revision` commit.
@@ -69,6 +71,38 @@ def test_label_probs_follow_the_config_order_and_sum_to_one():
 def test_classify_is_the_argmax_of_label_probs():
     assert _scorer([3.0, 1.0, 0.0], _UNUSUAL_ORDER).classify("a", "b") is NLILabel.ENTAILMENT
     assert _scorer([0.0, 1.0, 3.0], _UNUSUAL_ORDER).classify("a", "b") is NLILabel.CONTRADICTION
+
+
+class _OneWayModel:
+    """Entailment iff the premise is contained in the hypothesis, so the two
+    directions can disagree ("Paris" entails "Paris, France", not the reverse)."""
+
+    config = SimpleNamespace(id2label=_UNUSUAL_ORDER)
+
+    def __call__(self, *, premise: str, hypothesis: str) -> SimpleNamespace:
+        logits = [3.0, 1.0, 0.0] if premise in hypothesis else [0.0, 3.0, 1.0]
+        return SimpleNamespace(logits=torch.tensor([logits]))
+
+
+def test_bidirectional_entails_is_classify_both_ways():
+    """The SE trace joins clusters on two `classify` calls; that must be exactly
+    `bidirectional_entails` (the `DirectionalEntailmentScorer` contract)."""
+    scorer = NLIScorer(model_id="fake/nli", revision="f" * 40)
+    scorer._tokenizer = lambda premise, hypothesis, **_k: _FakeEncoding(  # type: ignore[assignment]
+        premise=premise, hypothesis=hypothesis
+    )
+    scorer._model = _OneWayModel()  # type: ignore[assignment]
+    texts = ["Paris", "Paris, France", "Rome"]
+
+    for a in texts:
+        for b in texts:
+            both = (
+                scorer.classify(a, b) is NLILabel.ENTAILMENT
+                and scorer.classify(b, a) is NLILabel.ENTAILMENT
+            )
+            assert scorer.bidirectional_entails(a, b) is both
+    assert scorer.classify("Paris", "Paris, France") is NLILabel.ENTAILMENT
+    assert not scorer.bidirectional_entails("Paris", "Paris, France")
 
 
 def test_unmapped_label_fails_fast_and_names_the_model():

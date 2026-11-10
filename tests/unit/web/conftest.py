@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from demo.web.app import create_app
-from hallucinations_math_lab import Sample, SampleSet, TokenLogprob
+from hallucinations_math_lab import EntailmentScorer, NLILabel, Sample, SampleSet, TokenLogprob
 from hallucinations_math_lab.config import Settings
 from tests.unit.sep_probe_fixtures import ProbeBackboneProvider
 
@@ -39,11 +39,21 @@ class KeywordNLI:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.directional_calls = 0
+
+    @staticmethod
+    def _same_meaning(a: str, b: str) -> bool:
+        na, nb = _normalize(a), _normalize(b)
+        return (PARIS in na and PARIS in nb) or na == nb
 
     def bidirectional_entails(self, a: str, b: str) -> bool:
         self.calls += 1
-        na, nb = _normalize(a), _normalize(b)
-        return (PARIS in na and PARIS in nb) or na == nb
+        return self._same_meaning(a, b)
+
+    def classify(self, premise: str, hypothesis: str) -> NLILabel:
+        """One direction, for the SE trace; symmetric here, like the relation above."""
+        self.directional_calls += 1
+        return NLILabel.ENTAILMENT if self._same_meaning(premise, hypothesis) else NLILabel.NEUTRAL
 
 
 class FakeProvider(ProbeBackboneProvider):
@@ -147,15 +157,16 @@ ClientFactory = Callable[..., TestClient]
 def make_client(
     nli: KeywordNLI, judge: FakeJudge, static_dir: Path, results_dir: Path
 ) -> ClientFactory:
-    """A TestClient over create_app with fakes; override the provider or settings."""
+    """A TestClient over create_app with fakes; override the provider, settings or NLI scorer."""
 
     def _make(
         provider: FakeProvider | None = None,
         settings: Settings | None = None,
+        nli_scorer: EntailmentScorer | None = None,
     ) -> TestClient:
         chosen = provider or FakeProvider([FAKE_GREEDY] * 10)
         app = create_app(
-            nli_scorer=nli,
+            nli_scorer=nli_scorer or nli,
             provider_factory=lambda: chosen,
             judge_factory=lambda: judge,
             results_dir=results_dir,
