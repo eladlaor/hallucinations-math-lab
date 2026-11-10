@@ -29,6 +29,12 @@ pick it up with `escalate.py check`.
   - Question: hallucinations-math-lab: may I run the history cleanup (B1) next, and will you do two quick setup steps for it? Step 1, in the Claude session type: ! gh auth refresh -h github.com -s delete_repo (lets the cleanup be undone; one browser click). Step 2: the cleanup must run outside my locked worktree, so either type ! ~/b1-hallucinations-math-lab/B1_RUNBOOK.sh phase0 in the session yourself, or open a fresh Claude session in ~/code/hallucinations-math-lab and tell it to run that script phase by phase. What it does: renames today's private repo to an archive (kept, nothing deleted), creates a fresh private repo under the same name with the cleaned history (private folders, old cloud project id and AI co-author lines removed; files identical), and re-points local checkouts without touching your uncommitted README and glossary edits. Rehearsed twice on copies, both secret scanners clean. No cost. I recommend yes, right after the first GPU run finishes.
   - Plan per answer: After GPU validation: B1 phases 0-5 with output reviewed per phase; then release GPU run on the new sha, private HF upload, fresh-clone check, go public.
 <!-- /q hallucinations-math-lab.ab7d4501 -->
+<!-- q hallucinations-math-lab.28b84790 kind=brief cursor=1 -->
+- **`hallucinations-math-lab.28b84790`**, asked 2026-11-10 16:29 IST
+  - Was doing: GPU attempt 2 lost outputs ($1.19); attempt 3 needs new budget
+  - Question: Approve a third GPU attempt for the SEP probe (about $0.60, cap $1.50): May I spend up to $1.50 more on a third RunPod attempt to train and benchmark the SEP probe? Options: Yes, A40 on-demand / Yes, cheaper card / Not now. Recommended: Yes, A40 on-demand.
+  - Plan per answer: On yes: caffeinate, A40 no filter, driver gate, pod-side persistence, per-stage pulls, fit with D10/D12, benchmark, dry-run publish.
+<!-- /q hallucinations-math-lab.28b84790 -->
 <!-- /escalate-to-owner:open -->
 
 ### Answered
