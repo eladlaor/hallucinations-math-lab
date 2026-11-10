@@ -268,8 +268,12 @@ entail the representative, each with the question in front, as the real
 clustering judges them. Both must be *entailment* to join. A common wrong
 guess is that one direction is enough: "Sally Ride, in 1983" entails "Sally
 Ride", but not the other way round (the second says nothing about the year),
-so they stay apart. When the first direction
-fails, the second is never run, and the replay says so. The answer joins the
+so they stay apart. None of the presets shows this case; to see it, pick the
+*divergent* preset in *Score answers*, replace the answers with "Sally Ride,
+in 1983" then "Sally Ride" (in that order), and score: DeBERTa says
+*entailment* forward and *neutral* backward. When the first direction
+fails, the second is never run, and the replay says so (type the two answers
+the other way round to see that). The answer joins the
 first meaning cluster that matches both ways; after the last failed
 comparison it opens a new one.
 

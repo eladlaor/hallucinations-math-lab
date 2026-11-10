@@ -63,10 +63,11 @@ export function ClusteringReplay({
       <div className="space-y-1">
         <CardTitle>Replay: how the answers split into meaning clusters</CardTitle>
         <CardDescription>
-          DeBERTa compares each answer with the first answer of every meaning cluster so far, in
-          order, both ways, with the question in front of each. The answer joins the first meaning
-          cluster it entails both ways; if none, it opens a new one. Then SE is computed from the
-          meaning clusters. These are the comparisons the real run made.
+          DeBERTa compares each answer with the first answer of each meaning cluster, in order,
+          with the question in front of both: first, does that first answer entail this one; only if
+          so, the reverse. The answer joins the first meaning cluster where both directions are
+          entailment and stops looking; if none match, it opens a new one. Then SE is computed from
+          the meaning clusters. These are the comparisons the real run made.
         </CardDescription>
       </div>
       {built.replay ? (

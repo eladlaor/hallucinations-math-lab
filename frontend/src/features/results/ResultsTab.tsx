@@ -73,7 +73,7 @@ export function ResultsTab() {
 
       {listing && listing.entries.length === 0 && (
         <Card className="space-y-3">
-          <CardTitle>No benchmark results yet</CardTitle>
+          <CardTitle>No results to measure yet</CardTitle>
           <CardDescription>
             Nothing in <span className="font-mono text-xs">{listing.results_dir}</span>. Produce a
             results file (it needs the model — see the README), then reload this page:
