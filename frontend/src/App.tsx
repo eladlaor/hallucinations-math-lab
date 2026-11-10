@@ -57,7 +57,7 @@ export default function App() {
           <TabsList aria-label="Ways in">
             <TabsTrigger value={TabId.SCORE}>Score answers</TabsTrigger>
             <TabsTrigger value={TabId.ASK}>Ask the model</TabsTrigger>
-            <TabsTrigger value={TabId.RESULTS}>Benchmark results</TabsTrigger>
+            <TabsTrigger value={TabId.RESULTS}>Measure the detectors</TabsTrigger>
           </TabsList>
           <TabsContent value={TabId.SCORE}>
             <ScoreTab defaultThreshold={status?.se_threshold ?? FALLBACK_DISPLAY_THRESHOLD} />

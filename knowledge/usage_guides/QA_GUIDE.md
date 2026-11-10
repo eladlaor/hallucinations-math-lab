@@ -219,14 +219,15 @@ New features follow test-first: write the failing test that defines
 | `web/test_web_score.py` | `/api/score`: the three presets give the example's PE / SE / cluster counts, clusters and SE for typed answers, PE null unless every answer carries logprobs, 422 on empty or blank input, NLI failures surfaced with their message |
 | `web/test_web_ask.py` | `/api/ask`: detect vs chat, the judge called only by chat and only on escalation, chat refused (400) without `GCP_PROJECT_ID`, provider errors surfaced (500 with the message), the provider built once |
 | `web/test_web_results.py` | `/api/results` listing (runs and sweep directories), run report equal to `auroc_report`, sweep report equal to `comparison_report`, paths outside `eval/results/` refused (400), missing (404) and unscorable (422) files |
-| `web/test_web_static_build.py` | the Vite build is committed under `demo/web/static/` and every asset `index.html` loads exists |
+| `web/test_web_static_build.py` | the Vite build is committed under `demo/web/static/` and every asset `index.html` loads exists; the bundle's tab list reads Score answers, Ask the model, Measure the detectors in that order, with the retired "Benchmark results" label absent; the README's numbered ways in follow the same order |
 
 The playground UI has its own suite under `frontend/` (Vitest + React
 Testing Library, the API client mocked), covering the logger and API client,
 the Score tab (presets, cluster chips, the threshold slider flipping
 *escalate* with no request, the "needs token logprobs" state), the Ask tab
 (status strip, Chat disabled with its reason, progress, errors shown
-verbatim) and the Results tab (empty state, AUROC with CIs, comparison table).
+verbatim) and the *Measure the detectors* tab (empty state, AUROC with CIs,
+comparison table).
 
 ## Running the suites
 

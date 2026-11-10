@@ -32,6 +32,7 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
 
 ## Recently done
 
+- [x] **Playground tabs match the README's ways in** (2026-11-10): *Score answers*, *Ask the model*, *Measure the detectors*, cheapest first.
 - [x] **SE's NLI check now sees the question** (2026-10-19, B2).
   - **The bug:** `services/semantic_entropy.py` passed bare answers to DeBERTa. The
     reference code (`jlko/semantic_uncertainty`, `condition_on_question=True` by

@@ -1,4 +1,5 @@
-"""Benchmark results on disk: listing them, and reporting on one without leaving the results dir.
+"""Benchmark results on disk, for the Measure the detectors tab: listing them, and reporting
+on one without leaving the results dir.
 
 The reports themselves come from eval.compute_auroc and eval.compare_models
 unchanged; this module only finds the files and guards the path.

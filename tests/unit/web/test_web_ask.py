@@ -1,4 +1,4 @@
-"""POST /api/ask — the Ask the model tab (way in 3), mirroring `demo.cli detect` / `chat`."""
+"""POST /api/ask — the Ask the model tab (way in 2), mirroring `demo.cli detect` / `chat`."""
 
 from dataclasses import dataclass
 

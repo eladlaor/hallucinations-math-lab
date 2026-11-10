@@ -47,8 +47,8 @@ Because SEP's whole selling point is "most of SE's signal at one forward pass",
 and the only way a reader can test that claim today is to pay for the expensive
 part first. Concretely, a published probe:
 
-- **Lets people play immediately.** Way 3 (ask the model) and way 2 (benchmark)
-  gain SEP with one `.env` line, on any machine that can run E2B.
+- **Lets people play immediately.** Way 2 (Ask the model) and way 3 (Measure
+  the detectors) gain SEP with one `.env` line, on any machine that can run E2B.
 - **Makes the claim checkable.** The training record and held-out metrics show
   how well the probe tracks SE — including if it tracks it badly. An honest weak
   result is still a result; a recipe with no result is not.

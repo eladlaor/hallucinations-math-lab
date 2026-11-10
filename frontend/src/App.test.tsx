@@ -13,14 +13,14 @@ beforeEach(() => {
 })
 
 describe('App', () => {
-  it('has one tab per way in, starting on Score answers', async () => {
+  it('has one tab per README way in, cheapest first, starting on Score answers', async () => {
     render(<App />)
 
     const tabs = screen.getAllByRole('tab')
     expect(tabs.map((t) => t.textContent)).toEqual([
       'Score answers',
       'Ask the model',
-      'Benchmark results',
+      'Measure the detectors',
     ])
     expect(screen.getByRole('tab', { name: 'Score answers' })).toHaveAttribute(
       'aria-selected',

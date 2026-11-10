@@ -23,9 +23,10 @@
 - **Stack:** FastAPI backend (thin layer over existing library and eval
   functions — no logic duplicated) + Vite, React, TypeScript, Tailwind,
   shadcn/ui frontend.
-- **Tabs:** *Score answers* (way 1, works on any laptop), *Ask the model*
-  (way 3, needs a model), *Benchmark results* (way 2, read-only viewer of
-  existing results files).
+- **Tabs:** named and ordered as the README's three ways in, cheapest first:
+  *Score answers* (way 1, works on any laptop), *Ask the model* (way 2, needs
+  a model), *Measure the detectors* (way 3, read-only viewer of existing
+  results files).
 - **Done when:** the success criteria below pass, including the "paraphrased"
   preset reproducing the example script's numbers exactly.
 
@@ -56,7 +57,7 @@ and a threshold slider flipping "escalate", teaches it faster than any table.
 - First request loads DeBERTa (~1.6 GB, first time only): the UI says so while
   it waits.
 
-### 2. Ask the model (way 3 — tier 1+ or a remote server)
+### 2. Ask the model (way 2 — tier 1+ or a remote server)
 
 - A question field; *Detect* (scores only) and *Chat* (scores + judge on
   escalation), mirroring `demo.cli detect` / `chat`.
@@ -72,7 +73,7 @@ and a threshold slider flipping "escalate", teaches it faster than any table.
 - Generation can take minutes on a CPU: a clear in-progress state with elapsed
   time; errors from the backend shown verbatim (fail-fast, no silent retry).
 
-### 3. Benchmark results (way 2 — read-only)
+### 3. Measure the detectors (way 3 — read-only)
 
 - Lists results files under `eval/results/` (single runs and `--sweep`
   directories).
@@ -151,7 +152,7 @@ Each item: write the failing test first, then the code.
    client-side), presets, PE "needs logprobs" state. Component tests.
 7. **Ask tab** — status strip, disabled-with-reason states, progress, result
    view reusing the cluster component. Component tests with a mocked API.
-8. **Results tab** — list, AUROC interval plot, comparison table, empty state.
+8. **Measure the detectors tab** — list, AUROC interval plot, comparison table, empty state.
 9. **Build & serve** — `npm run build` writes `demo/web/static/`; committed.
 10. **Docs** — README: a "Web playground" entry in the ways-in table's
     *Start with* column and a short "How do I use the web playground?"
@@ -168,8 +169,8 @@ Each item: write the failing test first, then the code.
 3. Typed answers without logprobs score SE; PE shows the "needs token
    logprobs" state.
 4. Moving the threshold slider flips *escalate* without a network request.
-5. Results tab shows the same AUROC and CI as `eval.compute_auroc` for the same
-   file.
+5. The Measure the detectors tab shows the same AUROC and CI as
+   `eval.compute_auroc` for the same file.
 6. `GET /api/results/report?path=../../etc/passwd` returns 400.
 7. Ask tab with no usable model shows the backend's error message; it does not
    hang silently.

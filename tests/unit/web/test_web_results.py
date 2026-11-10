@@ -1,4 +1,4 @@
-"""GET /api/results and /api/results/report — the Benchmark results tab (way in 2, read-only)."""
+"""GET /api/results and /api/results/report — the Measure the detectors tab (way in 3, read-only)."""
 
 from pathlib import Path
 
