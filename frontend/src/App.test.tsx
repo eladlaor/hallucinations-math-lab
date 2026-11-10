@@ -3,8 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from '@/App'
-import { api } from '@/lib/api'
-import { PRESETS, STATUS } from '@/test/fixtures'
+import { api, ApiError } from '@/lib/api'
+import { DIVERGENT_SCORE, PRESETS, STATUS } from '@/test/fixtures'
 
 beforeEach(() => {
   vi.spyOn(api, 'status').mockResolvedValue(STATUS)
@@ -39,5 +39,18 @@ describe('App', () => {
       'google/gemma-4-E2B-it',
     )
     expect(api.status).toHaveBeenCalledTimes(1)
+  })
+
+  it('scores without asking for the SE trace when the status failed to load', async () => {
+    const user = userEvent.setup()
+    vi.mocked(api.status).mockRejectedValue(new ApiError(500, 'status down'))
+    vi.spyOn(api, 'score').mockResolvedValue(DIVERGENT_SCORE)
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: /divergent/i }))
+    await user.click(screen.getByRole('button', { name: 'Score answers' }))
+
+    await screen.findByRole('region', { name: 'Meaning clusters' })
+    expect(vi.mocked(api.score).mock.calls[0]?.[0].se_trace).toBe(false)
   })
 })

@@ -4,7 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ScoreTab } from '@/features/score/ScoreTab'
 import { api, ApiError } from '@/lib/api'
-import { DIVERGENT_SCORE, PRESETS, TYPED_SCORE } from '@/test/fixtures'
+import {
+  DIVERGENT_SCORE,
+  DIVERGENT_SCORE_TRACED,
+  PRESETS,
+  STATUS_NO_TRACE,
+  TYPED_SCORE,
+} from '@/test/fixtures'
 
 beforeEach(() => {
   vi.spyOn(api, 'presets').mockResolvedValue(PRESETS)
@@ -13,7 +19,7 @@ beforeEach(() => {
 async function loadDivergentAndScore() {
   const user = userEvent.setup()
   vi.spyOn(api, 'score').mockResolvedValue(DIVERGENT_SCORE)
-  render(<ScoreTab defaultThreshold={1.0} />)
+  render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={null} />)
   await user.click(await screen.findByRole('button', { name: /divergent/i }))
   await user.click(screen.getByRole('button', { name: 'Score answers' }))
   await screen.findByRole('region', { name: 'Meaning clusters' })
@@ -23,7 +29,7 @@ async function loadDivergentAndScore() {
 describe('ScoreTab', () => {
   it('loads a preset into the question and answer fields', async () => {
     const user = userEvent.setup()
-    render(<ScoreTab defaultThreshold={1.0} />)
+    render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={null} />)
 
     await user.click(await screen.findByRole('button', { name: /divergent/i }))
 
@@ -74,7 +80,7 @@ describe('ScoreTab', () => {
   it('scores typed answers and explains why PE needs token logprobs', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'score').mockResolvedValue(TYPED_SCORE)
-    render(<ScoreTab defaultThreshold={1.0} />)
+    render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={null} />)
 
     await user.type(screen.getByLabelText('Question'), 'Capital of France?')
     await user.type(screen.getByLabelText('Answer 1'), 'Paris')
@@ -90,13 +96,67 @@ describe('ScoreTab', () => {
     expect(vi.mocked(api.score).mock.calls[0]?.[0]).toEqual({
       question: 'Capital of France?',
       answers: [{ text: 'Paris' }, { text: 'Lyon' }],
+      se_trace: true,
     })
+  })
+
+  it('asks for the SE trace and replays the clustering one comparison at a time', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'score').mockResolvedValue(DIVERGENT_SCORE_TRACED)
+    render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={null} />)
+    await user.click(await screen.findByRole('button', { name: /divergent/i }))
+    await user.click(screen.getByRole('button', { name: 'Score answers' }))
+
+    const replay = await screen.findByRole('region', { name: 'Clustering replay' })
+    expect(vi.mocked(api.score).mock.calls[0]?.[0].se_trace).toBe(true)
+    expect(within(replay).getByText(/^Step \d+ of \d+$/)).toHaveTextContent(
+      'Step 1 of 33',
+    )
+    await user.click(within(replay).getByRole('button', { name: 'Next step' }))
+    expect(within(replay).getByRole('region', { name: 'Current step' })).toHaveTextContent(
+      'Who was the first woman to walk on Mars? Valentina Tereshkova',
+    )
+  })
+
+  it('does not ask for the trace when the server cannot record it, and says why', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'score').mockResolvedValue(DIVERGENT_SCORE)
+    render(
+      <ScoreTab
+        defaultThreshold={1.0}
+        replayUnavailableReason={STATUS_NO_TRACE.se_trace_unavailable_reason}
+      />,
+    )
+    await user.click(await screen.findByRole('button', { name: /divergent/i }))
+    await user.click(screen.getByRole('button', { name: 'Score answers' }))
+
+    await screen.findByRole('region', { name: 'Meaning clusters' })
+    expect(vi.mocked(api.score).mock.calls[0]?.[0].se_trace).toBe(false)
+    expect(screen.getByText(/no step-by-step replay.*classify/i)).toBeInTheDocument()
+  })
+
+  it('does not ask for the trace while the server status is unknown, and says why', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(api, 'score').mockResolvedValue(DIVERGENT_SCORE)
+    render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={undefined} />)
+    await user.click(await screen.findByRole('button', { name: /divergent/i }))
+    await user.click(screen.getByRole('button', { name: 'Score answers' }))
+
+    await screen.findByRole('region', { name: 'Meaning clusters' })
+    expect(vi.mocked(api.score).mock.calls[0]?.[0].se_trace).toBe(false)
+    expect(screen.getByText(/no step-by-step replay.*status has not loaded/i)).toBeInTheDocument()
+  })
+
+  it('shows no replay when the response carries no trace', async () => {
+    await loadDivergentAndScore()
+
+    expect(screen.queryByRole('region', { name: 'Clustering replay' })).not.toBeInTheDocument()
   })
 
   it("drops a preset answer's logprobs once its text is edited", async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'score').mockResolvedValue(TYPED_SCORE)
-    render(<ScoreTab defaultThreshold={1.0} />)
+    render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={null} />)
     await user.click(await screen.findByRole('button', { name: /paraphrased/i }))
 
     await user.type(screen.getByLabelText('Answer 2'), '!')
@@ -109,7 +169,7 @@ describe('ScoreTab', () => {
 
   it('removes an answer', async () => {
     const user = userEvent.setup()
-    render(<ScoreTab defaultThreshold={1.0} />)
+    render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={null} />)
     await user.click(await screen.findByRole('button', { name: /paraphrased/i }))
 
     await user.click(screen.getByRole('button', { name: 'Remove answer 1' }))
@@ -121,7 +181,7 @@ describe('ScoreTab', () => {
   it('says the first request loads DeBERTa while it waits', async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'score').mockReturnValue(new Promise(() => {}))
-    render(<ScoreTab defaultThreshold={1.0} />)
+    render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={null} />)
     await user.click(await screen.findByRole('button', { name: /paraphrased/i }))
 
     await user.click(screen.getByRole('button', { name: 'Score answers' }))
@@ -133,7 +193,7 @@ describe('ScoreTab', () => {
   it("shows the backend's error verbatim", async () => {
     const user = userEvent.setup()
     vi.spyOn(api, 'score').mockRejectedValue(new ApiError(500, "Failed to load NLI model 'x'"))
-    render(<ScoreTab defaultThreshold={1.0} />)
+    render(<ScoreTab defaultThreshold={1.0} replayUnavailableReason={null} />)
     await user.click(await screen.findByRole('button', { name: /paraphrased/i }))
 
     await user.click(screen.getByRole('button', { name: 'Score answers' }))

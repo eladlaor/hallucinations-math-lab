@@ -25,6 +25,12 @@ export function AskTab({ status, statusError }: { status: Status | null; statusE
   const [runningMode, setRunningMode] = useState<AskMode | null>(null)
   const [result, setResult] = useState<DetectionResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // On by default: the replay is the point of the playground. It is off and locked,
+  // with the server's reason, when /ask cannot record it (no SE detector enabled, or
+  // an NLI scorer without per-direction classify), so the default never 400s.
+  const [wantsReplay, setWantsReplay] = useState(true)
+  const replayUnavailableReason = status?.ask_se_trace_unavailable_reason ?? null
+  const recordReplay = wantsReplay && replayUnavailableReason === null
   const loading = state === RequestState.LOADING
   const elapsed = useElapsed(loading)
 
@@ -32,14 +38,14 @@ export function AskTab({ status, statusError }: { status: Status | null; statusE
   const chatBlocked = status !== null && !status.judge_configured
 
   async function run(mode: AskMode) {
-    const context = { component: COMPONENT, mode, model: status?.model_id }
+    const context = { component: COMPONENT, mode, model: status?.model_id, seTrace: recordReplay }
     logger.info('ask requested', context)
     setState(RequestState.LOADING)
     setRunningMode(mode)
     setError(null)
     setResult(null)
     try {
-      const response = await api.ask(question.trim(), mode)
+      const response = await api.ask(question.trim(), mode, recordReplay)
       setResult(response)
       setState(RequestState.SUCCESS)
       logger.info('ask shown', {
@@ -101,6 +107,29 @@ export function AskTab({ status, statusError }: { status: Status | null; statusE
             Chat
           </Button>
         </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={recordReplay}
+            disabled={replayUnavailableReason !== null}
+            aria-describedby={
+              replayUnavailableReason !== null ? `${questionId}-replay-reason` : undefined
+            }
+            onChange={(e) => {
+              logger.info('replay recording toggled', {
+                component: COMPONENT,
+                seTrace: e.target.checked,
+              })
+              setWantsReplay(e.target.checked)
+            }}
+          />
+          Record the clustering for a step-by-step replay (no extra NLI calls)
+        </label>
+        {replayUnavailableReason !== null && (
+          <p id={`${questionId}-replay-reason`} className="text-xs text-muted-foreground">
+            The replay is unavailable: {replayUnavailableReason}
+          </p>
+        )}
         {chatBlocked && (
           <p id={`${questionId}-chat-reason`} className="text-xs text-muted-foreground">
             Chat is unavailable: {status.judge_unavailable_reason}

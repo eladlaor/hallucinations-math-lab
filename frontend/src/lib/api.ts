@@ -13,6 +13,7 @@ import {
   ResultsKind,
   type AnswerSource,
   type AskMode,
+  type NliLabel,
   type SeEstimator,
 } from '@/lib/constants'
 import { logger } from '@/lib/logger'
@@ -44,6 +45,10 @@ export interface Status {
   /** The one /api/ask applies to the configured escalation detector. */
   escalation_threshold: number
   nli_model_id: string
+  /** null when /api/score can record se_trace; else why the NLI scorer cannot. */
+  se_trace_unavailable_reason: string | null
+  /** The same for /api/ask, which also needs an SE detector in ENABLED_DETECTORS. */
+  ask_se_trace_unavailable_reason: string | null
 }
 
 export interface Preset {
@@ -60,6 +65,36 @@ export interface ScoreAnswer {
 export interface ScoreRequest {
   question: string
   answers: ScoreAnswer[]
+  /** Ask for the clustering step by step (`ScoreResponse.se_trace`). Same NLI work either way. */
+  se_trace?: boolean
+}
+
+/** One NLI comparison the real clustering ran: an answer against a cluster's first answer. */
+export interface ClusteringComparison {
+  answer_index: number
+  cluster_index: number
+  representative_index: number
+  /** representative -> answer, both prefixed with the question. */
+  forward: NliLabel
+  /** answer -> representative; null when it never ran (forward was not entailment). */
+  backward: NliLabel | null
+  joined: boolean
+}
+
+export interface ClusterPlacement {
+  answer_index: number
+  cluster_index: number
+  opened_new_cluster: boolean
+}
+
+/** Everything needed to replay one SE computation (the API's `se_trace`). */
+export interface SemanticEntropyTrace {
+  clustering: { comparisons: ClusteringComparison[]; placements: ClusterPlacement[] }
+  estimator: SeEstimator
+  /** exp(mean token logprob) per answer for the likelihood-weighted estimator; null for discrete. */
+  answer_likelihoods: number[] | null
+  /** The p(c) SE was computed from, aligned with the clusters. */
+  cluster_probabilities: number[]
 }
 
 export interface ScoreResponse {
@@ -69,6 +104,8 @@ export interface ScoreResponse {
   clusters: Cluster[]
   n_answers: number
   se_threshold: number
+  /** Present only when the request asked for it. */
+  se_trace?: SemanticEntropyTrace
 }
 
 export interface DetectionResult {
@@ -84,6 +121,8 @@ export interface DetectionResult {
   final_answer_source: AnswerSource
   judge_reasoning: string | null
   escalation_policy_desc: string | null
+  /** Present only when the request asked for it. */
+  se_trace?: SemanticEntropyTrace
 }
 
 export interface ResultsEntry {
@@ -217,8 +256,13 @@ export const api = {
   status: () => request<Status>('status', ApiRoute.STATUS),
   presets: () => request<Preset[]>('presets', ApiRoute.PRESETS),
   score: (body: ScoreRequest) => request<ScoreResponse>('score', ApiRoute.SCORE, postJson(body)),
-  ask: (question: string, mode: AskMode) =>
-    request<DetectionResult>('ask', ApiRoute.ASK, postJson({ question, mode }), ASK_TIMEOUT_MS),
+  ask: (question: string, mode: AskMode, seTrace: boolean = false) =>
+    request<DetectionResult>(
+      'ask',
+      ApiRoute.ASK,
+      postJson(seTrace ? { question, mode, se_trace: true } : { question, mode }),
+      ASK_TIMEOUT_MS,
+    ),
   results: () => request<ResultsListing>('results', ApiRoute.RESULTS),
   resultsReport: (path: string) =>
     request<ResultsReport>(

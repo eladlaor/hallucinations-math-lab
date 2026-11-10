@@ -39,6 +39,51 @@ export const SeEstimator = {
 } as const
 export type SeEstimator = (typeof SeEstimator)[keyof typeof SeEstimator]
 
+/** One direction's NLI verdict (the API's NLILabel). */
+export const NliLabel = {
+  ENTAILMENT: 'entailment',
+  NEUTRAL: 'neutral',
+  CONTRADICTION: 'contradiction',
+} as const
+export type NliLabel = (typeof NliLabel)[keyof typeof NliLabel]
+
+/** The detector whose score each SE estimator produces, for the replay's last step. */
+export const SE_DETECTOR_BY_ESTIMATOR: Record<SeEstimator, string> = {
+  [SeEstimator.LIKELIHOOD_WEIGHTED]: DetectorName.SEMANTIC_ENTROPY,
+  [SeEstimator.DISCRETE]: DetectorName.DISCRETE_SEMANTIC_ENTROPY,
+}
+
+/**
+ * The replay's playback speeds, slowest first, as milliseconds per step. The
+ * trace carries no timings: "Real time" approximates one DeBERTa comparison on
+ * a CPU, it is not a measurement of this run.
+ */
+export const ReplaySpeed = {
+  SLOW_MOTION: 'slow_motion',
+  SLOW: 'slow',
+  NORMAL: 'normal',
+  REAL_TIME: 'real_time',
+} as const
+export type ReplaySpeed = (typeof ReplaySpeed)[keyof typeof ReplaySpeed]
+export const REPLAY_STEP_MS: Record<ReplaySpeed, number> = {
+  [ReplaySpeed.SLOW_MOTION]: 4000,
+  [ReplaySpeed.SLOW]: 2000,
+  [ReplaySpeed.NORMAL]: 1000,
+  [ReplaySpeed.REAL_TIME]: 250,
+}
+export const REPLAY_SPEED_LABEL: Record<ReplaySpeed, string> = {
+  [ReplaySpeed.SLOW_MOTION]: 'Slow motion (4 s a step)',
+  [ReplaySpeed.SLOW]: 'Slow (2 s a step)',
+  [ReplaySpeed.NORMAL]: 'Normal (1 s a step)',
+  [ReplaySpeed.REAL_TIME]: 'Real time (about 0.25 s a step)',
+}
+export const DEFAULT_REPLAY_SPEED: ReplaySpeed = ReplaySpeed.SLOW
+/**
+ * How far the SE in the trace may drift from the reported SE, and each p(c) from
+ * the one its estimator implies, before the replay refuses the trace.
+ */
+export const REPLAY_SE_TOLERANCE = 1e-6
+
 export const TabId = { SCORE: 'score', ASK: 'ask', RESULTS: 'results' } as const
 export type TabId = (typeof TabId)[keyof typeof TabId]
 

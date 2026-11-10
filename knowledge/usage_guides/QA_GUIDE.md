@@ -226,10 +226,18 @@ New features follow test-first: write the failing test that defines
 The playground UI has its own suite under `frontend/` (Vitest + React
 Testing Library, the API client mocked), covering the logger and API client,
 the Score tab (presets, cluster chips, the threshold slider flipping
-*escalate* with no request, the "needs token logprobs" state), the Ask tab
-(status strip, Chat disabled with its reason, progress, errors shown
-verbatim) and the *Measure the detectors* tab (empty state, AUROC with CIs,
-comparison table).
+*escalate* with no request, the "needs token logprobs" state, asking for the
+SE trace and showing the replay, or not asking and saying why when the
+server cannot record it or its status is still loading or failed), the Ask tab (status strip, Chat disabled with its
+reason, progress, errors shown verbatim, the *Record the clustering*
+checkbox, locked off with its reason when no SE detector is enabled or the
+scorer cannot record, and the replay) and the *Measure the detectors* tab
+(empty state, AUROC with CIs, comparison table).
+
+| Frontend file | What it pins |
+|---|---|
+| `src/lib/replay.test.ts` | the replay's steps from an SE trace: the divergent trace rebuilds exactly the returned 7 meaning clusters (1 opening step + 25 comparisons + 7 SE terms), join vs next vs open-new outcomes, −p ln p filling in to the reported SE, per-cluster likelihood weights from each meaning cluster's own answers (a hand-built trace whose weights differ from the cluster sizes; none for discrete SE), fail-fast on a trace that does not rebuild the clusters, whose p(c) is not the one its estimator implies (the weight share, or \|c\| / N for discrete SE), whose answer likelihoods are missing for the likelihood-weighted estimator or present for the discrete one, whose p(c) does not give the reported SE, that compares against anything but the representative, or whose comparison verdicts contradict its join or its skipped backward check; real `/api/score` responses captured from DeBERTa (`src/test/capturedScoreTraces.ts`): the paraphrased preset replays to 9 joins, 1 meaning cluster and SE 0, the divergent preset to the 7 returned meaning clusters and its SE, and the hand-built divergent fixture differs from that real run only in its two edited verdicts |
+| `src/components/ClusteringReplay.test.tsx` | the player: starts paused on step 1, each step's answer, representative and both verdicts with the question in front ("not run" for a skipped backward one), one-way entailment does not join, the meaning clusters so far, step back, keyboard focus kept on Next / Step back at either end (`aria-disabled`, not `disabled`), the final SE step for likelihood-weighted (weights shown, with a weight share that differs from the size share) and discrete (\|c\| / N) SE, blaming typed answers for discrete SE only when they were typed, play / pause on fake timers, speed from slow motion to real time, stopping at the end, staying paused on Step back after the end, a manual step pausing playback, replaying from the start, the current step announced to screen readers only while paused, the "meaning clusters" wording (never "buckets") |
 
 ## Running the suites
 

@@ -164,15 +164,27 @@ def _api_router(
     router = APIRouter(prefix=API_PREFIX)
     model_lock = threading.Lock()
 
-    def refuse_trace_without_direction(ctx: dict[str, object]) -> None:
-        """400 before any work when a trace is asked of a scorer that cannot label one
-        direction at a time, instead of a 500 from inside the clustering."""
-        if scorer.supports_direction:
+    def score_trace_unavailable_reason() -> str | None:
+        """Why `/score` cannot record the SE trace, or None when it can."""
+        return None if scorer.supports_direction else SE_TRACE_NEEDS_DIRECTION_DETAIL
+
+    def ask_trace_unavailable_reason() -> str | None:
+        """Why `/ask` cannot record the SE trace, or None when it can: on top of the
+        scorer, `/ask` only runs the detectors in ENABLED_DETECTORS, so SE must be one."""
+        if not SE_TRACE_DETECTORS & set(settings.enabled_detectors):
+            return SE_TRACE_NEEDS_SE_DETAIL.format(
+                enabled=[str(d) for d in settings.enabled_detectors],
+                se_detectors=" nor ".join(sorted(SE_TRACE_DETECTORS)),
+            )
+        return score_trace_unavailable_reason()
+
+    def refuse_untraceable(reason: str | None, ctx: dict[str, object]) -> None:
+        """400 before any work when a trace is asked for but cannot be recorded,
+        instead of a 500 from inside the clustering."""
+        if reason is None:
             return
-        logger.warning(
-            "SE trace refused: the NLI scorer has no classify.", extra={LOG_EXTRA_KEY: ctx}
-        )
-        raise HTTPException(status_code=400, detail=SE_TRACE_NEEDS_DIRECTION_DETAIL)
+        logger.warning("SE trace refused.", extra={LOG_EXTRA_KEY: {**ctx, "reason": reason}})
+        raise HTTPException(status_code=400, detail=reason)
 
     evaluators: dict[AskMode, ResponseEvaluator] = {}
 
@@ -204,6 +216,8 @@ def _api_router(
             sep_threshold=settings.sep_threshold,
             escalation_threshold=settings.escalation_threshold_for(settings.escalation_detector),
             nli_model_id=settings.nli_model_id,
+            se_trace_unavailable_reason=score_trace_unavailable_reason(),
+            ask_se_trace_unavailable_reason=ask_trace_unavailable_reason(),
         )
 
     @router.get(ROUTE_PRESETS, response_model=list[Preset])
@@ -223,7 +237,7 @@ def _api_router(
             "question": request.question[:80],
         }
         if request.se_trace:
-            refuse_trace_without_direction(ctx)
+            refuse_untraceable(score_trace_unavailable_reason(), ctx)
         logger.info("Scoring answers.", extra={LOG_EXTRA_KEY: ctx})
         started = time.perf_counter()
         # Likelihood-weighted SE needs every answer's logprobs; typed answers
@@ -281,17 +295,8 @@ def _api_router(
             "se_trace": request.se_trace,
             "question": request.question[:80],
         }
-        if request.se_trace and not SE_TRACE_DETECTORS & set(settings.enabled_detectors):
-            logger.warning("SE trace refused: SE is not enabled.", extra={LOG_EXTRA_KEY: ctx})
-            raise HTTPException(
-                status_code=400,
-                detail=SE_TRACE_NEEDS_SE_DETAIL.format(
-                    enabled=[str(d) for d in settings.enabled_detectors],
-                    se_detectors=" nor ".join(sorted(SE_TRACE_DETECTORS)),
-                ),
-            )
         if request.se_trace:
-            refuse_trace_without_direction(ctx)
+            refuse_untraceable(ask_trace_unavailable_reason(), ctx)
         if request.mode == AskMode.CHAT:
             reason = judge_unavailable_reason(settings)
             if reason is not None:
@@ -351,6 +356,10 @@ def create_app(
     settings: Settings | None = None,
 ) -> FastAPI:
     """The playground app: the JSON API under /api, the built UI at /.
+
+    The SE replay (`se_trace`) needs a scorer that also labels one direction at
+    a time (a DirectionalEntailmentScorer, such as NLIScorer); with a plain
+    EntailmentScorer, /api/status reports why and the UI scores without it.
 
     Raises FileNotFoundError when `static_dir` holds no built UI.
     """

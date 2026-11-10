@@ -5,7 +5,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { AskTab } from '@/features/ask/AskTab'
 import { api, ApiError } from '@/lib/api'
 import { README_HARDWARE_URL } from '@/lib/constants'
-import { ESCALATED_CHAT, SEP_DETECT, STATUS, STATUS_NO_JUDGE } from '@/test/fixtures'
+import {
+  ESCALATED_CHAT,
+  ESCALATED_CHAT_TRACED,
+  SEP_DETECT,
+  STATUS,
+  STATUS_NO_JUDGE,
+  STATUS_NO_SE,
+  STATUS_NO_TRACE,
+} from '@/test/fixtures'
 
 const QUESTION = 'Who was the first woman to walk on Mars?'
 
@@ -63,7 +71,7 @@ describe('AskTab', () => {
 
     await ask('Chat')
 
-    expect(api.ask).toHaveBeenCalledWith(QUESTION, 'chat')
+    expect(api.ask).toHaveBeenCalledWith(QUESTION, 'chat', true)
     const answer = await screen.findByRole('region', { name: 'Answer' })
     expect(answer).toHaveTextContent('No woman has walked on Mars.')
     expect(answer).toHaveTextContent(/Gemini judge/)
@@ -77,6 +85,58 @@ describe('AskTab', () => {
     )
     const clusters = screen.getByRole('region', { name: 'Meaning clusters' })
     expect(within(clusters).getAllByRole('listitem', { name: /^Cluster \d+/ })).toHaveLength(7)
+  })
+
+  it('replays the SE clustering when the trace was recorded', async () => {
+    vi.spyOn(api, 'ask').mockResolvedValue(ESCALATED_CHAT_TRACED)
+    render(<AskTab status={STATUS} statusError={null} />)
+
+    await ask('Detect')
+
+    const replay = await screen.findByRole('region', { name: 'Clustering replay' })
+    expect(within(replay).getByText(/^Step \d+ of \d+$/)).toHaveTextContent(
+      'Step 1 of 33',
+    )
+    expect(within(replay).getByRole('region', { name: 'Current step' })).toHaveTextContent(
+      /opens meaning cluster 1/i,
+    )
+  })
+
+  it('can skip recording the replay', async () => {
+    vi.spyOn(api, 'ask').mockResolvedValue(SEP_DETECT)
+    render(<AskTab status={STATUS} statusError={null} />)
+    const record = screen.getByRole('checkbox', { name: /record the clustering/i })
+    expect(record).toBeChecked()
+
+    await userEvent.setup().click(record)
+    await ask('Detect')
+
+    expect(api.ask).toHaveBeenCalledWith(QUESTION, 'detect', false)
+    expect(screen.queryByRole('region', { name: 'Clustering replay' })).not.toBeInTheDocument()
+  })
+
+  it('locks the replay off with the reason when the server cannot record it', async () => {
+    vi.spyOn(api, 'ask').mockResolvedValue(SEP_DETECT)
+    render(<AskTab status={STATUS_NO_TRACE} statusError={null} />)
+    const record = screen.getByRole('checkbox', { name: /record the clustering/i })
+
+    expect(record).toBeDisabled()
+    expect(record).not.toBeChecked()
+    expect(record).toHaveAccessibleDescription(/replay is unavailable.*classify/i)
+    await ask('Detect')
+    expect(api.ask).toHaveBeenCalledWith(QUESTION, 'detect', false)
+  })
+
+  it('locks the replay off with the reason when no SE detector is enabled', async () => {
+    vi.spyOn(api, 'ask').mockResolvedValue(SEP_DETECT)
+    render(<AskTab status={STATUS_NO_SE} statusError={null} />)
+    const record = screen.getByRole('checkbox', { name: /record the clustering/i })
+
+    expect(record).toBeDisabled()
+    expect(record).not.toBeChecked()
+    expect(record).toHaveAccessibleDescription(/replay is unavailable.*ENABLED_DETECTORS/i)
+    await ask('Detect')
+    expect(api.ask).toHaveBeenCalledWith(QUESTION, 'detect', false)
   })
 
   it('shows SEP as P(high SE) against the SEP threshold', async () => {

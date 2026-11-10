@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from 'react'
 
 import { ClusterGroups } from '@/components/ClusterGroups'
+import { ClusteringReplay } from '@/components/ClusteringReplay'
 import { Metric } from '@/components/Metric'
 import { ErrorAlert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -29,10 +30,18 @@ interface AnswerDraft {
 }
 
 interface ScoredSnapshot {
+  /** A fresh id per scoring, so a new result restarts the replay. */
+  runId: number
+  question: string
   answers: string[]
+  /** Some answer was typed or edited, so it carries no token logprobs. */
+  typedAnswers: boolean
   response: ScoreResponse
+  /** Why this scoring did not ask for the replay; null when it did. */
+  replaySkippedReason: string | null
 }
 
+let nextRunId = 0
 let nextAnswerId = 0
 function draft(text = '', tokenLogprobs: TokenLogprob[] | null = null): AnswerDraft {
   nextAnswerId += 1
@@ -49,7 +58,23 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function ScoreTab({ defaultThreshold }: { defaultThreshold: number }) {
+/** Why the replay is skipped while /api/status has not answered (loading or failed). */
+const STATUS_UNKNOWN_REASON =
+  'the server status has not loaded, so the replay was not requested.'
+
+/**
+ * `replayUnavailableReason` (from /api/status): null when the server can record
+ * the SE trace, a string saying why it cannot, or undefined while the status is
+ * unknown (still loading, or failed). The trace is asked for only on null: a
+ * server that cannot record it answers a request for it with a 400.
+ */
+export function ScoreTab({
+  defaultThreshold,
+  replayUnavailableReason,
+}: {
+  defaultThreshold: number
+  replayUnavailableReason: string | null | undefined
+}) {
   useLifecycleLog(COMPONENT)
   const formId = useId()
   const [presets, setPresets] = useState<Preset[]>([])
@@ -115,24 +140,43 @@ export function ScoreTab({ defaultThreshold }: { defaultThreshold: number }) {
 
   async function score(event: FormEvent) {
     event.preventDefault()
-    const request = { question: question.trim(), answers: answers.map(toRequestAnswer) }
+    // The trace costs no extra NLI calls, so the replay is asked for whenever the
+    // server's NLI scorer is known to be able to record it.
+    const replaySkippedReason =
+      replayUnavailableReason === undefined ? STATUS_UNKNOWN_REASON : replayUnavailableReason
+    const request = {
+      question: question.trim(),
+      answers: answers.map(toRequestAnswer),
+      se_trace: replaySkippedReason === null,
+    }
+    const withLogprobs = answers.every((a) => a.tokenLogprobs !== null)
     const context = {
       component: COMPONENT,
       preset: activePreset,
       nAnswers: request.answers.length,
-      withLogprobs: answers.every((a) => a.tokenLogprobs !== null),
+      withLogprobs,
+      seTrace: request.se_trace,
     }
     logger.info('score requested', context)
     setState(RequestState.LOADING)
     setError(null)
     try {
       const response = await api.score(request)
-      setScored({ answers: request.answers.map((a) => a.text), response })
+      nextRunId += 1
+      setScored({
+        runId: nextRunId,
+        question: request.question,
+        answers: request.answers.map((a) => a.text),
+        typedAnswers: !withLogprobs,
+        response,
+        replaySkippedReason,
+      })
       setState(RequestState.SUCCESS)
       logger.info('score shown', {
         ...context,
         semanticEntropy: response.semantic_entropy,
         nClusters: response.clusters.length,
+        traced: response.se_trace !== undefined,
       })
     } catch (e) {
       logger.error('score failed', { ...context, error: e })
@@ -289,11 +333,30 @@ export function ScoreTab({ defaultThreshold }: { defaultThreshold: number }) {
           <div className="space-y-2">
             <CardTitle>Answers grouped by meaning</CardTitle>
             <CardDescription>
-              Each colour and number is one meaning. SE is the entropy of these group sizes.
+              Each colour and number is one meaning cluster. SE is the entropy over these meaning
+              clusters; the replay, when recorded, shows the p(c) it used for each.
             </CardDescription>
             <ClusterGroups answers={scored.answers} clusters={scored.response.clusters} />
           </div>
         </Card>
+      )}
+
+      {scored?.response.se_trace && (
+        <ClusteringReplay
+          key={scored.runId}
+          question={scored.question}
+          answers={scored.answers}
+          clusters={scored.response.clusters}
+          trace={scored.response.se_trace}
+          semanticEntropy={scored.response.semantic_entropy}
+          typedAnswers={scored.typedAnswers}
+        />
+      )}
+
+      {scored?.replaySkippedReason && (
+        <p className="text-xs text-muted-foreground">
+          No step-by-step replay: {scored.replaySkippedReason}
+        </p>
       )}
     </div>
   )

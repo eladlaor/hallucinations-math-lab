@@ -15,7 +15,10 @@ class StatusResponse(BaseModel):
 
     `se_threshold` is in nats (SE, discrete SE, PE); `sep_threshold` is on
     SEP's p(high SE) scale. `escalation_threshold` is the one `/ask` applies
-    to the configured escalation detector.
+    to the configured escalation detector. `se_trace_unavailable_reason` is
+    None when `/score` can record `se_trace`, else why the NLI scorer cannot.
+    `ask_se_trace_unavailable_reason` is the same for `/ask`, which also needs
+    an SE detector in ENABLED_DETECTORS.
     """
 
     provider: str
@@ -26,6 +29,8 @@ class StatusResponse(BaseModel):
     sep_threshold: float
     escalation_threshold: float
     nli_model_id: str
+    se_trace_unavailable_reason: str | None
+    ask_se_trace_unavailable_reason: str | None
 
 
 class Preset(BaseModel):

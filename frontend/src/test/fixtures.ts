@@ -2,13 +2,15 @@
 
 import type {
   AurocReport,
+  ClusteringComparison,
   ComparisonReport,
   DetectionResult,
   Preset,
   ScoreResponse,
+  SemanticEntropyTrace,
   Status,
 } from '@/lib/api'
-import { SeEstimator } from '@/lib/constants'
+import { NliLabel, SeEstimator } from '@/lib/constants'
 
 export const STATUS: Status = {
   provider: 'hf_transformers',
@@ -19,6 +21,25 @@ export const STATUS: Status = {
   sep_threshold: 0.5,
   escalation_threshold: 1.0,
   nli_model_id: 'microsoft/deberta-large-mnli',
+  se_trace_unavailable_reason: null,
+  ask_se_trace_unavailable_reason: null,
+}
+
+const NO_CLASSIFY_REASON =
+  'se_trace needs an NLI scorer that labels one direction at a time (classify(premise, hypothesis)); the configured scorer has only bidirectional_entails.'
+
+/** A server whose NLI scorer has no per-direction classify, so it cannot record the trace. */
+export const STATUS_NO_TRACE: Status = {
+  ...STATUS,
+  se_trace_unavailable_reason: NO_CLASSIFY_REASON,
+  ask_se_trace_unavailable_reason: NO_CLASSIFY_REASON,
+}
+
+/** A server whose ENABLED_DETECTORS has no SE detector: Score can trace, Ask cannot. */
+export const STATUS_NO_SE: Status = {
+  ...STATUS,
+  ask_se_trace_unavailable_reason:
+    "se_trace needs Semantic Entropy, but ENABLED_DETECTORS ['predictive_entropy'] has neither discrete_semantic_entropy nor semantic_entropy.",
 }
 
 export const STATUS_NO_JUDGE: Status = {
@@ -27,7 +48,7 @@ export const STATUS_NO_JUDGE: Status = {
   judge_unavailable_reason: 'GCP_PROJECT_ID is not set in .env.',
 }
 
-const DIVERGENT_TEXTS = [
+export const DIVERGENT_TEXTS = [
   'Sally Ride',
   'Valentina Tereshkova',
   'Peggy Whitson',
@@ -40,6 +61,8 @@ const DIVERGENT_TEXTS = [
   'Sally Ride',
 ]
 
+export const DIVERGENT_QUESTION = 'Who was the first woman to walk on Mars?'
+
 export const PRESETS: Preset[] = [
   {
     name: 'paraphrased',
@@ -51,13 +74,76 @@ export const PRESETS: Preset[] = [
   },
   {
     name: 'divergent',
-    question: 'Who was the first woman to walk on Mars?',
+    question: DIVERGENT_QUESTION,
     samples: DIVERGENT_TEXTS.map((text) => ({
       text,
       token_logprobs: [{ token: text, logprob: -0.4 }],
     })),
   },
 ]
+
+type Verdicts = [NliLabel, NliLabel | null]
+const NO_MATCH: Verdicts = [NliLabel.CONTRADICTION, null]
+
+/**
+ * The comparisons the backend's greedy clustering runs to reach `members`:
+ * each answer against each existing cluster's first answer, in order, stopping
+ * at the first join. A failed comparison is contradiction unless `verdicts`
+ * (keyed "answer-cluster") says otherwise.
+ */
+function clusteringTrace(
+  members: number[][],
+  verdicts: Record<string, Verdicts> = {},
+): SemanticEntropyTrace['clustering'] {
+  const nAnswers = members.flat().length
+  const clusterOf = (answer: number) => members.findIndex((m) => m.includes(answer))
+  const comparisons: ClusteringComparison[] = []
+  const placements = []
+  let nOpen = 0
+  for (let answer = 0; answer < nAnswers; answer += 1) {
+    const target = clusterOf(answer)
+    const opened = target === nOpen
+    const compared = opened ? nOpen : target + 1
+    for (let cluster = 0; cluster < compared; cluster += 1) {
+      const joined = cluster === target
+      const [forward, backward] = joined
+        ? [NliLabel.ENTAILMENT, NliLabel.ENTAILMENT]
+        : (verdicts[`${answer}-${cluster}`] ?? NO_MATCH)
+      comparisons.push({
+        answer_index: answer,
+        cluster_index: cluster,
+        representative_index: members[cluster]?.[0] ?? -1,
+        forward,
+        backward,
+        joined,
+      })
+    }
+    if (opened) nOpen += 1
+    placements.push({ answer_index: answer, cluster_index: target, opened_new_cluster: opened })
+  }
+  return { comparisons, placements }
+}
+
+const DIVERGENT_MEMBERS = [[0, 3, 9], [1, 7], [2], [4], [5], [6], [8]]
+
+/**
+ * The divergent preset's clustering, hand-built. In the real run (captured in
+ * capturedScoreTraces.ts) every failed comparison is contradiction; two are
+ * edited here to exercise the replay's neutral and one-way branches, which
+ * replay.test.ts checks are the only differences. All ten answers carry the
+ * same logprob, so p(c) is |c| / N here too.
+ */
+export const DIVERGENT_TRACE: SemanticEntropyTrace = {
+  clustering: clusteringTrace(DIVERGENT_MEMBERS, {
+    // Edited: "No woman has walked on Mars." vs "Sally Ride" neutral, so the reverse never runs.
+    '6-0': [NliLabel.NEUTRAL, null],
+    // Edited: "Eileen Collins" vs "Sally Ride" one way only, so no join.
+    '8-0': [NliLabel.ENTAILMENT, NliLabel.NEUTRAL],
+  }),
+  estimator: SeEstimator.LIKELIHOOD_WEIGHTED,
+  answer_likelihoods: Array.from({ length: 10 }, () => Math.exp(-0.4)),
+  cluster_probabilities: [0.3, 0.2, 0.1, 0.1, 0.1, 0.1, 0.1],
+}
 
 export const DIVERGENT_SCORE: ScoreResponse = {
   semantic_entropy: 1.8343719702816235,
@@ -76,6 +162,8 @@ export const DIVERGENT_SCORE: ScoreResponse = {
   se_threshold: 1.0,
 }
 
+export const DIVERGENT_SCORE_TRACED: ScoreResponse = { ...DIVERGENT_SCORE, se_trace: DIVERGENT_TRACE }
+
 export const TYPED_SCORE: ScoreResponse = {
   semantic_entropy: 0.6931471805599453,
   se_estimator: SeEstimator.DISCRETE,
@@ -88,8 +176,45 @@ export const TYPED_SCORE: ScoreResponse = {
   se_threshold: 1.0,
 }
 
+export const TYPED_TRACE: SemanticEntropyTrace = {
+  clustering: clusteringTrace([[0], [1]]),
+  estimator: SeEstimator.DISCRETE,
+  answer_likelihoods: null,
+  cluster_probabilities: [0.5, 0.5],
+}
+
+export const TYPED_SCORE_TRACED: ScoreResponse = { ...TYPED_SCORE, se_trace: TYPED_TRACE }
+
+export const WEIGHTED_QUESTION = 'What is the capital of Australia?'
+export const WEIGHTED_TEXTS = ['Canberra', 'Canberra', 'Sydney']
+
+/**
+ * Likelihood-weighted SE whose weights are not the cluster sizes: the lone
+ * "Sydney" carries 0.6 of the likelihood, so its p(c) is 0.6 where |c| / N
+ * would give 1/3. Catches a weight summed over the wrong answers.
+ */
+export const WEIGHTED_TRACE: SemanticEntropyTrace = {
+  clustering: clusteringTrace([[0, 1], [2]]),
+  estimator: SeEstimator.LIKELIHOOD_WEIGHTED,
+  answer_likelihoods: [0.2, 0.2, 0.6],
+  cluster_probabilities: [0.4, 0.6],
+}
+
+export const WEIGHTED_SCORE_TRACED: ScoreResponse = {
+  semantic_entropy: 0.6730116670092565,
+  se_estimator: SeEstimator.LIKELIHOOD_WEIGHTED,
+  predictive_entropy: 1.2432338162113972, // mean of -ln(likelihood)
+  clusters: [
+    { member_indices: [0, 1], representative_text: 'Canberra' },
+    { member_indices: [2], representative_text: 'Sydney' },
+  ],
+  n_answers: 3,
+  se_threshold: 1.0,
+  se_trace: WEIGHTED_TRACE,
+}
+
 export const ESCALATED_CHAT: DetectionResult = {
-  prompt: 'Who was the first woman to walk on Mars?',
+  prompt: DIVERGENT_QUESTION,
   greedy_answer: 'Sally Ride',
   samples: DIVERGENT_TEXTS,
   detector_scores: { predictive_entropy: 0.4, semantic_entropy: 1.834 },
@@ -101,6 +226,12 @@ export const ESCALATED_CHAT: DetectionResult = {
   final_answer_source: 'judge_model',
   judge_reasoning: 'No human has landed on Mars.',
   escalation_policy_desc: null,
+}
+
+export const ESCALATED_CHAT_TRACED: DetectionResult = {
+  ...ESCALATED_CHAT,
+  detector_scores: { ...ESCALATED_CHAT.detector_scores, semantic_entropy: DIVERGENT_SCORE.semantic_entropy },
+  se_trace: DIVERGENT_TRACE,
 }
 
 /** A Detect run escalated by SEP: its threshold is the status's sep_threshold. */

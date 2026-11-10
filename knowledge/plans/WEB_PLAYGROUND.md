@@ -190,6 +190,23 @@ Each item: write the failing test first, then the code.
     *Start with* column and a short "How do I use the web playground?"
     section; DEVELOPER_GUIDE (frontend dev loop), QA_GUIDE (new suites),
     CHANGELOG `[Unreleased]` → Added.
+11. **Clustering replay** (done 2026-11-10) — backend: the opt-in `se_trace`
+    (above), tests in `test_semantic_entropy_trace.py` and
+    `web/test_web_se_trace.py`. Frontend: `lib/replay.ts` turns the trace
+    into steps and refuses one that does not rebuild the returned clusters,
+    whose p(c) is not the one its estimator implies (|c| / N, or the
+    cluster's share of the answer likelihoods), or that misses the reported SE; `components/ClusteringReplay.tsx` plays them with
+    back / play-pause / next and four speeds (slow motion 4 s a step to
+    "real time", about 0.25 s). The Score tab asks for the trace (no extra
+    NLI calls) once `/api/status` has loaded and reports
+    `se_trace_unavailable_reason` null, i.e. the NLI scorer has a
+    per-direction `classify` (not while the status is loading or failed); the Ask tab
+    has a *Record the clustering* checkbox, on by default, locked off with
+    the reason whenever `/api/status` reports
+    `ask_se_trace_unavailable_reason` (no SE detector in
+    `ENABLED_DETECTORS`, or a scorer without `classify`), so the default
+    never meets the server's 400. Vitest: `lib/replay.test.ts`, `ClusteringReplay.test.tsx`,
+    the Score and Ask tab tests.
 
 ## Success criteria
 

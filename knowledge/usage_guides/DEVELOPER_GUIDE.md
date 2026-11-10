@@ -228,6 +228,18 @@ npm run typecheck && npm run lint && npm test   # tsc --noEmit, eslint, vitest r
 npm run build                                   # writes ../demo/web/static/
 ```
 
+The clustering replay (`src/components/ClusteringReplay.tsx`, steps built in
+`src/lib/replay.ts`) only plays back the API's `se_trace`; it never re-runs or
+re-simulates the clustering. `buildReplay` throws when the trace does not
+rebuild the returned clusters, a comparison's `joined` or `backward`
+contradicts its verdicts, its p(c) is not the one its estimator implies
+(|c| / N for discrete SE, each cluster's share of the answer likelihoods for
+likelihood-weighted SE), or its p(c) does not give the reported SE, and
+the player shows that error instead of a wrong replay. Its tests replay real
+`/api/score` responses kept in `src/test/capturedScoreTraces.ts`; if the
+presets or the pinned NLI model change, regenerate them by POSTing each
+preset to `/api/score` with `se_trace: true` on the launcher's DeBERTa.
+
 UI conventions: every API call goes through `src/lib/api.ts`, which logs
 start, success and failure with the structured `logger` (`src/lib/logger.ts`)
 and throws the backend's error message unchanged; components log mount,

@@ -272,3 +272,31 @@ def test_trace_without_a_directional_scorer_is_refused_up_front(
     assert refused.status_code == 400
     assert "classify" in refused.json()["detail"]
     assert plain.status_code == 200
+
+
+def test_status_says_why_a_scorer_without_classify_cannot_trace(
+    make_client: ClientFactory,
+) -> None:
+    traced = make_client().get("/api/status").json()
+    untraced = make_client(nli_scorer=BidirectionalOnlyNLI()).get("/api/status").json()
+
+    assert traced["se_trace_unavailable_reason"] is None
+    assert traced["ask_se_trace_unavailable_reason"] is None
+    assert "classify" in untraced["se_trace_unavailable_reason"]
+    assert "classify" in untraced["ask_se_trace_unavailable_reason"]
+
+
+def test_status_says_why_ask_cannot_trace_without_semantic_entropy(
+    make_client: ClientFactory,
+) -> None:
+    settings = Settings(
+        gcp_project_id=TEST_PROJECT,
+        enabled_detectors=[DetectorName.PREDICTIVE_ENTROPY],
+        escalation_detector=DetectorName.PREDICTIVE_ENTROPY,
+    )
+    client = make_client(settings=settings)
+    body = client.get("/api/status").json()
+
+    assert body["se_trace_unavailable_reason"] is None
+    assert "semantic_entropy" in body["ask_se_trace_unavailable_reason"]
+    assert body["ask_se_trace_unavailable_reason"] == _ask(client, se_trace=True).json()["detail"]

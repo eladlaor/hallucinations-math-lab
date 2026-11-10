@@ -60,7 +60,12 @@ export default function App() {
             <TabsTrigger value={TabId.RESULTS}>Measure the detectors</TabsTrigger>
           </TabsList>
           <TabsContent value={TabId.SCORE}>
-            <ScoreTab defaultThreshold={status?.se_threshold ?? FALLBACK_DISPLAY_THRESHOLD} />
+            <ScoreTab
+              defaultThreshold={status?.se_threshold ?? FALLBACK_DISPLAY_THRESHOLD}
+              replayUnavailableReason={
+                status === null ? undefined : status.se_trace_unavailable_reason
+              }
+            />
           </TabsContent>
           <TabsContent value={TabId.ASK}>
             <AskTab status={status} statusError={statusError} />

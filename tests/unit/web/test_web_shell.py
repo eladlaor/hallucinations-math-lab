@@ -35,6 +35,8 @@ def test_status_reports_provider_model_judge_and_threshold(make_client: ClientFa
         "sep_threshold": 0.3,
         "escalation_threshold": 0.7,
         "nli_model_id": settings.nli_model_id,
+        "se_trace_unavailable_reason": None,
+        "ask_se_trace_unavailable_reason": None,
     }
 
 

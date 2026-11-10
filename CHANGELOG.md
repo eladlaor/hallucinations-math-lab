@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Playground clustering replay: the *Score answers* and *Ask the model* tabs
+  step through the real SE clustering run, one NLI comparison at a time
+  (the answer, the meaning cluster's representative, both directional
+  verdicts with the question in front, and whether it joins or opens a new
+  meaning cluster), then fill in SE = −Σ p(c) ln p(c) with the p(c) the run
+  used. Play, pause, step back or forward, at speeds from slow motion to real
+  time. The Ask tab records it unless *Record the clustering* is unticked.
+  `/api/status` reports `se_trace_unavailable_reason` (Score) and
+  `ask_se_trace_unavailable_reason` (Ask, which also needs an SE detector in
+  `ENABLED_DETECTORS`); both tabs score without the replay, saying why, when
+  it cannot be recorded or the status has not loaded.
 - Opt-in SE trace for a step-by-step replay of the clustering: `se_trace: true`
   on the playground's `/api/score` and `/api/ask` returns every NLI
   comparison in the order it ran (each direction's label), where each answer

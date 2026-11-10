@@ -1,8 +1,9 @@
 import { ClusterGroups } from '@/components/ClusterGroups'
+import { ClusteringReplay } from '@/components/ClusteringReplay'
 import { Metric } from '@/components/Metric'
 import { Card, CardDescription, CardTitle } from '@/components/ui/card'
 import type { DetectionResult } from '@/lib/api'
-import { AnswerSource } from '@/lib/constants'
+import { AnswerSource, SE_DETECTOR_BY_ESTIMATOR } from '@/lib/constants'
 import { detectorInfo, formatDetectorScore, sortDetectors } from '@/lib/scores'
 
 /** What `demo.cli detect` / `chat` print, laid out: answer, decision, scores, clusters. */
@@ -76,10 +77,24 @@ export function AskResult({ result }: { result: DetectionResult }) {
         <Card className="space-y-2">
           <CardTitle>The {result.samples.length} samples, grouped by meaning</CardTitle>
           <CardDescription>
-            Each colour and number is one meaning. SE is the entropy of these group sizes.
+            Each colour and number is one meaning cluster. SE is the entropy over these meaning
+            clusters; the replay, when recorded, shows the p(c) it used for each.
           </CardDescription>
           <ClusterGroups answers={result.samples} clusters={result.clusters} />
         </Card>
+      )}
+
+      {result.clusters && result.se_trace && (
+        <ClusteringReplay
+          question={result.prompt}
+          answers={result.samples}
+          clusters={result.clusters}
+          trace={result.se_trace}
+          typedAnswers={false}
+          semanticEntropy={
+            result.detector_scores[SE_DETECTOR_BY_ESTIMATOR[result.se_trace.estimator]] ?? Number.NaN
+          }
+        />
       )}
     </div>
   )

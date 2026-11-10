@@ -15,6 +15,7 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 - [Which model am I testing, and how do I choose it?](#which-model-am-i-testing-and-how-do-i-choose-it)
 - [Quickstart: no GPU, no LLM](#quickstart-no-gpu-no-llm)
 - [How do I use the web playground?](#how-do-i-use-the-web-playground)
+  - [What does the clustering replay show?](#what-does-the-clustering-replay-show)
 - [What do I need before running a real model?](#what-do-i-need-before-running-a-real-model)
 - [What hardware do I need, and why?](#what-hardware-do-i-need-and-why)
   - [How do I check which tier my machine fits?](#how-do-i-check-which-tier-my-machine-fits)
@@ -239,15 +240,58 @@ committed, so you do not need Node. It has one tab per way in:
   and SE weighs each meaning by how many answers say it (discrete SE) instead
   of by their likelihoods; the SE note says which one ran.
   The threshold slider flips *escalate* in the browser, with no new request.
+  Below the scores, a replay steps through the clustering (see
+  [What does the clustering replay show?](#what-does-the-clustering-replay-show)).
 - **Ask the model** — *Detect* and *Chat* do what `demo.cli detect` and
-  `demo.cli chat` do, and show the samples grouped into clusters. A status
+  `demo.cli chat` do, and show the samples grouped into meaning clusters. A status
   strip shows the provider and model; *Chat* is disabled, with the reason,
   when the judge is not configured. Errors from the model are shown as the
-  server reports them.
+  server reports them. The same clustering replay follows the result. When
+  `ENABLED_DETECTORS` has no SE detector, *Record the clustering* is off and
+  locked, with the reason, since there is no clustering to record.
 - **Measure the detectors** — pick a results file for per-detector AUROC with
   its 95% confidence interval (the same numbers as `eval.compute_auroc`),
   or a `--sweep` directory for the model comparison table. Benchmarks are
   run from the command line, not from the UI.
+
+### What does the clustering replay show?
+
+How the answers split into meaning clusters, one NLI comparison at a time,
+and how SE follows from them. It plays back the comparisons the real run
+made, in the order it made them (the API's opt-in `se_trace`); nothing is
+re-simulated in the browser, and recording it costs no extra NLI calls.
+
+Each step shows the answer being placed, the meaning cluster it is compared
+with and that cluster's representative (its first answer), and DeBERTa's two
+verdicts: does the representative entail the answer, and does the answer
+entail the representative, each with the question in front, as the real
+clustering judges them. Both must be *entailment* to join. A common wrong
+guess is that one direction is enough: "Sally Ride, in 1983" entails "Sally
+Ride", but not the other way round (the second says nothing about the year),
+so they stay apart. When the first direction
+fails, the second is never run, and the replay says so. The answer joins the
+first meaning cluster that matches both ways; after the last failed
+comparison it opens a new one.
+
+The last steps fill in SE = −Σ p(c) ln p(c), one meaning cluster at a time,
+with the p(c) the run actually used: each cluster's share of the answers'
+likelihoods (exp of the mean token logprob, the weights are shown) when
+every answer has logprobs, or |c| / N with the discrete estimator (typed or
+edited answers in the Score tab, or discrete SE configured for the Ask tab).
+The presets give every answer the same logprob, so their weighted p(c)
+equals |c| / N; the weighting shows only with real model answers, whose
+likelihoods differ.
+Play, pause, step forward or back (a manual step pauses), and pick a speed
+from slow motion to real time ("real time" approximates one DeBERTa
+comparison on a CPU; the trace carries no timings).
+
+Recording needs an NLI scorer that labels one direction at a time, as the
+launcher's DeBERTa scorer does. An app built with `create_app` on a scorer
+that only answers "both ways or not" still scores; `/api/status` then says
+why there is no replay (`se_trace_unavailable_reason` for Score,
+`ask_se_trace_unavailable_reason` for Ask, which also needs an SE detector
+enabled), and both tabs say it too. Until `/api/status` has answered (or if
+it fails), neither tab asks for the replay, so a click never meets a 400.
 
 ## What do I need before running a real model?
 
