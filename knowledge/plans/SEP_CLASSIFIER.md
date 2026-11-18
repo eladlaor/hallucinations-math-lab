@@ -55,8 +55,8 @@ items 1–6 and 8, and changes it as listed in
   a probability, that comparison against a nats threshold would never escalate.
 
 **Needs a GPU:** collecting the 500-row calibration set, the actual best layer for Gemma 4,
-convergence at `max_iter=100`, and HF-vs-vLLM agreement. Until measured, all of these are
-assumptions. See [What needs a real GPU run](#what-needs-a-real-gpu-run).
+convergence at `max_iter=100`, and HF-vs-vLLM agreement. The 2026-11-18 run measured most of
+these; HF-vs-vLLM agreement is still open. See [What needs a real GPU run](#what-needs-a-real-gpu-run).
 
 **Owner decisions:** the Hub namespace (`eladlaor`) and the Gemma license treatment (the cards
 carry Apache 2.0) were decided on 2026-11-08. Still open until the sweep: which token position
@@ -1355,28 +1355,33 @@ Apply these edits to that plan in item 18. They change it as follows:
 
 ## What needs a real GPU run
 
-All of these are stated as **assumptions** until the first run.
+The first run (2026-11-18: `google/gemma-4-E2B-it` at revision `4adf1574…`, HF transformers
+provider, one RunPod A40, torch 2.14.1+cu130, transformers 5.19.0, repo commit `256def9`)
+settled most of these. Status per item:
 
-1. Collect the 500 E2B calibration rows (TBG and SLT, all layers), then fit, benchmark the
-   disjoint 200-question slice, and publish `v1` to `eladlaor/sep-probe-gemma-4-E2B-it` and
-   `eladlaor/sep-calibration-gemma-4-E2B-it`. This is PSP 7. The namespace and license
-   decisions were made on 2026-11-08.
-2. The actual best window and position for Gemma 4 E2B/E4B, and whether chat-template TBG
-   reaches useful AUROC at all. **Publish the result even if it is weak.**
-3. lbfgs convergence at `max_iter=100` on unscaled Gemma hidden states. If it fails, run the
-   pre-registered fallback (D10, then D12) on CPU from the export.
-4. Gemma 4 under transformers 5.19: `len(hidden_states) == L+1`, and index L is final-normed.
-   Both were read from code, not observed.
+1. **Done.** 500 calibration rows collected, fit, the disjoint 200-question slice benchmarked,
+   and `v1` published (private) to `eladlaor/sep-probe-gemma-4-E2B-it` and
+   `eladlaor/sep-calibration-gemma-4-E2B-it`. This is PSP 7. Results:
+   [README](../../README.md#what-did-the-first-real-sep-run-measure).
+2. **Measured.** TBG window layers 19–23 of 35 (nested-CV AUROC vs binarized SE 0.800 ± 0.026;
+   last layer alone 0.792 ± 0.041). SLT window 15–19 (0.804 ± 0.036; last layer 0.712 ± 0.047).
+   Chat-template TBG does reach useful AUROC: 0.780 held-out vs hallucination. v1 serves TBG.
+   E4B is not measured.
+3. **Refuted.** lbfgs did not converge at `max_iter=100`. D10 (`max_iter=1000`) converged in
+   157 iterations; D12 (scaling) was not needed.
+4. **Confirmed in part.** `len(hidden_states) == L+1` = 36 (embeddings included), by shape
+   checks. That index L is final-normed is still read from code, not observed.
 5. ~~`model.config._commit_hash` is populated~~ Resolved without a GPU: transformers 5.19
-   drops it (see item 7). Still to check: the Hub load at the pinned sha succeeds.
-6. Teacher-forced SLT agrees with generate-time SLT within tolerance.
-7. HF index L vs the vLLM embed runner at TBG: cosine similarity, and agreement of probe
-   probabilities and AUROC. Placeholder bars are cosine ≥ 0.999 and |Δp| ≤ 0.02. Record the
-   result in CAVEATS (`SEPProbeMetrics` forbids extra keys, so not in `metrics.json`). This is a manual check for now;
-   the script is deferred.
-8. vLLM `--revision` works together with `--language-model-only` on the v0.31 image.
-9. CPU time of the nested sweep, and disk use (about 110 MB per position for E2B).
-10. Whether the discrete-SE best split gives a usable class balance on E2B.
+   drops it (see item 7). The run loaded the model at the pinned sha.
+6. **Unverified.** Teacher-forced SLT vs generate-time SLT was not compared.
+7. **Unverified.** HF vs vLLM provider parity at TBG was not run (the run used HF only).
+   Placeholder bars stay cosine ≥ 0.999 and |Δp| ≤ 0.02, recorded in CAVEATS when measured.
+8. **Unverified.** vLLM `--revision` with `--language-model-only` was not exercised.
+9. **Measured.** The CPU fit takes under 5 minutes on a 10-core Mac, but over an hour on a
+   96-core pod, from BLAS thread oversubscription. Disk use is about 110 MB per position, as
+   estimated.
+10. **Confirmed.** The discrete-SE best split (γ* = 0.850 nats) gave 187 high / 313 low, a
+    usable balance.
 
 ## Deferred follow-ups
 

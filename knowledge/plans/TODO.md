@@ -17,16 +17,18 @@
 The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
 
 - **The repo is private** and is being prepared for public release. CI is green.
-- **No experiment has run on real hardware.** There has been no GPU run, no Vertex
-  deploy and no benchmark result, so no stored numbers are invalidated by the fixes
-  below.
+- **The first real GPU run happened on 2026-11-18** (`google/gemma-4-E2B-it`, one
+  RunPod A40, commit `256def9`): the SEP probe v1 and its calibration dataset are
+  on the Hub (private), with held-out results in the
+  [README](../../README.md#what-did-the-first-real-sep-run-measure). No Vertex
+  deploy has run.
 - **A pre-publication review on 2026-10-17 blocks release.** Its findings are the
   open items below.
 - **Next actions, in order:**
-  1. Finish the method blockers (B2), test-first.
-  2. Fix B3.
-  3. B1 is decided (2026-11-08); it runs last, at the release step.
-  4. Train and publish the first SEP probe (see Major, high priority).
+  1. B1 (history rewrite), at the release step.
+  2. Refit the probe as v2 from the published dataset at the post-B1 commit, since
+     B1 rewrites the commit ids v1 records.
+  3. Make the GitHub repo and both Hub repos public together.
 
   Verify with `uv sync --locked --all-extras && uv run pytest -q && uv run mypy && uvx ruff@0.17.0 check . && uvx ruff@0.17.0 format --check .`
 
@@ -79,7 +81,8 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
   release step:
   1. Merge every branch to `main`.
   2. Finish the GPU run, then upload both Hub repos **private** and verify that the
-     probe loads from the Hub.
+     probe loads from the Hub. Done 2026-11-18 (v1; checksums match, refit
+     reproduces the weights exactly).
   3. Take a full mirror backup of the repo.
   4. Rewrite with `git filter-repo` (paths, project id, trailers, as above).
   5. Run gitleaks and trufflehog on the result.
@@ -133,14 +136,17 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
 
 ## Major
 
-- [ ] **HIGH PRIORITY — publish a trained SEP probe on Hugging Face.** No probe has
-  been trained or published, so nobody can try SEP without a GPU run first. Ship
-  the weights, a backbone-pinned config, the training record, held-out metrics,
-  a model card, and the calibration dataset. Plan:
-  [`PUBLISHED_SEP_PROBE.md`](PUBLISHED_SEP_PROBE.md). The code is done (the
-  classifier recipe, the dataset export, `hf://` loading and the publish
-  script); what remains is the GPU run (PSP item 7). The Hub namespace and the
-  license were decided on 2026-11-08.
+- [x] **Publish a trained SEP probe on Hugging Face.** Done 2026-11-18:
+  `eladlaor/sep-probe-gemma-4-E2B-it@v1` and `eladlaor/sep-calibration-gemma-4-E2B-it@v1`
+  (private until release); held-out SEP AUROC 0.780 vs SE 0.792, see the
+  [README](../../README.md#what-did-the-first-real-sep-run-measure). Plan:
+  [`PUBLISHED_SEP_PROBE.md`](PUBLISHED_SEP_PROBE.md). Remaining: the v2 refit after
+  B1, then going public (see Summary).
+- [ ] **SE − PE criterion not met** on the first run (+0.044, CI −0.003 to +0.090,
+  bar ≥ 0.05 with CI excluding 0). Decide whether to rerun with more questions or
+  report it as is.
+- [ ] **Escalation criteria (3, 3b) unmeasured.** The first run had no judge; they
+  need a benchmark run with the judge on.
 - [ ] **Serving SLT probes.** The collection and the sweep cover the
   second-last-token position, but the loader refuses an SLT probe in v1:
   serving one needs the greedy answer passed through to the hidden-state read.
@@ -154,8 +160,9 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
   publish.
 - [ ] **A vLLM path for non-final layers.** The embed runner pools only the
   last layer. Options: an out-of-tree model plugin returning intermediate
-  hidden states, or an HF-transformers sidecar. Pending an owner decision,
-  after the first sweep shows whether the chosen window is near layer L.
+  hidden states, or an HF-transformers sidecar. Pending an owner decision. The
+  first sweep (Gemma 4 E2B) chose TBG layers 19–23 of 35, but the last layer alone
+  was close (nested-CV AUROC 0.792 vs 0.800).
 - [ ] **Library settings leak into consumers.** `config.py` has no `env_prefix`, so a
   consumer's `MAX_TOKENS=4096` breaks `NLIScorer()`.
   - Use `env_prefix="HML_"`.
@@ -201,8 +208,9 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
   - CONTRIBUTING, SECURITY.md, CODE_OF_CONDUCT, issue and PR templates,
     `CITATION.cff`, badges.
   - Cite Kuhn, Gal & Farquhar (ICLR 2023).
-- [ ] **No results.** After B2, run one PE-vs-SE AUROC table on TriviaQA, or state
-  that the repo is a toolkit, not a study.
+- [x] **No results.** Done 2026-11-18: PE, SE, discrete SE and SEP AUROC with 95%
+  bootstrap CIs on 200 held-out TriviaQA questions, in the
+  [README](../../README.md#what-did-the-first-real-sep-run-measure).
 
 ## Minor
 

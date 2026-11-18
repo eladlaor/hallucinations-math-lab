@@ -32,6 +32,7 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
   - [Which layer and token does SEP read, and are mid layers better?](#which-layer-and-token-does-sep-read-and-are-mid-layers-better)
   - [How does this SEP differ from the paper?](#how-does-this-sep-differ-from-the-paper)
   - [What changed for an existing SEP setup?](#what-changed-for-an-existing-sep-setup)
+  - [What did the first real SEP run measure?](#what-did-the-first-real-sep-run-measure)
 - [How do I score samples from my own model?](#how-do-i-score-samples-from-my-own-model)
 - [How do I add my own detector?](#how-do-i-add-my-own-detector)
 - [What can I experiment with?](#what-can-i-experiment-with)
@@ -796,8 +797,8 @@ listed [below](#how-does-this-sep-differ-from-the-paper). For each
 calibration question, the expensive step computes SE from 10 samples and
 stores the model's hidden states at every layer; the cheap step splits SE
 into high and low, fits a logistic classifier, and picks which layers it
-reads. **No probe has been trained or published yet**: there is no GPU
-result for any Gemma 4 model so far.
+reads. One probe is published so far, for `google/gemma-4-E2B-it`; its
+measured results are [below](#what-did-the-first-real-sep-run-measure).
 
 A probe is a **directory**, the same on disk and on the Hugging Face Hub:
 
@@ -816,13 +817,14 @@ fallback between sources. Before the first sample, it refuses a probe whose
 model id, revision, layer count, width, answer instruction or chat template
 differs from the model under test, naming both values.
 
-**1. Use a published probe.** None exists yet. The first will be
+**1. Use a published probe.** For `google/gemma-4-E2B-it` there is
 `eladlaor/sep-probe-gemma-4-E2B-it` (Apache 2.0, the base model's license),
-with its calibration data in `eladlaor/sep-calibration-gemma-4-E2B-it`. Once it
-is published, set `SEP_PROBE_PATH=hf://eladlaor/sep-probe-gemma-4-E2B-it@<tag>`
-and enable SEP as in step 2.4
-below; nothing else is needed, on any machine that runs the model with
-`hf_transformers` (or with vLLM for a last-layer probe).
+with its calibration data in `eladlaor/sep-calibration-gemma-4-E2B-it`. Set
+`SEP_PROBE_PATH=hf://eladlaor/sep-probe-gemma-4-E2B-it@v1` and enable SEP as
+in step 2.4 below, with `SLM_PROVIDER=hf_transformers`: this probe reads
+layers 19–23, so vLLM, which serves only last-layer probes, cannot serve it.
+Calibrate `SEP_THRESHOLD` before relying on escalation
+([why](#what-did-the-first-real-sep-run-measure)).
 
 **2. Train your own.** Needs `SLM_PROVIDER=hf_transformers` and a GPU that
 fits the model (collection runs 500 questions × 11 generations).
@@ -903,16 +905,23 @@ token in the middle layers" mixes them up.
   cross-validation (selection repeated inside each outer fold) gives the
   reported AUROC, which therefore includes the cost of choosing.
 
-**The misconception to head off: "research shows mid layers are best."** In
-Kossen et al., mid layers win for probes that predict *correctness* and for
-*long-form* answers. For short answers, the setting used here, their SEP
-AUROC rises toward the late layers, and most of their chosen windows are
-the last five layers. Gemma 4 was not in the paper, and our prompt differs
-from theirs, so this repo assumes neither: the sweep measures it. Read the
-result from the probe's `metrics.json`: `layer_sweep` (every layer, both
-positions), `selection` (the chosen window and its nested-CV AUROC) and
+**On Gemma 4 E2B, middle windows were chosen, but the last layer was close
+at TBG.** The sweep picked layers 19–23 (of 35) at TBG and 15–19 at SLT.
+At TBG the last layer alone scored nearly as well (nested-CV AUROC 0.792
+against 0.800); at SLT the middle clearly beat it (0.804 against 0.712).
+
+**The misconception to head off: "research shows mid layers are best" (or
+"late layers are best").** Neither transfers as a rule. In Kossen et al.,
+mid layers win for probes that predict *correctness* and for *long-form*
+answers; for short answers, the setting used here, their SEP AUROC rises
+toward the late layers, and most of their chosen windows are the last five
+layers. On Gemma 4 E2B, with our prompt, the best windows sat in the middle,
+and how much that mattered depended on the token position. The lesson is
+to measure per model, which is what the sweep does. Read the result from
+the probe's `metrics.json`: `layer_sweep` (every layer, both positions),
+`selection` (the chosen window and its nested-CV AUROC) and
 `final_layer_auroc` (the last layer alone, the baseline for "just use the
-last layer"). No Gemma 4 sweep has run yet.
+last layer").
 
 ### How does this SEP differ from the paper?
 
@@ -951,6 +960,48 @@ SEP was previously a ridge regression predicting SE in nats. If you used it:
 | A custom detector with `requires_hidden_state=True` | Implement `HiddenStateDetector.hidden_state_layers`; otherwise building the evaluator raises `TypeError`. |
 | Results files from an earlier `eval.run_benchmark` | Re-run it: the scoring scripts refuse rows without the `sep_probe` field it now records. |
 | A benchmark question without an `id`, run with SEP enabled | Give every question an `id`; a SEP run refuses it instead of skipping it. |
+
+### What did the first real SEP run measure?
+
+On `google/gemma-4-E2B-it`, one forward pass recovered most of SE's ability
+to rank hallucinations: SEP scored AUROC 0.780 against SE's 0.792. The
+misreading to avoid is "SEP matches SE": this is one model, one dataset and
+200 questions, so the confidence intervals overlap widely and do not rank the
+detectors. Run on 2026-11-18 (revision `4adf1574…`, `hf_transformers`, one
+A40, repo commit `256def9`); the probe is published as
+`eladlaor/sep-probe-gemma-4-E2B-it@v1`.
+
+**Held-out benchmark**: 200 TriviaQA questions disjoint from calibration, no
+judge; 133 of the 200 greedy answers were wrong (median answer: 2 words).
+
+| Detector | AUROC vs hallucination (95% bootstrap CI) |
+|---|---|
+| SE, likelihood-weighted | 0.792 (0.738–0.846) |
+| SE, discrete | 0.798 (0.745–0.851) |
+| SEP | 0.780 (0.707–0.847) |
+| PE | 0.749 (0.680–0.817) |
+
+**Calibration**: 500 TriviaQA questions; SE split at 0.850 nats into 187 high
+and 313 low. The fit did not converge at the paper's 100 iterations; the
+pre-registered fallback D10 (1000) converged in 157. Nested cross-validation:
+
+| Window | AUROC vs binarized SE | AUROC vs model error |
+|---|---|---|
+| TBG, layers 19–23 of 35 (served) | 0.800 ± 0.026 | 0.773 ± 0.053 |
+| TBG, layer 35 only | 0.792 ± 0.041 | |
+| SLT, layers 15–19 | 0.804 ± 0.036 | 0.750 ± 0.014 |
+| SLT, layer 35 only | 0.712 ± 0.047 | |
+
+**Pre-registered criteria**: SE AUROC ≥ 0.75 was met (0.792). SE beating PE
+by ≥ 0.05 with a CI excluding 0 was not (+0.044, CI −0.003 to +0.090). The
+escalation criteria were not measured, since the run had no judge.
+
+**The threshold needs calibrating.** The recommended threshold (Youden's J on
+out-of-fold rows) is p = 0.00023: TPR 0.886, FPR 0.434, escalating 72.8% of
+questions. Such a small p means the probabilities are overconfident (7680
+features from 5 layers, 400 training rows per fold, no scaling): the ranking
+is sound, the probability values are not. Set `SEP_THRESHOLD` with
+`eval.calibrate_threshold` on a dev set; the default 0.5 is a placeholder.
 
 ## How do I score samples from my own model?
 
@@ -1037,7 +1088,9 @@ evaluator raises `TypeError` without it. See the
 
 ## What does it look like on real questions?
 
-The numbers below are illustrative, to show the shapes to look for.
+The numbers below are illustrative, to show the shapes to look for. For
+measured results on 200 held-out questions, see
+[What did the first real SEP run measure?](#what-did-the-first-real-sep-run-measure).
 
 **Confident and correct.** "Who wrote the novel 1984?" — all ten samples say
 Orwell: one cluster, SE = 0, no escalation, the greedy answer is returned.
@@ -1164,7 +1217,9 @@ knowledge/                     # developer / DevOps / QA guides, theory, caveats
 
 Pre-1.0 and changing. The library API (`evaluate_responses`,
 `ResponseEvaluator`, the three detectors, the `Judge` protocol and the
-escalation policies) is what the tests pin down. An LLM-as-judge detector
+escalation policies) is what the tests pin down. The first trained SEP
+probe, for `google/gemma-4-E2B-it`, is published as v1 with its
+[measured results](#what-did-the-first-real-sep-run-measure). An LLM-as-judge detector
 and cost / latency reporting in the benchmark are planned — see the
 [Pareto plan](knowledge/plans/PARETO_DETECTOR_FRAMEWORK.md). Changes are
 tracked in [CHANGELOG.md](CHANGELOG.md).

@@ -31,7 +31,7 @@
   refit or re-examine the probe on a laptop, no GPU.
 - **Status:** the code (items 1–6 and 8) is implemented by
   [`SEP_CLASSIFIER.md`](SEP_CLASSIFIER.md) items 2–18. Item 7, the real run,
-  is open. The Hub namespace and license decisions were made on 2026-11-08 (see
+  is done (v1, private, 2026-11-18). The Hub namespace and license decisions were made on 2026-11-08 (see
   [Risks and decisions](#risks-and-decisions)), and both cards now carry the licenses.
 - **Code:** the trainer writes its record to files (not only stdout), a
   publish script uploads, and the detector loads a probe straight from the Hub,
@@ -153,6 +153,17 @@ items 2–18**, with the changes noted in each item below. Item 7 stays here.
    [DevOps Guide](../usage_guides/DEVOPS_GUIDE.md#publishing-a-sep-probe-to-the-hub).
    Afterwards, replace the README's and the `.pt` refusal's generic `hf://`
    hint with the published reference.
+   **Done 2026-11-18 (v1, private):** `google/gemma-4-E2B-it` at revision
+   `4adf1574…`, HF transformers provider, one RunPod A40, torch 2.14.1+cu130,
+   transformers 5.19.0, repo commit `256def9`. Calibration: 500 TriviaQA
+   questions, split at 0.850 nats into 187 high / 313 low; the fit needed D10
+   (converged in 157 iterations). v1 serves TBG layers 19–23 of 35 (nested-CV
+   AUROC 0.800 ± 0.026 vs binarized SE; last layer 0.792 ± 0.041). Held-out
+   (200 questions, no judge): SEP 0.780 (0.707–0.847), SE 0.792 (0.738–0.846),
+   PE 0.749 (0.680–0.817). Verified from the Hub: the loader works, checksums
+   match, and a refit from the published dataset reproduces the weights exactly.
+   The README now names the published reference. **v2** will be refit from the
+   dataset after B1, since the rewrite changes the commit ids v1 records.
 8. **Docs.** README *How do I train and use a SEP?* gets a "Use the published
    probe" path first and "Train your own" second; the web playground plan
    ([`WEB_PLAYGROUND.md`](WEB_PLAYGROUND.md)) points at it; CHANGELOG entry.
@@ -160,15 +171,21 @@ items 2–18**, with the changes noted in each item below. Item 7 stays here.
 
 ## Success criteria
 
+Status after the v1 run (2026-11-18):
+
 - [ ] A fresh clone, no `data/probes/`, with `SEP_PROBE_PATH=hf://…` and
       `VLLM_MODEL_ID=google/gemma-4-E2B-it`, runs `run_benchmark` with SEP enabled.
+      (Loading from the Hub is verified; a full benchmark from a fresh clone is not.)
 - [ ] That run reproduces the SEP AUROC in the published `metrics.json` within
       its confidence interval.
 - [ ] Pointing the probe at a different backbone fails before any scoring.
-- [ ] Refitting from the published dataset reproduces the published weights.
+      (Not yet exercised against the published probe.)
+- [x] Refitting from the published dataset reproduces the published weights
+      (max abs diff 0.0).
 - [ ] The model card states the numbers, the limits and the license, and links
-      back to the exact repo commit that trained it.
-- [ ] The README states the measured layer window and the `final_layer_auroc`
+      back to the exact repo commit that trained it. (v1 links to `256def9`,
+      which B1 rewrites; v2 fixes this.)
+- [x] The README states the measured layer window and the `final_layer_auroc`
       baseline.
 
 ## Out of scope
