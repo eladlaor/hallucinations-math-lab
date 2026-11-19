@@ -305,13 +305,13 @@ uv run python -m eval.compute_auroc --in eval/results/sep_heldout.jsonl \
   --json-out eval/results/sep_heldout_auroc.json
 # 5. Create both Hub repos private first: the publisher creates a missing repo with the
 #    account's default visibility. They go public with the GitHub repo (TODO.md, B1).
-hf repos create eladlaor/sep-gemma-4-E2B-it --private
-hf repos create eladlaor/sep-gemma-4-E2B-it-calibration --repo-type dataset --private
+hf repos create eladlaor/SEP-gemma-4-E2B-it --private
+hf repos create eladlaor/SEP-gemma-4-E2B-it-calibration --repo-type dataset --private
 # 6. Check everything and print both cards; then run again without --dry-run.
 uv run python -m eval.publish_sep_probe --probe-dir data/probes/<slug> \
   --dataset data/sep_datasets/<slug> --heldout eval/results/sep_heldout_auroc.json \
-  --repo eladlaor/sep-gemma-4-E2B-it \
-  --dataset-repo eladlaor/sep-gemma-4-E2B-it-calibration --tag v1 --dry-run
+  --repo eladlaor/SEP-gemma-4-E2B-it \
+  --dataset-repo eladlaor/SEP-gemma-4-E2B-it-calibration --tag v1 --dry-run
 ```
 
 Both cards state the license. The probe is released under its backbone's license, which
