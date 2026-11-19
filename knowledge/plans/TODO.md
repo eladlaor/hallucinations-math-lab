@@ -31,7 +31,7 @@ The work queue for `hallucinations-math-lab`. It replaces `SESSION_HANDOFF.md`.
   2. ~~Refit the probe as v2 at the post-B1 commit.~~ Done 2026-11-19: v2 refit at
      `38eded8` (weights identical to v1), held-out benchmark re-run, published and
      verified signed-out from the Hub. Both Hub repos renamed to
-     `semantic-entropy-probe-gemma-4-E2B-it[-calibration]` and made public.
+     `sep-gemma-4-E2B-it[-calibration]` and made public.
   3. Make the GitHub repo public (needs the owner's explicit go-ahead).
 
   Verify with `uv sync --locked --all-extras && uv run pytest -q && uv run mypy && uvx ruff@0.17.0 check . && uvx ruff@0.17.0 format --check .`
@@ -141,7 +141,7 @@ repo; the original history survives only in the private archive repo and a local
 ## Major
 
 - [x] **Publish a trained SEP probe on Hugging Face.** Done 2026-11-18:
-  `eladlaor/semantic-entropy-probe-gemma-4-E2B-it@v1` and `eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration@v1`
+  `eladlaor/sep-gemma-4-E2B-it@v1` and `eladlaor/sep-gemma-4-E2B-it-calibration@v1`
   (public since 2026-11-19; v2 at commit `38eded8` is current); held-out SEP AUROC
   0.780 vs SE 0.790, see the
   [README](../../README.md#what-did-the-first-real-sep-run-measure). Plan:
@@ -265,7 +265,7 @@ repo; the original history survives only in the private archive repo and a local
 | 2026-10 | Keep the repo private for now. | The release is being prepared, not published. |
 | 2026-10 | Private files stay gitignored on disk, never deleted. | They are the owner's working material. |
 | 2026-10 | Package `hallucinations_math_lab`, MIT license. | Matches the distribution name. |
-| 2026-11-08 | Hub namespace `eladlaor`: `eladlaor/semantic-entropy-probe-gemma-4-E2B-it` and `eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration`. | Owner's choice. |
+| 2026-11-08 | Hub namespace `eladlaor`: `eladlaor/sep-gemma-4-E2B-it` and `eladlaor/sep-gemma-4-E2B-it-calibration`. | Owner's choice. |
 | 2026-11-08 | Release the probe under Apache 2.0, the base model's license; the model card carries it. The dataset card credits TriviaQA. | The Hub lists the Gemma 4 family as `apache-2.0`, ungated. |
 | 2026-11-08 | B1: `git filter-repo` rewrite of the existing repo, run last (see B1). | Keeps the URL and history. |
 | 2026-10 | Serve Gemma 4 on `vllm/vllm-openai:v0.31.0-cu129`. | Gemma 4 support starts at v0.19, and cu129 runs on Vertex's R535+ drivers. |

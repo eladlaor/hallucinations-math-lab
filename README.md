@@ -818,9 +818,9 @@ model id, revision, layer count, width, answer instruction or chat template
 differs from the model under test, naming both values.
 
 **1. Use a published probe.** For `google/gemma-4-E2B-it` there is
-[`eladlaor/semantic-entropy-probe-gemma-4-E2B-it`](https://huggingface.co/eladlaor/semantic-entropy-probe-gemma-4-E2B-it) (Apache 2.0, the base model's license),
-with its calibration data in [`eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration`](https://huggingface.co/datasets/eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration). Set
-`SEP_PROBE_PATH=hf://eladlaor/semantic-entropy-probe-gemma-4-E2B-it@v2` and enable SEP as
+[`eladlaor/sep-gemma-4-E2B-it`](https://huggingface.co/eladlaor/sep-gemma-4-E2B-it) (Apache 2.0, the base model's license),
+with its calibration data in [`eladlaor/sep-gemma-4-E2B-it-calibration`](https://huggingface.co/datasets/eladlaor/sep-gemma-4-E2B-it-calibration). Set
+`SEP_PROBE_PATH=hf://eladlaor/sep-gemma-4-E2B-it@v2` and enable SEP as
 in step 2.4 below, with `SLM_PROVIDER=hf_transformers`: this probe reads
 layers 19–23, so vLLM, which serves only last-layer probes, cannot serve it.
 Calibrate `SEP_THRESHOLD` before relying on escalation
@@ -970,7 +970,7 @@ misreading to avoid is "SEP matches SE": this is one model, one dataset and
 detectors. Collected and fitted on 2026-11-18 (revision `4adf1574…`,
 `hf_transformers`, one A40); refit on 2026-11-19 at repo commit `38eded8` with
 identical weights and benchmarked again, the run shown here. The probe is
-published as `eladlaor/semantic-entropy-probe-gemma-4-E2B-it@v2` (`v1` holds the same weights, fitted before the
+published as `eladlaor/sep-gemma-4-E2B-it@v2` (`v1` holds the same weights, fitted before the
 repository's history was rewritten).
 
 **Held-out benchmark**: 200 TriviaQA questions disjoint from calibration, no

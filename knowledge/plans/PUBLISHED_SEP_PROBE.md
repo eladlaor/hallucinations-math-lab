@@ -75,7 +75,7 @@ what gets published as the training record.
 
 ## What gets published
 
-**Model repo** `eladlaor/semantic-entropy-probe-gemma-4-E2B-it`:
+**Model repo** `eladlaor/sep-gemma-4-E2B-it`:
 
 | File | Content |
 |---|---|
@@ -86,7 +86,7 @@ what gets published as the training record.
 | `metrics.json` | The per-layer sweep at both token positions, the layer-window selection with its nested-CV AUROC against binarized SE (mean ± std per fold), the last-layer baseline (`final_layer_auroc`), the recommended threshold with its TPR, FPR and escalation rate, plus the held-out benchmark AUROC of SEP next to PE and SE on the disjoint 200-question slice, with confidence intervals. |
 | `README.md` | Model card: what it is, how to use it with this repo, the numbers, the limits (works only for this exact backbone; TriviaQA-style questions only; not a correctness oracle), the license, and citations. |
 
-**Dataset repo** `eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration`: `rows.parquet`
+**Dataset repo** `eladlaor/sep-gemma-4-E2B-it-calibration`: `rows.parquet`
 (one row per calibration question: the question, the 10 sampled answers plus
 the greedy answer, their cluster ids, both SE values, greedy correctness),
 `hidden_states.safetensors` (every layer at two token positions, TBG and SLT)
@@ -202,4 +202,4 @@ Status after the v1 run (2026-11-18):
 | **Gemma license** | **Decided 2026-11-08: the model card carries the base model's license terms.** The Hub lists `google/gemma-4-E2B-it` (and the rest of the Gemma 4 family) as `apache-2.0`, ungated, with `license_link` https://ai.google.dev/gemma/docs/gemma_4_license, which redirects to Google's Apache 2.0 page. So the probe weights and config are released under Apache 2.0, the base model's license. The model card states this (`license: apache-2.0` and `license_link` in its front matter, plus a license section), and this repo's code stays MIT. The dataset card releases the derived columns under Apache 2.0 and credits TriviaQA (Joshi et al. 2017) for the questions. The Hub lists TriviaQA's license as unknown, so users must check its terms before redistributing the questions. |
 | **Silent backbone drift** | A re-uploaded or updated Gemma checkpoint changes hidden states and quietly breaks the probe. Mitigated by pinning the revision (item 2) and refusing a mismatch (item 4). |
 | **The result may be weak** | Publish it anyway, with the numbers. The value is that it is checkable. |
-| **Hub namespace** | **Decided 2026-11-08: the personal account `eladlaor`.** The repos are `eladlaor/semantic-entropy-probe-gemma-4-E2B-it` and `eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration`. |
+| **Hub namespace** | **Decided 2026-11-08: the personal account `eladlaor`.** The repos are `eladlaor/sep-gemma-4-E2B-it` and `eladlaor/sep-gemma-4-E2B-it-calibration`. |

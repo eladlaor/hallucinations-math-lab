@@ -1360,8 +1360,8 @@ provider, one RunPod A40, torch 2.14.1+cu130, transformers 5.19.0, repo commit `
 settled most of these. Status per item:
 
 1. **Done.** 500 calibration rows collected, fit, the disjoint 200-question slice benchmarked,
-   and `v1` published (private) to `eladlaor/semantic-entropy-probe-gemma-4-E2B-it` and
-   `eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration`. This is PSP 7. Results:
+   and `v1` published (private) to `eladlaor/sep-gemma-4-E2B-it` and
+   `eladlaor/sep-gemma-4-E2B-it-calibration`. This is PSP 7. Results:
    [README](../../README.md#what-did-the-first-real-sep-run-measure).
 2. **Measured.** TBG window layers 19–23 of 35 (nested-CV AUROC vs binarized SE 0.800 ± 0.026;
    last layer alone 0.792 ± 0.041). SLT window 15–19 (0.804 ± 0.036; last layer 0.712 ± 0.047).
@@ -1397,8 +1397,8 @@ Add these to [`TODO.md`](TODO.md):
 ## Open decisions for the owner
 
 1. ~~**Hub namespace:** personal account or an org.~~ **Decided 2026-11-08:** the personal
-   account `eladlaor`, so the repos are `eladlaor/semantic-entropy-probe-gemma-4-E2B-it` and
-   `eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration`.
+   account `eladlaor`, so the repos are `eladlaor/sep-gemma-4-E2B-it` and
+   `eladlaor/sep-gemma-4-E2B-it-calibration`.
 2. ~~**Gemma license:** whether the model card must carry the Gemma terms.~~ **Decided
    2026-11-08:** yes. The Hub lists the Gemma 4 family as `apache-2.0`, ungated, with
    `license_link` https://ai.google.dev/gemma/docs/gemma_4_license. The probe is therefore
