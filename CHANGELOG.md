@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - First trained SEP probe for google/gemma-4-E2B-it, published as
-  eladlaor/sep-probe-gemma-4-E2B-it v1, with its calibration dataset and
-  held-out results in the README.
+  eladlaor/semantic-entropy-probe-gemma-4-E2B-it (v2, refit after the history rewrite with
+  identical weights; v1 was its first upload), with its calibration dataset
+  eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration and held-out results in the README.
 - SEP provenance records the torch build that produced the hidden states:
   `torch_version` and `torch_cuda_version` (None for CPU-only) in the dataset's
   collection config and the probe's training record, shown on both Hub cards;

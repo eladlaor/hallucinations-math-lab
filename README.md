@@ -818,9 +818,9 @@ model id, revision, layer count, width, answer instruction or chat template
 differs from the model under test, naming both values.
 
 **1. Use a published probe.** For `google/gemma-4-E2B-it` there is
-`eladlaor/sep-probe-gemma-4-E2B-it` (Apache 2.0, the base model's license),
-with its calibration data in `eladlaor/sep-calibration-gemma-4-E2B-it`. Set
-`SEP_PROBE_PATH=hf://eladlaor/sep-probe-gemma-4-E2B-it@v1` and enable SEP as
+[`eladlaor/semantic-entropy-probe-gemma-4-E2B-it`](https://huggingface.co/eladlaor/semantic-entropy-probe-gemma-4-E2B-it) (Apache 2.0, the base model's license),
+with its calibration data in [`eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration`](https://huggingface.co/datasets/eladlaor/semantic-entropy-probe-gemma-4-E2B-it-calibration). Set
+`SEP_PROBE_PATH=hf://eladlaor/semantic-entropy-probe-gemma-4-E2B-it@v2` and enable SEP as
 in step 2.4 below, with `SLM_PROVIDER=hf_transformers`: this probe reads
 layers 19–23, so vLLM, which serves only last-layer probes, cannot serve it.
 Calibrate `SEP_THRESHOLD` before relying on escalation
@@ -964,22 +964,24 @@ SEP was previously a ridge regression predicting SE in nats. If you used it:
 ### What did the first real SEP run measure?
 
 On `google/gemma-4-E2B-it`, one forward pass recovered most of SE's ability
-to rank hallucinations: SEP scored AUROC 0.780 against SE's 0.792. The
+to rank hallucinations: SEP scored AUROC 0.780 against SE's 0.790. The
 misreading to avoid is "SEP matches SE": this is one model, one dataset and
 200 questions, so the confidence intervals overlap widely and do not rank the
-detectors. Run on 2026-11-18 (revision `4adf1574…`, `hf_transformers`, one
-A40, repo commit `256def9`); the probe is published as
-`eladlaor/sep-probe-gemma-4-E2B-it@v1`.
+detectors. Collected and fitted on 2026-11-18 (revision `4adf1574…`,
+`hf_transformers`, one A40); refit on 2026-11-19 at repo commit `38eded8` with
+identical weights and benchmarked again, the run shown here. The probe is
+published as `eladlaor/semantic-entropy-probe-gemma-4-E2B-it@v2` (`v1` holds the same weights, fitted before the
+repository's history was rewritten).
 
 **Held-out benchmark**: 200 TriviaQA questions disjoint from calibration, no
 judge; 133 of the 200 greedy answers were wrong (median answer: 2 words).
 
 | Detector | AUROC vs hallucination (95% bootstrap CI) |
 |---|---|
-| SE, likelihood-weighted | 0.792 (0.738–0.846) |
-| SE, discrete | 0.798 (0.745–0.851) |
+| SE, likelihood-weighted | 0.790 (0.733–0.847) |
+| SE, discrete | 0.791 (0.735–0.848) |
 | SEP | 0.780 (0.707–0.847) |
-| PE | 0.749 (0.680–0.817) |
+| PE | 0.750 (0.679–0.817) |
 
 **Calibration**: 500 TriviaQA questions; SE split at 0.850 nats into 187 high
 and 313 low. The fit did not converge at the paper's 100 iterations; the
@@ -992,8 +994,8 @@ pre-registered fallback D10 (1000) converged in 157. Nested cross-validation:
 | SLT, layers 15–19 | 0.804 ± 0.036 | 0.750 ± 0.014 |
 | SLT, layer 35 only | 0.712 ± 0.047 | |
 
-**Pre-registered criteria**: SE AUROC ≥ 0.75 was met (0.792). SE beating PE
-by ≥ 0.05 with a CI excluding 0 was not (+0.044, CI −0.003 to +0.090). The
+**Pre-registered criteria**: SE AUROC ≥ 0.75 was met (0.790). SE beating PE
+by ≥ 0.05 with a CI excluding 0 was not (+0.040, CI −0.005 to +0.086). The
 escalation criteria were not measured, since the run had no judge.
 
 **The threshold needs calibrating.** The recommended threshold (Youden's J on
