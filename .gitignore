@@ -68,3 +68,5 @@ terraform/*.tfplan
 .claude/
 knowledge/lectures/
 knowledge/submissions/
+# Agent session notes: operational, not project documentation.
+knowledge/plans/SESSION_HANDOFF.md
