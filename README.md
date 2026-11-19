@@ -1,16 +1,25 @@
 # hallucinations-math-lab
 
+[![CI](https://github.com/eladlaor/hallucinations-math-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/eladlaor/hallucinations-math-lab/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.12–3.13](https://img.shields.io/badge/python-3.12%E2%80%933.13-blue.svg)](pyproject.toml)
+[![Hugging Face: SEP probe](https://img.shields.io/badge/%F0%9F%A4%97%20model-SEP--gemma--4--E2B--it-yellow.svg)](https://huggingface.co/eladlaor/SEP-gemma-4-E2B-it)
+
 A research repo built around one question: **how well do Semantic Entropy,
 and a cheap single-pass probe approximating it, flag hallucinations in
 self-hosted, open-weight LLMs?** It answers with two measurements — AUROC
 against a predictive-entropy baseline, and an accuracy-vs-escalation-rate
-curve (targeted vs. random escalation to a stronger judge) — and includes an
-interactive web playground for exploring both.
+curve (targeted vs. random escalation to a stronger judge) — and ships a
+trained probe on Hugging Face and an interactive web playground for
+exploring both.
 
 Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 
 ## Table of contents
 
+- [Key result](#key-result)
+- [Published probe on Hugging Face](#published-probe-on-hugging-face)
+- [Try the playground in two minutes](#try-the-playground-in-two-minutes)
 - [Summary](#summary)
 - [Which model am I testing, and how do I choose it?](#which-model-am-i-testing-and-how-do-i-choose-it)
 - [Quickstart: no GPU, no LLM](#quickstart-no-gpu-no-llm)
@@ -42,6 +51,76 @@ Import name: `hallucinations_math_lab` · Python 3.12–3.13 · MIT license
 - [Where does the theory live?](#where-does-the-theory-live)
 - [Repository layout](#repository-layout)
 - [Project status](#project-status)
+
+## Key result
+
+On `google/gemma-4-E2B-it`, a probe that reads the model's hidden states
+once, before it answers, recovers almost all of Semantic Entropy's ability
+to rank hallucinations — without SE's 11 generations and NLI
+clustering per question.
+
+| Detector | Cost per question | AUROC vs hallucination (95% bootstrap CI) |
+|---|---|---|
+| SE, likelihood-weighted | 11 generations + NLI clustering | 0.790 (0.733–0.847) |
+| SE, discrete | 11 generations + NLI clustering | 0.791 (0.735–0.848) |
+| **SEP** (this repo's probe) | one forward pass over the prompt | **0.780** (0.707–0.847) |
+| PE (baseline) | free, from token probabilities | 0.750 (0.679–0.817) |
+
+200 held-out TriviaQA questions, disjoint from the 500 used to fit the probe;
+133 of the 200 greedy answers were wrong. The intervals overlap: this is one
+model, one dataset and 200 questions, so it is evidence that SEP keeps most
+of SE's signal, not a ranking of the detectors. Pre-registered criteria,
+calibration diagnostics and the layer study are in
+[What did the first real SEP run measure?](#what-did-the-first-real-sep-run-measure)
+
+## Published probe on Hugging Face
+
+| Artifact | Link |
+|---|---|
+| SEP probe for `google/gemma-4-E2B-it` (v2) | [`eladlaor/SEP-gemma-4-E2B-it`](https://huggingface.co/eladlaor/SEP-gemma-4-E2B-it) |
+| Calibration dataset it was fitted on | [`eladlaor/SEP-gemma-4-E2B-it-calibration`](https://huggingface.co/datasets/eladlaor/SEP-gemma-4-E2B-it-calibration) |
+
+A logistic probe over layers 19–23 of 35 at the token before generation; it
+outputs p(high SE), the probability that the model is about to be uncertain
+in meaning. The model card records the full provenance: base-model revision,
+repo commit, data split, and the held-out metrics above. To use it, set in
+`.env`:
+
+```bash
+SLM_PROVIDER=hf_transformers
+SEP_PROBE_PATH=hf://eladlaor/SEP-gemma-4-E2B-it@v2
+ENABLED_DETECTORS=["predictive_entropy","semantic_entropy_probe","semantic_entropy"]
+```
+
+Calibrate `SEP_THRESHOLD` on a dev set before relying on escalation; see
+[How do I train and use a Semantic Entropy Probe?](#how-do-i-train-and-use-a-semantic-entropy-probe)
+
+## Try the playground in two minutes
+
+No GPU and no LLM needed for the first tab:
+
+```bash
+git clone https://github.com/eladlaor/hallucinations-math-lab.git
+cd hallucinations-math-lab
+uv sync --all-extras
+uv run python -m demo.web        # then open http://127.0.0.1:8765
+```
+
+1. In **Score answers**, click the **Divergent** preset: ten contradictory
+   answers to "Who was the first woman to walk on Mars?".
+2. Click **Score answers**. The first run downloads the NLI model (DeBERTa,
+   ~1.6 GB, once).
+3. Read the result: SE 1.834 nats across 7 meaning clusters, above the
+   1.00 threshold, so the question escalates to the judge. Try the
+   **Consistent** and **Paraphrased** presets for contrast: SE drops to 0,
+   while PE still rises for the paraphrases.
+4. Move the threshold slider to see the decision flip, and press **Play** in
+   the replay to watch the answers being clustered step by step.
+
+![The playground scoring the Divergent preset: SE 1.834 over 7 meaning clusters, escalated](knowledge/screenshots/playground_score_divergent.png)
+
+*Ask the model* and *Measure the detectors* need a model or saved benchmark
+results; see [How do I use the web playground?](#how-do-i-use-the-web-playground)
 
 ## Summary
 
@@ -970,8 +1049,7 @@ misreading to avoid is "SEP matches SE": this is one model, one dataset and
 detectors. Collected and fitted on 2026-11-18 (revision `4adf1574…`,
 `hf_transformers`, one A40); refit on 2026-11-19 at repo commit `38eded8` with
 identical weights and benchmarked again, the run shown here. The probe is
-published as `eladlaor/SEP-gemma-4-E2B-it@v2` (`v1` holds the same weights, fitted before the
-repository's history was rewritten).
+published as `eladlaor/SEP-gemma-4-E2B-it@v2` (`v1` holds the same weights, fitted at an earlier commit).
 
 **Held-out benchmark**: 200 TriviaQA questions disjoint from calibration, no
 judge; 133 of the 200 greedy answers were wrong (median answer: 2 words).
@@ -1220,8 +1298,9 @@ knowledge/                     # developer / DevOps / QA guides, theory, caveats
 Pre-1.0 and changing. The library API (`evaluate_responses`,
 `ResponseEvaluator`, the three detectors, the `Judge` protocol and the
 escalation policies) is what the tests pin down. The first trained SEP
-probe, for `google/gemma-4-E2B-it`, is published as v1 with its
-[measured results](#what-did-the-first-real-sep-run-measure). An LLM-as-judge detector
+probe, for `google/gemma-4-E2B-it`, is published on Hugging Face as
+[`eladlaor/SEP-gemma-4-E2B-it@v2`](https://huggingface.co/eladlaor/SEP-gemma-4-E2B-it)
+with its [measured results](#what-did-the-first-real-sep-run-measure). An LLM-as-judge detector
 and cost / latency reporting in the benchmark are planned — see the
 [Pareto plan](knowledge/plans/PARETO_DETECTOR_FRAMEWORK.md). Changes are
 tracked in [CHANGELOG.md](CHANGELOG.md).

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - First trained SEP probe for google/gemma-4-E2B-it, published as
-  eladlaor/SEP-gemma-4-E2B-it (v2, refit after the history rewrite with
+  eladlaor/SEP-gemma-4-E2B-it (v2, refit at a later commit with
   identical weights; v1 was its first upload), with its calibration dataset
   eladlaor/SEP-gemma-4-E2B-it-calibration and held-out results in the README.
 - SEP provenance records the torch build that produced the hidden states:
@@ -146,6 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the real OpenAI client) and the HF logprob extraction.
 
 ### Changed
+- The README opens with the key held-out result, the published Hugging Face
+  probe and a two-minute playground walkthrough with a screenshot.
 - The minimum pydantic is now 2.12 (was 2.7): untraced results leave
   `se_trace` out of their JSON through `Field(exclude_if=...)`, which older
   pydantic ignores.
