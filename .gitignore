@@ -20,6 +20,9 @@ credentials*.json
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
 .hf_cache/
 hf_cache/
 
